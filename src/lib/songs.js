@@ -1,0 +1,266 @@
+/**
+ * Songs keyed by progression name.
+ * degrees: 0-based diatonic degree indices matching the progression's degrees array.
+ * scaleType: 'major' or 'minor' — must match the progression's scale type.
+ * key: the song's original key, used only for display (showing original chord names).
+ */
+export const SONGS_BY_PROGRESSION = {
+
+  // ─── Major progressions ────────────────────────────────────────────────────
+
+  'I – IV – V': [
+    { title: 'Johnny B. Goode',          artist: 'Chuck Berry',                    year: 1958, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Wild Thing',               artist: 'The Troggs',                     year: 1966, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Twist and Shout',          artist: 'The Beatles',                    year: 1963, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'La Grange',                artist: 'ZZ Top',                         year: 1973, key: 'A',  scaleType: 'major', section: 'Main riff', degrees: [0, 3, 4] },
+    { title: 'Hound Dog',                artist: 'Elvis Presley',                  year: 1956, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Rock Around the Clock',    artist: 'Bill Haley & His Comets',        year: 1954, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Blue Suede Shoes',         artist: 'Elvis Presley',                  year: 1956, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Brown Eyed Girl',          artist: 'Van Morrison',                   year: 1967, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Blueberry Hill',           artist: 'Fats Domino',                    year: 1956, key: 'F',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Proud Mary',               artist: 'Creedence Clearwater Revival',   year: 1969, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Good Riddance (Time of Your Life)', artist: 'Green Day',             year: 1997, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4] },
+    { title: "Knockin' on Heaven's Door", artist: 'Bob Dylan',                     year: 1973, key: 'G',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 4] },
+    { title: 'I Love Rock \'n\' Roll',   artist: 'Joan Jett',                      year: 1982, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Wonderful Tonight',        artist: 'Eric Clapton',                   year: 1977, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4] },
+    { title: '500 Miles',                artist: 'The Proclaimers',                year: 1988, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Louie Louie',              artist: 'The Kingsmen',                   year: 1963, key: 'A',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 4] },
+  ],
+
+  'I – IV – V – I': [
+    { title: 'Amazing Grace',            artist: 'Traditional',                    year: 1779, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4, 0] },
+    { title: 'This Land Is Your Land',   artist: 'Woody Guthrie',                  year: 1940, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
+    { title: 'Blowin\' in the Wind',     artist: 'Bob Dylan',                      year: 1963, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
+    { title: 'He\'s Got the Whole World', artist: 'Traditional',                   year: 1927, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 4, 0] },
+    { title: '500 Miles',                artist: 'The Proclaimers',                year: 1988, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
+    { title: 'Ring of Fire',             artist: 'Johnny Cash',                    year: 1963, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
+  ],
+
+  'I – V – vi – IV': [
+    { title: 'Let It Be',                artist: 'The Beatles',                    year: 1970, key: 'C',  scaleType: 'major', section: 'Full song', degrees: [0, 4, 5, 3, 0, 4, 3, 0, 1, 0, 5, 4, 3, 0] },
+    { title: 'With or Without You',      artist: 'U2',                             year: 1987, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Someone Like You',         artist: 'Adele',                          year: 2011, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Don\'t Stop Believin\'',   artist: 'Journey',                        year: 1981, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Memories',                 artist: 'Maroon 5',                       year: 2019, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'No Woman No Cry',          artist: 'Bob Marley',                     year: 1974, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Poker Face',               artist: 'Lady Gaga',                      year: 2008, key: 'Ab', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Can You Feel the Love Tonight', artist: 'Elton John',               year: 1994, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'She Will Be Loved',        artist: 'Maroon 5',                       year: 2002, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Everywhere',               artist: 'Fleetwood Mac',                  year: 1987, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Hallelujah',               artist: 'Jeff Buckley',                   year: 1994, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [0, 4, 5, 3] },
+    { title: 'Perfect',                  artist: 'Ed Sheeran',                     year: 2017, key: 'Ab', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Photograph',               artist: 'Ed Sheeran',                     year: 2014, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: "Don't Look Back in Anger", artist: 'Oasis',                          year: 1995, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Love Story',               artist: 'Taylor Swift',                   year: 2008, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Viva La Vida',             artist: 'Coldplay',                       year: 2008, key: 'Ab', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Shallow',                  artist: 'Lady Gaga & Bradley Cooper',     year: 2018, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Angels',                   artist: 'Robbie Williams',                year: 1997, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'The A Team',               artist: 'Ed Sheeran',                     year: 2011, key: 'D',  scaleType: 'major', section: 'Verse',     degrees: [0, 4, 5, 3] },
+    { title: 'The Only Exception',       artist: 'Paramore',                       year: 2009, key: 'Bb', scaleType: 'major', section: 'Verse',     degrees: [0, 4, 5, 3] },
+    { title: 'Riptide',                  artist: 'Vance Joy',                      year: 2013, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 4, 5, 3] },
+    { title: 'Happier',                  artist: 'Marshmello & Bastille',          year: 2018, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Payphone',                 artist: 'Maroon 5',                       year: 2012, key: 'Eb', scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'Budapest',                 artist: 'George Ezra',                    year: 2014, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+    { title: 'I\'m Yours',               artist: 'Jason Mraz',                     year: 2008, key: 'B',  scaleType: 'major', section: 'Verse',     degrees: [0, 4, 5, 3] },
+    { title: 'Africa',                   artist: 'Toto',                           year: 1982, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 3] },
+  ],
+
+  'I – vi – IV – V': [
+    { title: 'Stand By Me',              artist: 'Ben E. King',                    year: 1961, key: 'A',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'Every Breath You Take',    artist: 'The Police',                     year: 1983, key: 'Ab', scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'La Bamba',                 artist: 'Ritchie Valens',                 year: 1958, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 3, 4] },
+    { title: 'Blue Moon',                artist: 'Rodgers & Hart',                 year: 1934, key: 'Bb', scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'Earth Angel',              artist: 'The Penguins',                   year: 1954, key: 'Eb', scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'The Lion Sleeps Tonight',  artist: 'The Tokens',                     year: 1961, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'Why Do Fools Fall in Love', artist: 'Frankie Lymon',                 year: 1956, key: 'A',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 3, 4] },
+    { title: 'Crocodile Rock',           artist: 'Elton John',                     year: 1972, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 5, 3, 4] },
+    { title: "Can't Help Falling in Love", artist: 'Elvis Presley',                year: 1961, key: 'D',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'Take On Me',               artist: 'a-ha',                           year: 1985, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 5, 3, 4] },
+    { title: 'Your Song',                artist: 'Elton John',                     year: 1970, key: 'Eb', scaleType: 'major', section: 'Verse',     degrees: [0, 5, 3, 4] },
+    { title: 'Come On Eileen',           artist: 'Dexys Midnight Runners',         year: 1982, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 5, 3, 4] },
+  ],
+
+  'I – vi – ii – V': [
+    { title: 'Heart and Soul',           artist: 'Hoagy Carmichael',               year: 1938, key: 'F',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4] },
+    { title: 'I\'ve Got You Under My Skin', artist: 'Cole Porter',                 year: 1936, key: 'Eb', scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4] },
+    { title: 'Blue Moon',                artist: 'Rodgers & Hart',                 year: 1934, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4] },
+    { title: 'All of Me',                artist: 'Gerald Marks',                   year: 1931, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4] },
+    { title: 'When I Was Your Man',      artist: 'Bruno Mars',                     year: 2013, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 1, 4] },
+    { title: 'Just the Way You Are',     artist: 'Billy Joel',                     year: 1977, key: 'F',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 1, 4] },
+    { title: 'Fly Me to the Moon',       artist: 'Frank Sinatra',                  year: 1964, key: 'C',  scaleType: 'major', section: 'Bridge',    degrees: [0, 5, 1, 4] },
+  ],
+
+  'ii – V – I': [
+    // verse: vi – ii – V – I – IV – vii° – iii – vi  →  contains ii–V–I at position 1
+    { title: 'Fly Me to the Moon',       artist: 'Frank Sinatra',                  year: 1954, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [5, 1, 4, 0, 3, 6, 2, 5] },
+    // main turnaround: I – vi – ii – V – I  →  contains ii–V–I at position 2
+    { title: 'Autumn Leaves',            artist: 'Traditional Jazz',               year: 1945, key: 'G',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4, 0] },
+    { title: 'Satin Doll',               artist: 'Duke Ellington',                 year: 1953, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 1, 4, 0] },
+  ],
+
+  'I – IV – vi – V': [
+    { title: 'Take Me Home, Country Roads', artist: 'John Denver',                 year: 1971, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 5, 4] },
+    { title: 'Hey Soul Sister',          artist: 'Train',                          year: 2009, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 5, 4] },
+    { title: 'Ho Hey',                   artist: 'The Lumineers',                  year: 2012, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 5, 4] },
+    { title: 'Use Somebody',             artist: 'Kings of Leon',                  year: 2008, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 5, 4] },
+  ],
+
+  'vi – IV – I – V': [
+    { title: 'Counting Stars',           artist: 'OneRepublic',                    year: 2013, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+    { title: 'Demons',                   artist: 'Imagine Dragons',                year: 2012, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [5, 3, 0, 4] },
+    { title: 'Despacito',                artist: 'Luis Fonsi',                     year: 2017, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [5, 3, 0, 4] },
+    { title: 'Mr. Brightside',           artist: 'The Killers',                    year: 2003, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+    { title: 'Someone You Loved',        artist: 'Lewis Capaldi',                  year: 2018, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [5, 3, 0, 4] },
+    { title: 'Thinking Out Loud',        artist: 'Ed Sheeran',                     year: 2014, key: 'D',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+    { title: 'Wicked Game',              artist: 'Chris Isaak',                    year: 1989, key: 'D',  scaleType: 'major', section: 'Main',      degrees: [5, 3, 0, 4] },
+    { title: 'All of Me',                artist: 'John Legend',                    year: 2013, key: 'F',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+    { title: 'Apologize',                artist: 'Timbaland ft. OneRepublic',      year: 2007, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [5, 3, 0, 4] },
+    { title: 'Stay With Me',             artist: 'Sam Smith',                      year: 2014, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [5, 3, 0, 4] },
+    { title: 'Stereo Hearts',            artist: 'Gym Class Heroes',               year: 2011, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+    { title: 'Tenerife Sea',             artist: 'Ed Sheeran',                     year: 2014, key: 'A',  scaleType: 'major', section: 'Verse',     degrees: [5, 3, 0, 4] },
+  ],
+
+  'I – iii – IV – V': [
+    { title: 'Let Her Go',               artist: 'Passenger',                      year: 2012, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 3, 4] },
+    { title: 'A Thousand Miles',         artist: 'Vanessa Carlton',                year: 2001, key: 'Ab', scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 3, 4] },
+    { title: 'I Will Follow You into the Dark', artist: 'Death Cab for Cutie',     year: 2005, key: 'F',  scaleType: 'major', section: 'Verse',     degrees: [0, 2, 3, 4] },
+    { title: 'What\'s Going On',         artist: 'Marvin Gaye',                    year: 1971, key: 'E',  scaleType: 'major', section: 'Verse',     degrees: [0, 2, 3, 4] },
+    { title: 'Love Yourself',            artist: 'Justin Bieber',                  year: 2015, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 3, 4] },
+    { title: 'Hey There Delilah',        artist: 'Plain White T\'s',               year: 2006, key: 'D',  scaleType: 'major', section: 'Verse',     degrees: [0, 2, 3, 4] },
+    { title: 'Fast Car',                 artist: 'Tracy Chapman',                  year: 1988, key: 'D',  scaleType: 'major', section: 'Verse',     degrees: [0, 2, 3, 4] },
+    { title: 'Chasing Cars',             artist: 'Snow Patrol',                    year: 2006, key: 'A',  scaleType: 'major', section: 'Main',      degrees: [0, 2, 3, 4] },
+  ],
+
+  'I – V – vi – iii – IV': [
+    // full pattern: I–V–vi–iii–IV–I–IV–V  →  contains I–V–vi–iii–IV at position 0
+    { title: 'Canon in D',               artist: 'Johann Pachelbel',               year: 1680, key: 'D',  scaleType: 'major', section: 'Main',      degrees: [0, 4, 5, 2, 3, 0, 3, 4] },
+    { title: 'Go West',                  artist: 'Village People / Pet Shop Boys', year: 1979, key: 'C',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 2, 3] },
+    { title: 'Basket Case',              artist: 'Green Day',                      year: 1994, key: 'Eb', scaleType: 'major', section: 'Verse',     degrees: [0, 4, 5, 2, 3] },
+    { title: 'Graduation (Friends Forever)', artist: 'Vitamin C',                  year: 2000, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 4, 5, 2, 3] },
+  ],
+
+  'I – ii – IV – I': [
+    { title: 'Every Rose Has Its Thorn', artist: 'Poison',                         year: 1988, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 1, 3, 0] },
+    { title: 'Thinking Out Loud',        artist: 'Ed Sheeran',                     year: 2014, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 1, 3, 0] },
+    { title: 'More Than Words',          artist: 'Extreme',                        year: 1990, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 1, 3, 0] },
+  ],
+
+  'IV – I – V – vi': [
+    { title: 'More Than a Feeling',      artist: 'Boston',                         year: 1976, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [3, 0, 4, 5] },
+    { title: 'Summer of \'69',          artist: 'Bryan Adams',                    year: 1985, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [3, 0, 4, 5] },
+    { title: 'Turn the Page',            artist: 'Bob Seger',                      year: 1973, key: 'E',  scaleType: 'major', section: 'Main',      degrees: [3, 0, 4, 5] },
+  ],
+
+  'I – IV – I – V': [
+    { title: 'Sweet Home Alabama',       artist: 'Lynyrd Skynyrd',                 year: 1974, key: 'D',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 0, 4] },
+    { title: 'Sweet Home Chicago',       artist: 'Robert Johnson',                 year: 1936, key: 'E',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 0, 4] },
+  ],
+
+  'I – iii – vi – IV': [
+    { title: 'What\'s Up',              artist: '4 Non Blondes',                  year: 1992, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 5, 3] },
+    { title: '3 AM',                     artist: 'Matchbox Twenty',                year: 1996, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 5, 3] },
+    { title: 'Iris',                     artist: 'Goo Goo Dolls',                  year: 1998, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 2, 5, 3] },
+    { title: 'Here Without You',         artist: '3 Doors Down',                   year: 2002, key: 'A',  scaleType: 'major', section: 'Verse',     degrees: [0, 2, 5, 3] },
+  ],
+
+  // ─── Minor progressions ────────────────────────────────────────────────────
+
+  'i – VII – VI – VII': [
+    { title: 'All Along the Watchtower', artist: 'Bob Dylan / Jimi Hendrix',       year: 1967, key: 'Bm', scaleType: 'minor', section: 'Main',      degrees: [0, 6, 5, 6] },
+    { title: 'Wish You Were Here',       artist: 'Pink Floyd',                     year: 1975, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [0, 6, 5, 6] },
+    { title: 'Black',                    artist: 'Pearl Jam',                      year: 1991, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 6, 5, 6] },
+    { title: 'Stairway to Heaven',       artist: 'Led Zeppelin',                   year: 1971, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 6, 5, 6] },
+    { title: 'Wonderwall',               artist: 'Oasis',                          year: 1995, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 6, 5, 6] },
+    { title: 'Highway to Hell',          artist: 'AC/DC',                          year: 1979, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 6, 5, 6] },
+    { title: 'Back in Black',            artist: 'AC/DC',                          year: 1980, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 6, 5, 6] },
+  ],
+
+  'i – iv – v': [
+    { title: 'Summertime',               artist: 'George Gershwin',                year: 1935, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 4] },
+    { title: 'House of the Rising Sun',  artist: 'The Animals',                    year: 1964, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 3, 4] },
+    { title: 'Greensleeves',             artist: 'Traditional',                    year: 1580, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 4] },
+    { title: 'Scarborough Fair',         artist: 'Simon & Garfunkel',              year: 1966, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 4] },
+  ],
+
+  'i – VI – III – VII': [
+    { title: 'Zombie',                   artist: 'The Cranberries',                year: 1994, key: 'Em', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'Mad World',                artist: 'Tears for Fears / Gary Jules',   year: 1982, key: 'F#m', scaleType: 'minor', section: 'Verse',    degrees: [0, 5, 2, 6] },
+    { title: 'Numb',                     artist: 'Linkin Park',                    year: 2003, key: 'F#m', scaleType: 'minor', section: 'Chorus',   degrees: [0, 5, 2, 6] },
+    { title: 'Boulevard of Broken Dreams', artist: 'Green Day',                    year: 2004, key: 'Fm', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 6] },
+    { title: 'It\'s My Life',            artist: 'Bon Jovi',                       year: 2000, key: 'Gm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'In the End',               artist: 'Linkin Park',                    year: 2000, key: 'Cm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'Wake Me Up When September Ends', artist: 'Green Day',               year: 2004, key: 'Em', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'Animals',                  artist: 'Maroon 5',                       year: 2014, key: 'Bm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'The Scientist',            artist: 'Coldplay',                       year: 2002, key: 'Dm', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 6] },
+    { title: 'Radioactive',              artist: 'Imagine Dragons',                year: 2012, key: 'Bm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'Sail',                     artist: 'AWOLNATION',                     year: 2011, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [0, 5, 2, 6] },
+    { title: 'Pompeii',                  artist: 'Bastille',                       year: 2013, key: 'Dm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+    { title: 'Am I Wrong',               artist: 'Nico & Vinz',                    year: 2014, key: 'Am', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 6] },
+  ],
+
+  'i – iv – VII – III': [
+    { title: 'Smooth',                   artist: 'Santana ft. Rob Thomas',         year: 1999, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 6, 2] },
+    { title: 'Oye Como Va',              artist: 'Santana',                        year: 1970, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 6, 2] },
+    { title: 'The Sound of Silence',     artist: 'Simon & Garfunkel',              year: 1964, key: 'Dm', scaleType: 'minor', section: 'Verse',     degrees: [0, 3, 6, 2] },
+    { title: 'White Rabbit',             artist: 'Jefferson Airplane',             year: 1967, key: 'F#m', scaleType: 'minor', section: 'Main',    degrees: [0, 3, 6, 2] },
+  ],
+
+  'i – VII – VI – v': [
+    { title: 'Hotel California',         artist: 'Eagles',                         year: 1977, key: 'Bm', scaleType: 'minor', section: 'Solo',      degrees: [0, 6, 5, 4] },
+    { title: 'Still Loving You',         artist: 'Scorpions',                      year: 1984, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 6, 5, 4] },
+    { title: 'House of the Rising Sun',  artist: 'The Animals',                    year: 1964, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 6, 5, 4] },
+    { title: 'Sultans of Swing',         artist: 'Dire Straits',                   year: 1978, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [0, 6, 5, 4] },
+  ],
+
+  'i – III – VII – VI': [
+    { title: 'Enter Sandman',            artist: 'Metallica',                      year: 1991, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 2, 6, 5] },
+    { title: 'Eye of the Tiger',         artist: 'Survivor',                       year: 1982, key: 'Cm', scaleType: 'minor', section: 'Verse',     degrees: [0, 2, 6, 5] },
+    { title: 'Livin\' on a Prayer',      artist: 'Bon Jovi',                       year: 1986, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 2, 6, 5] },
+    { title: 'Master of Puppets',        artist: 'Metallica',                      year: 1986, key: 'Em', scaleType: 'minor', section: 'Main',      degrees: [0, 2, 6, 5] },
+    { title: 'Blinding Lights',          artist: 'The Weeknd',                     year: 2019, key: 'Fm', scaleType: 'minor', section: 'Chorus',    degrees: [0, 2, 6, 5] },
+    { title: 'Roxanne',                  artist: 'The Police',                     year: 1978, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 2, 6, 5] },
+    { title: 'Losing My Religion',       artist: 'R.E.M.',                         year: 1991, key: 'Am', scaleType: 'minor', section: 'Chorus',    degrees: [0, 2, 6, 5] },
+    { title: 'Shape of You',             artist: 'Ed Sheeran',                     year: 2017, key: 'C#m', scaleType: 'minor', section: 'Main',     degrees: [0, 2, 6, 5] },
+  ],
+
+  'ii° – v – i': [
+    { title: 'Autumn Leaves',            artist: 'Traditional Jazz',               year: 1945, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [1, 4, 0] },
+    { title: 'Misty',                    artist: 'Erroll Garner',                  year: 1954, key: 'Ebm', scaleType: 'minor', section: 'Bridge',   degrees: [1, 4, 0] },
+    { title: 'Summertime',               artist: 'George Gershwin',                year: 1935, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [1, 4, 0] },
+  ],
+
+  'i – VI – VII – i': [
+    { title: 'In the Air Tonight',       artist: 'Phil Collins',                   year: 1981, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [0, 5, 6, 0] },
+    { title: 'Go Your Own Way',          artist: 'Fleetwood Mac',                  year: 1977, key: 'F#m', scaleType: 'minor', section: 'Chorus',   degrees: [0, 5, 6, 0] },
+    { title: 'Somebody That I Used to Know', artist: 'Gotye',                      year: 2011, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [0, 5, 6, 0] },
+    { title: 'Tom Sawyer',               artist: 'Rush',                           year: 1981, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 6, 0] },
+  ],
+
+  'i – iv – i – v': [
+    { title: 'She\'s Not There',         artist: 'The Zombies',                    year: 1964, key: 'Am', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 0, 4] },
+    { title: 'Riders on the Storm',      artist: 'The Doors',                      year: 1971, key: 'Em', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 0, 4] },
+    { title: 'Moondance',                artist: 'Van Morrison',                   year: 1970, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 3, 0, 4] },
+    { title: 'The Thrill Is Gone',       artist: 'B.B. King',                      year: 1969, key: 'Bm', scaleType: 'minor', section: 'Main',      degrees: [0, 3, 0, 4] },
+  ],
+
+  'VI – VII – i': [
+    { title: 'Somebody That I Used to Know', artist: 'Gotye',                      year: 2011, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [5, 6, 0] },
+    { title: 'Eleanor Rigby',            artist: 'The Beatles',                    year: 1966, key: 'Em', scaleType: 'minor', section: 'Main',      degrees: [5, 6, 0] },
+    { title: 'Game of Thrones Theme',    artist: 'Ramin Djawadi',                  year: 2011, key: 'Cm', scaleType: 'minor', section: 'Main',      degrees: [5, 6, 0] },
+    { title: 'People Are Strange',       artist: 'The Doors',                      year: 1967, key: 'Dm', scaleType: 'minor', section: 'Main',      degrees: [5, 6, 0] },
+  ],
+
+  'i – v – VI – VII': [
+    { title: 'Nothing Else Matters',     artist: 'Metallica',                      year: 1991, key: 'Em', scaleType: 'minor', section: 'Verse',     degrees: [0, 4, 5, 6] },
+    { title: 'The Scientist',            artist: 'Coldplay',                       year: 2002, key: 'Dm', scaleType: 'minor', section: 'Verse',     degrees: [0, 4, 5, 6] },
+    { title: 'Fix You',                  artist: 'Coldplay',                       year: 2005, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [0, 4, 5, 6] },
+    { title: 'Creep',                    artist: 'Radiohead',                      year: 1992, key: 'Gm', scaleType: 'minor', section: 'Verse',     degrees: [0, 4, 5, 6] },
+  ],
+
+  'i – VI – III – v': [
+    { title: 'Losing My Religion',       artist: 'R.E.M.',                         year: 1991, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 4] },
+    { title: 'Sound of Silence',         artist: 'Simon & Garfunkel',              year: 1964, key: 'Dm', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 4] },
+    { title: 'Run',                      artist: 'Snow Patrol',                    year: 2003, key: 'Am', scaleType: 'minor', section: 'Chorus',    degrees: [0, 5, 2, 4] },
+    { title: 'Dust in the Wind',         artist: 'Kansas',                         year: 1977, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 4] },
+  ],
+};
