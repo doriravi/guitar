@@ -567,22 +567,25 @@ function ChordDiagram({ chord, isActive, onClick }) {
   );
 }
 
-function ChordFinderMode() {
+function ChordFinderMode({ diffMax }) {
   const [search, setSearch]       = useState('');
   const [selectedName, setSelectedName] = useState('Am');
   const [activeVoicing, setActiveVoicing] = useState(null);
 
-  // All voicings for selected chord name
+  // All voicings for selected chord name, filtered by difficulty
   const voicings = useMemo(() =>
-    CHORDS.filter(c => c.name === selectedName).slice(0, 4),
-    [selectedName]
+    CHORDS.filter(c => c.name === selectedName && calcDifficulty(c.notes) <= diffMax).slice(0, 4),
+    [selectedName, diffMax]
   );
+
+  // Reset active voicing if it no longer passes the filter
+  const activeVoicingValid = activeVoicing && calcDifficulty(activeVoicing.notes) <= diffMax;
 
   // Active voicing frets for the fretboard
   const activeFrets = useMemo(() => {
-    if (!activeVoicing) return null;
+    if (!activeVoicingValid) return null;
     return tabToFrets(activeVoicing.tab);
-  }, [activeVoicing]);
+  }, [activeVoicingValid, activeVoicing]);
 
   // When chord name changes, reset voicing
   const selectChord = useCallback((name) => {
@@ -595,11 +598,12 @@ function ChordFinderMode() {
     strum(tabToFrets(v.tab));
   }, []);
 
-  // Filtered chord names
+  // Chord names that have at least one voicing within the difficulty limit
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
-  }, [search]);
+    const names = q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
+    return names.filter(name => CHORDS.some(c => c.name === name && calcDifficulty(c.notes) <= diffMax));
+  }, [search, diffMax]);
 
   // Dot style: show the active voicing on the fretboard, greyed out if no voicing selected
   const dotStyle = useCallback((s, f) => {
@@ -660,9 +664,9 @@ function ChordFinderMode() {
         </div>
       )}
 
-      {voicings.length === 0 && (
+      {voicings.length === 0 && selectedName && (
         <div className="mb-4 text-sm text-center py-6" style={{ color: '#3a3a3a' }}>
-          No voicings found for "{selectedName}"
+          No voicings for "{selectedName}" within difficulty ≤ {diffMax}
         </div>
       )}
 
@@ -689,19 +693,20 @@ function ChordFinderMode() {
 
 const EMPTY_BEAT = () => [null, null, null, null, null, null];
 
-function ChordPicker({ onApply }) {
+function ChordPicker({ onApply, diffMax }) {
   const [search, setSearch] = useState('');
   const [selectedName, setSelectedName] = useState('');
   const [open, setOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
-  }, [search]);
+    const names = q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
+    return names.filter(name => CHORDS.some(c => c.name === name && calcDifficulty(c.notes) <= diffMax));
+  }, [search, diffMax]);
 
   const voicings = useMemo(() =>
-    selectedName ? CHORDS.filter(c => c.name === selectedName).slice(0, 4) : [],
-    [selectedName]
+    selectedName ? CHORDS.filter(c => c.name === selectedName && calcDifficulty(c.notes) <= diffMax).slice(0, 4) : [],
+    [selectedName, diffMax]
   );
 
   if (!open) {
@@ -849,7 +854,7 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
   );
 }
 
-function MusicEditorMode() {
+function MusicEditorMode({ diffMax }) {
   const [beats, setBeats] = useState([{ frets: EMPTY_BEAT(), id: 0 }]);
   const [editIdx, setEditIdx] = useState(0);
   const [playIdx, setPlayIdx] = useState(null);
@@ -1036,7 +1041,7 @@ function MusicEditorMode() {
       </div>
 
       {/* Chord picker */}
-      <ChordPicker onApply={applyChord} />
+      <ChordPicker onApply={applyChord} diffMax={diffMax} />
 
       {/* Fretboard editor */}
       <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
@@ -1079,16 +1084,42 @@ function MusicEditorMode() {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+function DiffSlider({ diffMax, setDiffMax }) {
+  const pct = ((diffMax - 1) / 9) * 100;
+  const color = diffMax <= 3 ? '#4ade80' : diffMax <= 6 ? '#c9a96e' : '#f87171';
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-3"
+      style={{ background: '#161616', border: '1px solid #1e1e1e' }}>
+      <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
+        Max difficulty
+      </span>
+      <input
+        type="range" min={1} max={10} value={diffMax}
+        onChange={e => setDiffMax(Number(e.target.value))}
+        className="flex-1"
+        style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)` }}
+      />
+      <span className="text-sm font-bold tabular-nums w-5 text-right" style={{ color }}>
+        {diffMax}
+      </span>
+    </div>
+  );
+}
+
 export default function GuitarStrings() {
   const [mode, setMode] = useState('play');
+  const [diffMax, setDiffMax] = useState(10);
 
   return (
     <div className="p-3 sm:p-5 select-none">
       <ModeBar mode={mode} setMode={setMode} />
-      {mode === 'play'  && <PlayMode />}
-      {mode === 'scale' && <ScaleMode />}
-      {mode === 'chord' && <ChordFinderMode />}
-      {mode === 'editor' && <MusicEditorMode />}
+      {(mode === 'chord' || mode === 'editor') && (
+        <DiffSlider diffMax={diffMax} setDiffMax={setDiffMax} />
+      )}
+      {mode === 'play'   && <PlayMode />}
+      {mode === 'scale'  && <ScaleMode />}
+      {mode === 'chord'  && <ChordFinderMode diffMax={diffMax} />}
+      {mode === 'editor' && <MusicEditorMode diffMax={diffMax} />}
     </div>
   );
 }
