@@ -689,6 +689,82 @@ function ChordFinderMode() {
 
 const EMPTY_BEAT = () => [null, null, null, null, null, null];
 
+function ChordPicker({ onApply }) {
+  const [search, setSearch] = useState('');
+  const [selectedName, setSelectedName] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
+  }, [search]);
+
+  const voicings = useMemo(() =>
+    selectedName ? CHORDS.filter(c => c.name === selectedName).slice(0, 4) : [],
+    [selectedName]
+  );
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+        style={{ background: '#1a1a1a', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
+        + Add chord
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>Add chord to beat</span>
+        <button onClick={() => { setOpen(false); setSelectedName(''); setSearch(''); }}
+          className="text-xs" style={{ color: '#5a5a5a' }}>✕ close</button>
+      </div>
+
+      <input
+        value={search} onChange={e => { setSearch(e.target.value); setSelectedName(''); }}
+        placeholder="Search chord… e.g. Am, Bm7"
+        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2"
+        style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+        autoFocus
+      />
+
+      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto mb-2">
+        {filtered.slice(0, 40).map(name => (
+          <button key={name} onClick={() => setSelectedName(name)}
+            className="px-2 py-0.5 rounded-md text-xs font-semibold transition-all"
+            style={selectedName === name
+              ? { background: '#a78bfa', color: '#0f0f0f' }
+              : { background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #252525' }}>
+            {name}
+          </button>
+        ))}
+      </div>
+
+      {voicings.length > 0 && (
+        <div>
+          <p className="text-[10px] mb-1.5" style={{ color: '#3a3a3a' }}>Pick voicing:</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {voicings.map((v, i) => (
+              <button
+                key={i}
+                onClick={() => { onApply(v); setOpen(false); setSelectedName(''); setSearch(''); }}
+                className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all flex flex-col items-center gap-0.5"
+                style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', color: '#a78bfa', minWidth: 70 }}>
+                <span className="font-bold" style={{ color: '#f0ede8' }}>{v.name}</span>
+                <span style={{ color: '#5a5a5a' }}>{v.type}</span>
+                <span className="font-mono text-[10px]" style={{ color: '#3a3a3a' }}>{v.tab}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove, total }) {
   const hasNotes = beat.frets.some(f => f !== null);
   return (
@@ -755,12 +831,18 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
         })}
       </div>
 
+      {beat.chordLabel && (
+        <div className="text-[9px] text-center font-bold rounded px-1 py-0.5 truncate"
+          style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>
+          {beat.chordLabel}
+        </div>
+      )}
       {isEditing && (
         <div className="text-[9px] text-center font-semibold rounded px-1 py-0.5" style={{ background: '#38bdf820', color: '#38bdf8' }}>
           editing
         </div>
       )}
-      {!hasNotes && !isEditing && (
+      {!hasNotes && !isEditing && !beat.chordLabel && (
         <div className="text-[9px] text-center" style={{ color: '#2a2a2a' }}>empty</div>
       )}
     </div>
@@ -874,8 +956,16 @@ function MusicEditorMode() {
   }, [isPlaying]);
 
   const clearBeat = () => {
-    setBeats(prev => prev.map((b, i) => i === editIdx ? { ...b, frets: EMPTY_BEAT() } : b));
+    setBeats(prev => prev.map((b, i) => i === editIdx ? { ...b, frets: EMPTY_BEAT(), chordLabel: null } : b));
   };
+
+  const applyChord = useCallback((voicing) => {
+    const frets = tabToFrets(voicing.tab);
+    strum(frets);
+    setBeats(prev => prev.map((b, i) =>
+      i === editIdx ? { ...b, frets, chordLabel: `${voicing.name} ${voicing.type}` } : b
+    ));
+  }, [editIdx]);
 
   const pct = ((bpm - 40) / (200 - 40)) * 100;
 
@@ -945,13 +1035,19 @@ function MusicEditorMode() {
         </button>
       </div>
 
+      {/* Chord picker */}
+      <ChordPicker onApply={applyChord} />
+
       {/* Fretboard editor */}
       <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>
             Editing beat {editIdx + 1}
+            {editBeat?.chordLabel && (
+              <span className="ml-1.5 font-normal" style={{ color: '#a78bfa' }}>· {editBeat.chordLabel}</span>
+            )}
           </span>
-          <span className="text-xs" style={{ color: '#3a3a3a' }}>— tap frets to set notes</span>
+          <span className="text-xs" style={{ color: '#3a3a3a' }}>— tap frets to modify</span>
         </div>
         <div className="flex gap-2">
           <button
