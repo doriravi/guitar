@@ -112,6 +112,7 @@ function ModeBar({ mode, setMode }) {
     { id: 'play',   label: 'Play',   icon: '🎸' },
     { id: 'scale',  label: 'Scale',  icon: '🎵' },
     { id: 'chord',  label: 'Chords', icon: '🎼' },
+    { id: 'editor', label: 'Editor', icon: '🎹' },
   ];
   return (
     <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#161616' }}>
@@ -684,6 +685,302 @@ function ChordFinderMode() {
   );
 }
 
+// ── MODE: MUSIC EDITOR ───────────────────────────────────────────────────────
+
+const EMPTY_BEAT = () => [null, null, null, null, null, null];
+
+function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove, total }) {
+  const hasNotes = beat.frets.some(f => f !== null);
+  return (
+    <div
+      className="rounded-xl p-2 flex flex-col gap-1.5 cursor-pointer transition-all shrink-0"
+      style={{
+        background: isActive ? 'rgba(201,169,110,0.12)' : isEditing ? 'rgba(56,189,248,0.08)' : '#1a1a1a',
+        border: `1.5px solid ${isActive ? '#c9a96e' : isEditing ? '#38bdf8' : '#222'}`,
+        minWidth: 82,
+        maxWidth: 82,
+      }}
+      onClick={onSelect}
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-[10px] font-bold tabular-nums" style={{ color: isActive ? '#c9a96e' : '#5a5a5a' }}>
+          {index + 1}
+        </span>
+        <div className="flex gap-0.5">
+          <button
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all"
+            style={{ background: '#111', color: '#4a4a4a' }}
+            onClick={e => { e.stopPropagation(); onMove(-1); }}
+            disabled={index === 0}
+          >‹</button>
+          <button
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all"
+            style={{ background: '#111', color: '#4a4a4a' }}
+            onClick={e => { e.stopPropagation(); onMove(1); }}
+            disabled={index === total - 1}
+          >›</button>
+          <button
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px]"
+            style={{ background: '#111', color: '#f87171' }}
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+          >✕</button>
+        </div>
+      </div>
+
+      {/* Mini fretboard preview — 6 string dots */}
+      <div className="flex flex-col gap-0.5">
+        {[0,1,2,3,4,5].map(s => {
+          const f = beat.frets[s];
+          return (
+            <div key={s} className="flex items-center gap-1">
+              <span className="text-[8px] font-bold w-3" style={{ color: STRING_COLORS[s] }}>
+                {STRING_NAMES[s]}
+              </span>
+              <div className="flex-1 h-2 rounded-full relative" style={{ background: '#111' }}>
+                {f !== null && (
+                  <div
+                    className="absolute top-0 bottom-0 rounded-full"
+                    style={{
+                      left: f === 0 ? 0 : `${Math.min(((f - 1) / 11) * 100, 92)}%`,
+                      width: 8, background: STRING_COLORS[s],
+                    }}
+                  />
+                )}
+              </div>
+              <span className="text-[8px] font-mono w-4 text-right" style={{ color: f === null ? '#2a2a2a' : '#7a7a7a' }}>
+                {f === null ? '–' : f === 0 ? 'O' : f}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {isEditing && (
+        <div className="text-[9px] text-center font-semibold rounded px-1 py-0.5" style={{ background: '#38bdf820', color: '#38bdf8' }}>
+          editing
+        </div>
+      )}
+      {!hasNotes && !isEditing && (
+        <div className="text-[9px] text-center" style={{ color: '#2a2a2a' }}>empty</div>
+      )}
+    </div>
+  );
+}
+
+function MusicEditorMode() {
+  const [beats, setBeats] = useState([{ frets: EMPTY_BEAT(), id: 0 }]);
+  const [editIdx, setEditIdx] = useState(0);
+  const [playIdx, setPlayIdx] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [bpm, setBpm] = useState(80);
+  const [loop, setLoop] = useState(false);
+  const nextId = useRef(1);
+  const playTimer = useRef(null);
+  const bpmRef = useRef(bpm);
+  bpmRef.current = bpm;
+  const loopRef = useRef(loop);
+  loopRef.current = loop;
+  const beatsRef = useRef(beats);
+  beatsRef.current = beats;
+
+  // Current beat being edited
+  const editBeat = beats[editIdx] ?? beats[0];
+
+  const addBeat = () => {
+    const newBeat = { frets: [...(editBeat?.frets ?? EMPTY_BEAT())], id: nextId.current++ };
+    setBeats(prev => {
+      const next = [...prev];
+      next.splice(editIdx + 1, 0, newBeat);
+      return next;
+    });
+    setEditIdx(editIdx + 1);
+  };
+
+  const deleteBeat = (i) => {
+    if (beats.length === 1) { setBeats([{ frets: EMPTY_BEAT(), id: nextId.current++ }]); setEditIdx(0); return; }
+    setBeats(prev => prev.filter((_, idx) => idx !== i));
+    setEditIdx(Math.max(0, i >= beats.length - 1 ? i - 1 : i));
+  };
+
+  const moveBeat = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= beats.length) return;
+    setBeats(prev => {
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+    setEditIdx(j);
+  };
+
+  const handleFret = useCallback((s, f) => {
+    pluck(OPEN_HZ[s] * 2 ** (f / 12));
+    setBeats(prev => {
+      const next = prev.map((b, i) => {
+        if (i !== editIdx) return b;
+        const frets = [...b.frets];
+        frets[s] = frets[s] === f ? null : f;
+        return { ...b, frets };
+      });
+      return next;
+    });
+  }, [editIdx]);
+
+  const handleOpen = useCallback((s) => {
+    pluck(OPEN_HZ[s], 2.6);
+    setBeats(prev => {
+      const next = prev.map((b, i) => {
+        if (i !== editIdx) return b;
+        const frets = [...b.frets];
+        frets[s] = frets[s] === 0 ? null : 0;
+        return { ...b, frets };
+      });
+      return next;
+    });
+  }, [editIdx]);
+
+  const dotStyle = useCallback((s, f) => {
+    const sel = editBeat?.frets[s];
+    if (sel !== f || sel === null) return null;
+    return {
+      bg: STRING_COLORS[s],
+      color: '#0f0f0f',
+      glow: `0 0 12px ${STRING_COLORS[s]}88`,
+      label: NOTE_NAMES[semitoneAt(s, f)],
+    };
+  }, [editBeat]);
+
+  const playAll = useCallback(() => {
+    if (isPlaying) {
+      clearTimeout(playTimer.current);
+      setIsPlaying(false);
+      setPlayIdx(null);
+      return;
+    }
+    setIsPlaying(true);
+    const msPerBeat = (60 / bpmRef.current) * 1000;
+    let i = 0;
+    const tick = () => {
+      const currentBeats = beatsRef.current;
+      if (i >= currentBeats.length) {
+        if (loopRef.current) { i = 0; } else { setIsPlaying(false); setPlayIdx(null); return; }
+      }
+      setPlayIdx(i);
+      strum(currentBeats[i].frets);
+      i++;
+      playTimer.current = setTimeout(tick, msPerBeat);
+    };
+    tick();
+  }, [isPlaying]);
+
+  const clearBeat = () => {
+    setBeats(prev => prev.map((b, i) => i === editIdx ? { ...b, frets: EMPTY_BEAT() } : b));
+  };
+
+  const pct = ((bpm - 40) / (200 - 40)) * 100;
+
+  return (
+    <div>
+      {/* Transport controls */}
+      <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
+        style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+        <button
+          onClick={playAll}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+          style={isPlaying
+            ? { background: '#f87171', color: '#0f0f0f' }
+            : { background: '#c9a96e', color: '#0f0f0f' }}>
+          {isPlaying ? '■ Stop' : '▶ Play'}
+        </button>
+
+        <button
+          onClick={() => setLoop(l => !l)}
+          className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+          style={loop
+            ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }
+            : { background: '#141414', color: '#5a5a5a', border: '1px solid #222' }}>
+          ↻ Loop
+        </button>
+
+        {/* BPM slider */}
+        <div className="flex items-center gap-2 flex-1 min-w-[120px]">
+          <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>BPM</span>
+          <input
+            type="range" min={40} max={200} value={bpm}
+            onChange={e => setBpm(Number(e.target.value))}
+            className="flex-1"
+            style={{ background: `linear-gradient(to right, #c9a96e ${pct}%, #2a2a2a ${pct}%)` }}
+          />
+          <span className="text-sm font-bold tabular-nums w-8 text-right" style={{ color: '#c9a96e' }}>{bpm}</span>
+        </div>
+
+        <span className="text-xs tabular-nums" style={{ color: '#3a3a3a' }}>
+          {beats.length} beat{beats.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Beat track */}
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+        {beats.map((beat, i) => (
+          <BeatCard
+            key={beat.id}
+            beat={beat}
+            index={i}
+            total={beats.length}
+            isActive={playIdx === i}
+            isEditing={editIdx === i && !isPlaying}
+            onSelect={() => { setEditIdx(i); if (isPlaying) return; strum(beat.frets); }}
+            onDelete={() => deleteBeat(i)}
+            onMove={dir => moveBeat(i, dir)}
+          />
+        ))}
+
+        {/* Add beat button */}
+        <button
+          onClick={addBeat}
+          className="shrink-0 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
+          style={{ minWidth: 50, minHeight: 80, background: '#141414', border: '1px dashed #2a2a2a', color: '#3a3a3a' }}>
+          <span className="text-xl leading-none">+</span>
+          <span className="text-[9px]">beat</span>
+        </button>
+      </div>
+
+      {/* Fretboard editor */}
+      <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>
+            Editing beat {editIdx + 1}
+          </span>
+          <span className="text-xs" style={{ color: '#3a3a3a' }}>— tap frets to set notes</span>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={clearBeat}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+            Clear beat
+          </button>
+          <button
+            onClick={() => strum(editBeat?.frets ?? EMPTY_BEAT())}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: '#1a1a1a', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }}>
+            🎸 Strum
+          </button>
+        </div>
+      </div>
+
+      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
+
+      {/* Playback indicator */}
+      {isPlaying && playIdx !== null && (
+        <div className="mt-3 text-center text-xs font-semibold" style={{ color: '#c9a96e' }}>
+          ♪ Playing beat {playIdx + 1} of {beats.length}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export default function GuitarStrings() {
@@ -695,6 +992,7 @@ export default function GuitarStrings() {
       {mode === 'play'  && <PlayMode />}
       {mode === 'scale' && <ScaleMode />}
       {mode === 'chord' && <ChordFinderMode />}
+      {mode === 'editor' && <MusicEditorMode />}
     </div>
   );
 }
