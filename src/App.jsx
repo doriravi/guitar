@@ -4,6 +4,7 @@ import TripletTable from './components/TripletTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
+import GuitarStrings from './components/GuitarStrings';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 
 export const HandProfileContext = createContext(DEFAULT_PROFILE);
@@ -19,6 +20,7 @@ function loadProfile() {
 
 const TABS = [
   { id: 'hand',         label: 'My Hand',     icon: '✋' },
+  { id: 'strings',      label: 'Strings',     icon: '🎶' },
   { id: 'listen',       label: 'Listen',       icon: '🎙️' },
   { id: 'chords',       label: 'Chords',       icon: '🎸' },
   { id: 'triplets',     label: 'Triplets',     icon: '🎵' },
@@ -81,6 +83,7 @@ export default function App() {
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
             {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} />}
+            {activeTab === 'strings'      && <GuitarStrings />}
             {activeTab === 'listen'       && <ChordListener />}
             {activeTab === 'chords'       && <ChordTable />}
             {activeTab === 'triplets'     && <TripletTable />}
