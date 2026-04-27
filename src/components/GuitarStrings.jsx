@@ -1,36 +1,62 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
+import { CHORDS } from '../lib/chords';
+import { calcDifficulty } from '../lib/fretboard';
+import DifficultyBadge from './DifficultyBadge';
 
-// Standard tuning: E2 A2 D3 G3 B3 E4
-const OPEN_HZ   = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
-const STRING_NAMES  = ['E', 'A', 'D', 'G', 'B', 'e'];
-const NOTE_NAMES    = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const STRING_COLORS = ['#a78bfa','#38bdf8','#34d399','#c9a96e','#fb923c','#f87171'];
-const STRING_THICK  = [3.5, 3.0, 2.5, 2.0, 1.5, 1.0]; // visual thickness px
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-const FRET_COUNT = 12;
+const OPEN_HZ      = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
+const OPEN_MIDI    = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 B3 E4
+const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
+const NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const NOTE_FLAT    = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const STRING_COLORS= ['#a78bfa','#38bdf8','#34d399','#c9a96e','#fb923c','#f87171'];
+const STRING_THICK = [3.5, 3.0, 2.5, 2.0, 1.5, 1.0];
+const FRET_COUNT   = 12;
+const MARKER_FRETS = [3,5,7,9,12];
 
-function fretHz(stringIdx, fret) {
-  return OPEN_HZ[stringIdx] * 2 ** (fret / 12);
+// ── Scale definitions ─────────────────────────────────────────────────────────
+
+const SCALE_TYPES = {
+  'Major':           [0,2,4,5,7,9,11],
+  'Natural Minor':   [0,2,3,5,7,8,10],
+  'Pentatonic Major':[0,2,4,7,9],
+  'Pentatonic Minor':[0,3,5,7,10],
+  'Blues':           [0,3,5,6,7,10],
+  'Dorian':          [0,2,3,5,7,9,10],
+  'Mixolydian':      [0,2,4,5,7,9,10],
+  'Phrygian':        [0,1,3,5,7,8,10],
+  'Lydian':          [0,2,4,6,7,9,11],
+  'Harmonic Minor':  [0,2,3,5,7,8,11],
+  'Melodic Minor':   [0,2,3,5,7,9,11],
+  'Whole Tone':      [0,2,4,6,8,10],
+  'Diminished':      [0,2,3,5,6,8,9,11],
+};
+
+const ROOTS = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+
+const NOTE_TO_SEMITONE = {
+  C:0,'C#':1,Db:1,D:2,'D#':3,Eb:3,E:4,F:5,'F#':6,Gb:6,G:7,'G#':8,Ab:8,A:9,'A#':10,Bb:10,B:11
+};
+
+function noteDisplayName(semitone) {
+  // prefer sharp names except for Eb, Ab, Bb
+  return NOTE_NAMES[((semitone % 12) + 12) % 12];
 }
 
-function noteNameAt(stringIdx, fret) {
-  // E2 = midi 40, A2=45, D3=50, G3=55, B3=59, E4=64
-  const openMidi = [40, 45, 50, 55, 59, 64];
-  const midi = openMidi[stringIdx] + fret;
-  return NOTE_NAMES[midi % 12];
+function semitoneAt(stringIdx, fret) {
+  return (OPEN_MIDI[stringIdx] + fret) % 12;
 }
 
-// ── Audio engine ──────────────────────────────────────────────────────────────
+// ── Audio ─────────────────────────────────────────────────────────────────────
 
 let _ctx = null;
 function getCtx() {
   if (!_ctx || _ctx.state === 'closed') {
     _ctx = new AudioContext();
     const comp = _ctx.createDynamicsCompressor();
-    comp.threshold.value = -18;
-    comp.ratio.value = 5;
-    comp.attack.value = 0.002;
-    comp.release.value = 0.25;
+    comp.threshold.value = -18; comp.ratio.value = 5;
+    comp.attack.value = 0.002;  comp.release.value = 0.25;
     comp.connect(_ctx.destination);
     _ctx._out = comp;
   }
@@ -38,7 +64,7 @@ function getCtx() {
   return _ctx;
 }
 
-function pluckNote(hz, decay = 2.2) {
+function pluck(hz, decay = 2.2) {
   const ctx = getCtx();
   const now = ctx.currentTime;
   const env = ctx.createGain();
@@ -46,304 +72,629 @@ function pluckNote(hz, decay = 2.2) {
   env.gain.setValueAtTime(0, now);
   env.gain.linearRampToValueAtTime(0.28, now + 0.003);
   env.gain.exponentialRampToValueAtTime(0.001, now + decay);
-
-  [
-    [1, 'triangle', 0.55],
-    [2, 'sine',     0.26],
-    [3, 'sine',     0.12],
-    [4, 'sine',     0.07],
-  ].forEach(([h, type, amp]) => {
-    const osc = ctx.createOscillator();
-    const g   = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = hz * h;
-    g.gain.value = amp;
-    osc.connect(g);
-    g.connect(env);
-    osc.start(now);
-    osc.stop(now + decay + 0.1);
+  [[1,'triangle',0.55],[2,'sine',0.26],[3,'sine',0.12],[4,'sine',0.07]].forEach(([h,t,a]) => {
+    const osc = ctx.createOscillator(); const g = ctx.createGain();
+    osc.type = t; osc.frequency.value = hz * h; g.gain.value = a;
+    osc.connect(g); g.connect(env); osc.start(now); osc.stop(now + decay + 0.1);
   });
 }
 
-function strumNotes(frets) {
-  // frets: array of 6 values, null = muted
+function strum(frets) {
   const ctx = getCtx();
   frets.forEach((fret, s) => {
     if (fret === null) return;
-    const hz = fretHz(s, fret);
+    const hz = OPEN_HZ[s] * 2 ** (fret / 12);
     const decay = 2.0 - s * 0.05;
-    const delay = s * 0.018; // low→high strum
-    const now = ctx.currentTime + delay;
-
+    const now = ctx.currentTime + s * 0.018;
     const env = ctx.createGain();
     env.connect(ctx._out);
     env.gain.setValueAtTime(0, now);
     env.gain.linearRampToValueAtTime(0.22, now + 0.003);
     env.gain.exponentialRampToValueAtTime(0.001, now + decay);
-
-    [[1,'triangle',0.55],[2,'sine',0.26],[3,'sine',0.12],[4,'sine',0.07]].forEach(([h,type,amp]) => {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = hz * h;
-      g.gain.value = amp;
-      osc.connect(g);
-      g.connect(env);
-      osc.start(now);
-      osc.stop(now + decay + 0.1);
+    [[1,'triangle',0.55],[2,'sine',0.26],[3,'sine',0.12],[4,'sine',0.07]].forEach(([h,t,a]) => {
+      const osc = ctx.createOscillator(); const g = ctx.createGain();
+      osc.type = t; osc.frequency.value = hz * h; g.gain.value = a;
+      osc.connect(g); g.connect(env); osc.start(now); osc.stop(now + decay + 0.1);
     });
   });
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Chord voicing from tab ────────────────────────────────────────────────────
 
-export default function GuitarStrings() {
-  // selected fret per string: 0 = open, null = muted
+function tabToFrets(tab) {
+  return tab.split('').map(c => (c === 'x' ? null : parseInt(c, 10)));
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function ModeBar({ mode, setMode }) {
+  const modes = [
+    { id: 'play',   label: 'Play',   icon: '🎸' },
+    { id: 'scale',  label: 'Scale',  icon: '🎵' },
+    { id: 'chord',  label: 'Chords', icon: '🎼' },
+  ];
+  return (
+    <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#161616' }}>
+      {modes.map(m => (
+        <button key={m.id} onClick={() => setMode(m.id)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={mode === m.id
+            ? { background: '#1e1e1e', color: '#c9a96e', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
+            : { color: '#5a5a5a' }}>
+          <span>{m.icon}</span><span>{m.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Fretboard ─────────────────────────────────────────────────────────────────
+// Shared visual component used by all three modes.
+// dotStyle(s, f) → null | { bg, color, glow, label }
+
+function Fretboard({ dotStyle, onFretClick, onOpenClick }) {
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: '#1a1010', border: '1px solid #2a1a1a' }}>
+      {/* Fret number header */}
+      <div className="flex" style={{ borderBottom: '1px solid #2a2a2a' }}>
+        <div style={{ width: 44 }} className="shrink-0" />
+        <div className="flex items-center justify-center text-xs font-semibold py-2 shrink-0"
+          style={{ width: 40, color: '#3a3a3a' }}>O</div>
+        {Array.from({ length: FRET_COUNT }, (_, f) => (
+          <div key={f} className="flex-1 flex items-center justify-center text-xs py-2"
+            style={{ minWidth: 0, color: MARKER_FRETS.includes(f+1) ? '#c9a96e' : '#2a2a2a', fontWeight: MARKER_FRETS.includes(f+1) ? 700 : 400 }}>
+            {f+1}
+          </div>
+        ))}
+      </div>
+
+      {/* Strings */}
+      {[0,1,2,3,4,5].map(s => {
+        const openDot = dotStyle(s, 0);
+        return (
+          <div key={s} className="flex items-center relative"
+            style={{ borderBottom: s < 5 ? '1px solid #1e1010' : 'none', minHeight: 52 }}>
+
+            {/* String label */}
+            <button onClick={() => onOpenClick?.(s)}
+              className="shrink-0 flex items-center justify-center"
+              style={{ width: 44, height: 52 }}>
+              <span className="text-sm font-black" style={{ color: STRING_COLORS[s] }}>
+                {STRING_NAMES[s]}
+              </span>
+            </button>
+
+            {/* Open fret dot */}
+            <div className="flex items-center justify-center shrink-0" style={{ width: 40, height: 52 }}>
+              <button onClick={() => onOpenClick?.(s)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
+                style={openDot
+                  ? { background: openDot.bg, color: openDot.color, boxShadow: openDot.glow }
+                  : { background: '#1e1e1e', color: '#3a3a3a', border: '1px solid #2a2a2a' }}>
+                {openDot?.label ?? NOTE_NAMES[(OPEN_MIDI[s]) % 12]}
+              </button>
+            </div>
+
+            {/* String line */}
+            <div className="absolute pointer-events-none"
+              style={{ left: 84, right: 0, top: '50%', height: STRING_THICK[s],
+                transform: 'translateY(-50%)',
+                background: `linear-gradient(to right, ${STRING_COLORS[s]}cc, ${STRING_COLORS[s]}33)`,
+                borderRadius: 9999 }} />
+
+            {/* Fret buttons */}
+            {Array.from({ length: FRET_COUNT }, (_, f) => {
+              const fretNum = f + 1;
+              const dot = dotStyle(s, fretNum);
+              const isMark = MARKER_FRETS.includes(fretNum);
+              return (
+                <div key={f} className="flex-1 flex items-center justify-center relative"
+                  style={{ minWidth: 0, height: 52 }}>
+                  <div className="absolute left-0 top-0 bottom-0 pointer-events-none"
+                    style={{ width: 1.5, background: '#3a2a2a', opacity: 0.6 }} />
+                  <button onClick={() => onFretClick?.(s, fretNum)}
+                    className="relative z-10 flex items-center justify-center rounded-full transition-all text-xs font-bold"
+                    style={{
+                      width: 28, height: 28,
+                      background: dot ? dot.bg : isMark ? '#1e1616' : 'transparent',
+                      color: dot ? dot.color : isMark ? '#3a3a3a' : 'transparent',
+                      boxShadow: dot?.glow ?? 'none',
+                      transform: dot ? 'scale(1.05)' : 'scale(1)',
+                      border: dot ? 'none' : isMark ? '1px solid #2a2020' : 'none',
+                    }}>
+                    {dot?.label ?? (isMark ? '·' : '')}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {/* Bottom position markers */}
+      <div className="flex" style={{ borderTop: '1px solid #1e1010' }}>
+        <div style={{ width: 84 }} />
+        {Array.from({ length: FRET_COUNT }, (_, f) => {
+          const fn = f + 1;
+          return (
+            <div key={f} className="flex-1 flex items-center justify-center py-2" style={{ minWidth: 0 }}>
+              {fn === 12 ? (
+                <div className="flex gap-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
+                </div>
+              ) : [3,5,7,9].includes(fn) ? (
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── MODE: PLAY ────────────────────────────────────────────────────────────────
+
+function PlayMode() {
   const [selected, setSelected] = useState([0, 0, 0, 0, 0, 0]);
-  const [ripple, setRipple]     = useState({}); // { `${s}-${f}`: timestamp }
+  const [ripple, setRipple]     = useState({});
   const [strumming, setStrumming] = useState(false);
   const strumTimer = useRef(null);
 
-  const triggerRipple = useCallback((s, f) => {
+  const fire = useCallback((s, f) => {
     const key = `${s}-${f}`;
-    setRipple(r => ({ ...r, [key]: Date.now() }));
-    setTimeout(() => setRipple(r => { const n = {...r}; delete n[key]; return n; }), 500);
+    setRipple(r => ({ ...r, [key]: 1 }));
+    setTimeout(() => setRipple(r => { const n={...r}; delete n[key]; return n; }), 400);
   }, []);
 
-  const handleFretClick = useCallback((stringIdx, fret) => {
-    setSelected(prev => {
-      const next = [...prev];
-      // clicking the already-selected fret toggles to muted
-      next[stringIdx] = prev[stringIdx] === fret ? null : fret;
-      return next;
-    });
-    triggerRipple(stringIdx, fret);
-    pluckNote(fretHz(stringIdx, fret));
-  }, [triggerRipple]);
+  const handleFret = useCallback((s, f) => {
+    setSelected(p => { const n=[...p]; n[s] = p[s]===f ? null : f; return n; });
+    fire(s, f);
+    pluck(OPEN_HZ[s] * 2 ** (f / 12));
+  }, [fire]);
 
-  const handleOpenClick = useCallback((stringIdx) => {
-    setSelected(prev => {
-      const next = [...prev];
-      next[stringIdx] = prev[stringIdx] === 0 ? null : 0;
-      return next;
-    });
-    triggerRipple(stringIdx, 0);
-    pluckNote(fretHz(stringIdx, 0), 2.6);
-  }, [triggerRipple]);
+  const handleOpen = useCallback((s) => {
+    setSelected(p => { const n=[...p]; n[s] = p[s]===0 ? null : 0; return n; });
+    fire(s, 0);
+    pluck(OPEN_HZ[s], 2.6);
+  }, [fire]);
 
-  const handleStrum = useCallback(() => {
-    strumNotes(selected);
+  const handleStrum = () => {
+    strum(selected);
     setStrumming(true);
-    if (strumTimer.current) clearTimeout(strumTimer.current);
+    clearTimeout(strumTimer.current);
     strumTimer.current = setTimeout(() => setStrumming(false), 300);
-  }, [selected]);
-
-  const handleMuteAll = useCallback(() => {
-    setSelected([null, null, null, null, null, null]);
-  }, []);
-
-  const handleOpenAll = useCallback(() => {
-    setSelected([0, 0, 0, 0, 0, 0]);
-    strumNotes([0, 0, 0, 0, 0, 0]);
-  }, []);
+  };
 
   const activeCount = selected.filter(f => f !== null).length;
 
+  const dotStyle = useCallback((s, f) => {
+    const sel = selected[s];
+    if (sel !== f) return null;
+    const hasRipple = !!ripple[`${s}-${f}`];
+    return {
+      bg: STRING_COLORS[s],
+      color: '#0f0f0f',
+      glow: `0 0 12px ${STRING_COLORS[s]}88`,
+      label: NOTE_NAMES[semitoneAt(s, f)],
+      scale: hasRipple ? 1.3 : 1.1,
+    };
+  }, [selected, ripple]);
+
   return (
-    <div className="p-3 sm:p-5 select-none">
-
-      {/* Header */}
-      <div className="mb-4">
-        <h2 className="text-base sm:text-lg font-bold mb-0.5" style={{ color: '#f0ede8' }}>
-          Guitar Strings
-        </h2>
-        <p className="text-xs" style={{ color: '#5a5a5a' }}>
-          Tap a fret to select &amp; hear it. Tap the string name to play open. Hit Strum to play all selected strings.
-        </p>
-      </div>
-
-      {/* Action bar */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
-        <button
-          onClick={handleStrum}
-          disabled={activeCount === 0}
+    <div>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <button onClick={handleStrum} disabled={activeCount === 0}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all"
           style={activeCount > 0
             ? { background: strumming ? '#b8913a' : '#c9a96e', color: '#0f0f0f', transform: strumming ? 'scale(0.97)' : 'scale(1)' }
-            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}
-        >
-          🎸 Strum
-          {activeCount > 0 && <span className="text-xs font-normal opacity-70">({activeCount} strings)</span>}
+            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+          🎸 Strum {activeCount > 0 && <span className="text-xs font-normal opacity-70">({activeCount})</span>}
         </button>
-        <button
-          onClick={handleOpenAll}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
-          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
-        >
+        <button onClick={() => { setSelected([0,0,0,0,0,0]); strum([0,0,0,0,0,0]); }}
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
           All Open
         </button>
-        <button
-          onClick={handleMuteAll}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
-          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
-        >
+        <button onClick={() => setSelected([null,null,null,null,null,null])}
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
           Mute All
         </button>
       </div>
 
-      {/* Fretboard */}
-      <div className="rounded-2xl overflow-hidden" style={{ background: '#1a1010', border: '1px solid #2a1a1a' }}>
+      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
 
-        {/* Fret number header */}
-        <div className="flex" style={{ borderBottom: '1px solid #2a2a2a' }}>
-          {/* String label column */}
-          <div className="shrink-0" style={{ width: 44 }} />
-          {/* Open column */}
-          <div className="flex items-center justify-center text-xs font-semibold py-2"
-            style={{ width: 40, color: '#3a3a3a' }}>
-            O
-          </div>
-          {/* Fret columns */}
-          {Array.from({ length: FRET_COUNT }, (_, f) => (
-            <div key={f} className="flex-1 flex items-center justify-center text-xs py-2"
-              style={{ color: [3,5,7,9,12].includes(f+1) ? '#c9a96e' : '#2a2a2a', fontWeight: [3,5,7,9,12].includes(f+1) ? 700 : 400, minWidth: 0 }}>
-              {f + 1}
-            </div>
-          ))}
-        </div>
-
-        {/* Strings */}
-        {[0,1,2,3,4,5].map(s => {
-          const sel = selected[s]; // null | 0..FRET_COUNT
-          const isMuted = sel === null;
-
-          return (
-            <div key={s} className="flex items-center relative"
-              style={{ borderBottom: s < 5 ? '1px solid #1e1010' : 'none', minHeight: 52 }}>
-
-              {/* String name + mute indicator */}
-              <button
-                onClick={() => handleOpenClick(s)}
-                className="shrink-0 flex flex-col items-center justify-center gap-0.5 transition-all"
-                style={{ width: 44, height: 52 }}
-                title={`Play ${STRING_NAMES[s]} open`}
-              >
-                <span className="text-sm font-black leading-none" style={{ color: isMuted ? '#2a2a2a' : STRING_COLORS[s] }}>
-                  {STRING_NAMES[s]}
-                </span>
-                {isMuted && <span className="text-xs leading-none" style={{ color: '#3a3a3a' }}>✕</span>}
-              </button>
-
-              {/* Open string dot */}
-              <div className="flex items-center justify-center shrink-0" style={{ width: 40, height: 52 }}>
-                <button
-                  onClick={() => handleOpenClick(s)}
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
-                  style={sel === 0
-                    ? { background: STRING_COLORS[s], color: '#0f0f0f', boxShadow: `0 0 10px ${STRING_COLORS[s]}66` }
-                    : { background: '#1e1e1e', color: '#3a3a3a', border: '1px solid #2a2a2a' }}
-                  title={`${STRING_NAMES[s]}2 open — ${noteNameAt(s, 0)}`}
-                >
-                  {noteNameAt(s, 0)}
-                </button>
-              </div>
-
-              {/* The string line (drawn behind fret buttons) */}
-              <div className="absolute pointer-events-none"
-                style={{
-                  left: 84, right: 0, top: '50%',
-                  height: STRING_THICK[s],
-                  transform: 'translateY(-50%)',
-                  background: isMuted
-                    ? '#1e1e1e'
-                    : `linear-gradient(to right, ${STRING_COLORS[s]}cc, ${STRING_COLORS[s]}44)`,
-                  borderRadius: 9999,
-                  opacity: isMuted ? 0.3 : 1,
-                }}
-              />
-
-              {/* Fret buttons */}
-              {Array.from({ length: FRET_COUNT }, (_, f) => {
-                const fretNum = f + 1;
-                const isSelected = sel === fretNum;
-                const rippleKey = `${s}-${fretNum}`;
-                const hasRipple = !!ripple[rippleKey];
-                const isDot = [3,5,7,9,12].includes(fretNum);
-
-                return (
-                  <div key={f} className="flex-1 flex items-center justify-center relative" style={{ minWidth: 0, height: 52 }}>
-                    {/* Fret wire */}
-                    <div className="absolute left-0 top-0 bottom-0 pointer-events-none"
-                      style={{ width: 1.5, background: '#3a2a2a', opacity: 0.6 }} />
-
-                    <button
-                      onClick={() => handleFretClick(s, fretNum)}
-                      className="relative z-10 flex items-center justify-center rounded-full transition-all text-xs font-bold"
-                      style={{
-                        width: 28, height: 28,
-                        background: isSelected
-                          ? STRING_COLORS[s]
-                          : isDot ? '#1e1616' : 'transparent',
-                        color: isSelected ? '#0f0f0f' : isDot ? '#3a3a3a' : 'transparent',
-                        boxShadow: isSelected ? `0 0 12px ${STRING_COLORS[s]}88` : 'none',
-                        transform: hasRipple ? 'scale(1.25)' : isSelected ? 'scale(1.1)' : 'scale(1)',
-                        border: isSelected ? 'none' : isDot ? '1px solid #2a2020' : 'none',
-                      }}
-                      title={`${STRING_NAMES[s]} fret ${fretNum} — ${noteNameAt(s, fretNum)}`}
-                    >
-                      {isSelected ? noteNameAt(s, fretNum) : isDot ? '·' : ''}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-
-        {/* Fret position markers (dots) */}
-        <div className="flex" style={{ borderTop: '1px solid #1e1010' }}>
-          <div style={{ width: 84 }} />
-          {Array.from({ length: FRET_COUNT }, (_, f) => {
-            const fretNum = f + 1;
-            const isDot   = [3,5,7,9].includes(fretNum);
-            const isDouble = fretNum === 12;
-            return (
-              <div key={f} className="flex-1 flex items-center justify-center py-2" style={{ minWidth: 0 }}>
-                {isDouble ? (
-                  <div className="flex gap-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
-                  </div>
-                ) : isDot ? (
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a96e55' }} />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Active chord info */}
       {activeCount > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2 items-center">
+        <div className="mt-3 flex flex-wrap gap-2 items-center">
           <span className="text-xs" style={{ color: '#3a3a3a' }}>Playing:</span>
           {[0,1,2,3,4,5].map(s => {
             const f = selected[s];
-            if (f === null) return (
-              <span key={s} className="text-xs px-2 py-1 rounded-lg font-semibold"
-                style={{ background: '#141414', color: '#2a2a2a' }}>
-                {STRING_NAMES[s]} ✕
-              </span>
-            );
+            if (f === null) return null;
             return (
               <span key={s} className="text-xs px-2 py-1 rounded-lg font-semibold"
                 style={{ background: `${STRING_COLORS[s]}18`, color: STRING_COLORS[s], border: `1px solid ${STRING_COLORS[s]}33` }}>
-                {STRING_NAMES[s]}{f === 0 ? ' open' : ` fret ${f}`} · {noteNameAt(s, f)}
+                {STRING_NAMES[s]}{f === 0 ? ' open' : ` fr.${f}`} · {NOTE_NAMES[semitoneAt(s,f)]}
               </span>
             );
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── MODE: SCALE ───────────────────────────────────────────────────────────────
+
+function ScaleMode() {
+  const [root, setRoot]           = useState('C');
+  const [scaleName, setScaleName] = useState('Major');
+
+  const rootSemitone = NOTE_TO_SEMITONE[root] ?? 0;
+  const intervals    = SCALE_TYPES[scaleName] ?? [];
+  const scaleSet     = new Set(intervals.map(i => (rootSemitone + i) % 12));
+  const rootPc       = rootSemitone % 12;
+
+  // Compute the notes in the scale for display
+  const scaleNotes = intervals.map(i => {
+    const pc = (rootSemitone + i) % 12;
+    return NOTE_NAMES[pc];
+  });
+
+  const dotStyle = useCallback((s, f) => {
+    const pc = semitoneAt(s, f);
+    if (!scaleSet.has(pc)) return null;
+    const isRoot = pc === rootPc;
+    return {
+      bg: isRoot ? '#c9a96e' : `${STRING_COLORS[s]}33`,
+      color: isRoot ? '#0f0f0f' : STRING_COLORS[s],
+      glow: isRoot ? '0 0 14px #c9a96e88' : 'none',
+      label: NOTE_NAMES[pc],
+    };
+  }, [scaleSet, rootPc]);
+
+  const handleFret = useCallback((s, f) => {
+    const pc = semitoneAt(s, f);
+    if (scaleSet.has(pc)) pluck(OPEN_HZ[s] * 2 ** (f / 12));
+  }, [scaleSet]);
+
+  const handleOpen = useCallback((s) => {
+    const pc = semitoneAt(s, 0);
+    if (scaleSet.has(pc)) pluck(OPEN_HZ[s], 2.6);
+  }, [scaleSet]);
+
+  // Play scale ascending
+  const playScale = useCallback(() => {
+    const ctx = getCtx();
+    // Collect scale notes on string 1 (A) across frets 0-12
+    const notes = [];
+    for (let f = 0; f <= FRET_COUNT; f++) {
+      const pc = semitoneAt(1, f);
+      if (scaleSet.has(pc)) notes.push({ s: 1, f });
+    }
+    notes.forEach(({ s, f }, i) => {
+      const hz = OPEN_HZ[s] * 2 ** (f / 12);
+      const t  = ctx.currentTime + i * 0.35;
+      const env = ctx.createGain();
+      env.connect(ctx._out);
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(0.2, t + 0.003);
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      [[1,'triangle',0.55],[2,'sine',0.26]].forEach(([h,tp,a]) => {
+        const osc = ctx.createOscillator(); const g = ctx.createGain();
+        osc.type = tp; osc.frequency.value = hz * h; g.gain.value = a;
+        osc.connect(g); g.connect(env); osc.start(t); osc.stop(t + 0.7);
+      });
+    });
+  }, [scaleSet]);
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="flex flex-wrap gap-2 mb-4 items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Root</label>
+          <div className="flex flex-wrap gap-1">
+            {ROOTS.map(r => (
+              <button key={r} onClick={() => setRoot(r)}
+                className="px-2 py-1 rounded-lg text-xs font-bold transition-all"
+                style={root === r
+                  ? { background: '#c9a96e', color: '#0f0f0f' }
+                  : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-col gap-1 flex-1">
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Scale</label>
+          <div className="flex flex-wrap gap-1">
+            {Object.keys(SCALE_TYPES).map(sn => (
+              <button key={sn} onClick={() => setScaleName(sn)}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                style={scaleName === sn
+                  ? { background: '#c9a96e', color: '#0f0f0f' }
+                  : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+                {sn}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Scale info + play button */}
+      <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2.5 rounded-xl"
+        style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+        <div>
+          <p className="text-xs font-bold mb-1" style={{ color: '#c9a96e' }}>
+            {root} {scaleName}
+          </p>
+          <p className="text-xs font-mono" style={{ color: '#5a5a5a' }}>
+            {scaleNotes.join('  ·  ')}
+          </p>
+        </div>
+        <button onClick={playScale}
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: '#252525', color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+          ▶ Play
+        </button>
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-3 text-xs mb-3" style={{ color: '#3a3a3a' }}>
+        <span className="flex items-center gap-1.5">
+          <span className="w-4 h-4 rounded-full inline-block" style={{ background: '#c9a96e' }} />
+          Root note
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-4 h-4 rounded-full inline-block" style={{ background: `${STRING_COLORS[0]}44`, border: `1px solid ${STRING_COLORS[0]}` }} />
+          Scale note (tap to hear)
+        </span>
+      </div>
+
+      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
+    </div>
+  );
+}
+
+// ── MODE: CHORD FINDER ────────────────────────────────────────────────────────
+
+// Group unique chord names from the CHORDS library
+const CHORD_NAMES = (() => {
+  const seen = new Set();
+  const names = [];
+  for (const c of CHORDS) {
+    if (!seen.has(c.name)) { seen.add(c.name); names.push(c.name); }
+  }
+  return names;
+})();
+
+// Chord type groups for the selector
+const CHORD_TYPE_GROUPS = [
+  { label: 'Major',    match: t => /^Major/.test(t) || t === 'Maj 7' || t === 'Maj 7 (barre)' || t === 'Maj 9' || t === '6th' },
+  { label: 'Minor',    match: t => /^Minor/.test(t) || t === 'Half-dim' },
+  { label: '7th+',     match: t => /^Dom 7|^7sus|^7#9|^7b9|^13th|^9th|^Dom 9/.test(t) },
+  { label: 'Sus',      match: t => /^Sus/.test(t) },
+  { label: 'Other',    match: ()  => true },
+];
+
+function groupChordsByType(voicings) {
+  const groups = CHORD_TYPE_GROUPS.map(g => ({ ...g, items: [] }));
+  const assigned = new Set();
+  for (const g of groups.slice(0, -1)) {
+    for (const v of voicings) {
+      if (!assigned.has(v) && g.match(v.type)) { g.items.push(v); assigned.add(v); }
+    }
+  }
+  groups[groups.length - 1].items = voicings.filter(v => !assigned.has(v));
+  return groups.filter(g => g.items.length > 0);
+}
+
+function ChordDiagram({ chord, isActive, onClick }) {
+  const frets = tabToFrets(chord.tab);
+  const activeFrets = frets.filter(f => f !== null);
+  const minFret = activeFrets.length ? Math.min(...activeFrets.filter(f => f > 0)) : 1;
+  const maxFret = activeFrets.length ? Math.max(...activeFrets) : 1;
+  const spanFrets = Math.max(4, maxFret - (minFret > 1 ? minFret - 1 : 0) + 1);
+  const startFret = minFret > 1 ? minFret - 1 : 0;
+  const score = calcDifficulty(chord.notes);
+
+  const W = 90, H = 110;
+  const padL = 14, padR = 8, padT = 22, padB = 12;
+  const fretW = (W - padL - padR) / Math.min(spanFrets, 4);
+  const strH  = (H - padT - padB) / 5;
+
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-xl p-2 transition-all flex flex-col items-center gap-1"
+      style={{
+        background: isActive ? 'rgba(201,169,110,0.1)' : '#141414',
+        border: `1px solid ${isActive ? 'rgba(201,169,110,0.4)' : '#222'}`,
+        minWidth: 100,
+      }}
+    >
+      <p className="text-xs font-semibold" style={{ color: isActive ? '#c9a96e' : '#7a7a7a' }}>
+        {chord.type}
+      </p>
+      <svg width={W} height={H} style={{ overflow: 'visible' }}>
+        {/* Nut or fret marker */}
+        {startFret === 0
+          ? <line x1={padL} y1={padT} x2={padL} y2={padT + 5 * strH} stroke="#c9a96e" strokeWidth={3} strokeLinecap="round" />
+          : <text x={padL - 4} y={padT + 2 * strH} textAnchor="end" fontSize={9} fill="#5a5a5a">{startFret + 1}</text>
+        }
+        {/* Fret wires */}
+        {Array.from({ length: Math.min(spanFrets, 4) + 1 }, (_, i) => (
+          <line key={i} x1={padL + i * fretW} y1={padT} x2={padL + i * fretW} y2={padT + 5 * strH}
+            stroke="#2a2020" strokeWidth={1} />
+        ))}
+        {/* String lines */}
+        {[0,1,2,3,4,5].map(s => (
+          <line key={s} x1={padL} y1={padT + s * strH} x2={padL + Math.min(spanFrets, 4) * fretW} y2={padT + s * strH}
+            stroke={STRING_COLORS[s]} strokeWidth={STRING_THICK[s] * 0.45} opacity={0.6} />
+        ))}
+        {/* Muted / open markers */}
+        {frets.map((f, s) => f === null && (
+          <text key={s} x={padL - 7} y={padT + s * strH + 3.5} textAnchor="middle" fontSize={8} fill="#3a3a3a">✕</text>
+        ))}
+        {frets.map((f, s) => f === 0 && (
+          <circle key={s} cx={padL - 7} cy={padT + s * strH} r={3} fill="none" stroke="#5a5a5a" strokeWidth={1} />
+        ))}
+        {/* Fret dots */}
+        {frets.map((f, s) => {
+          if (f === null || f === 0) return null;
+          const col = f - startFret;
+          if (col < 1 || col > 4) return null;
+          const cx = padL + (col - 0.5) * fretW;
+          const cy = padT + s * strH;
+          return (
+            <g key={s}>
+              <circle cx={cx} cy={cy} r={6} fill={STRING_COLORS[s]} opacity={0.9} />
+              <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize={7} fill="#0f0f0f" fontWeight="bold">
+                {NOTE_NAMES[semitoneAt(s, f)]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <DifficultyBadge score={score} />
+    </button>
+  );
+}
+
+function ChordFinderMode() {
+  const [search, setSearch]       = useState('');
+  const [selectedName, setSelectedName] = useState('Am');
+  const [activeVoicing, setActiveVoicing] = useState(null);
+
+  // All voicings for selected chord name
+  const voicings = useMemo(() =>
+    CHORDS.filter(c => c.name === selectedName).slice(0, 4),
+    [selectedName]
+  );
+
+  // Active voicing frets for the fretboard
+  const activeFrets = useMemo(() => {
+    if (!activeVoicing) return null;
+    return tabToFrets(activeVoicing.tab);
+  }, [activeVoicing]);
+
+  // When chord name changes, reset voicing
+  const selectChord = useCallback((name) => {
+    setSelectedName(name);
+    setActiveVoicing(null);
+  }, []);
+
+  const selectVoicing = useCallback((v) => {
+    setActiveVoicing(v);
+    strum(tabToFrets(v.tab));
+  }, []);
+
+  // Filtered chord names
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
+  }, [search]);
+
+  // Dot style: show the active voicing on the fretboard, greyed out if no voicing selected
+  const dotStyle = useCallback((s, f) => {
+    if (!activeFrets) return null;
+    const expected = activeFrets[s];
+    if (expected !== f) return null;
+    if (f === null) return null;
+    return {
+      bg: STRING_COLORS[s],
+      color: '#0f0f0f',
+      glow: `0 0 12px ${STRING_COLORS[s]}88`,
+      label: NOTE_NAMES[semitoneAt(s, f)],
+    };
+  }, [activeFrets]);
+
+  const handleFret = useCallback((s, f) => {
+    pluck(OPEN_HZ[s] * 2 ** (f / 12));
+  }, []);
+
+  const handleOpen = useCallback((s) => {
+    pluck(OPEN_HZ[s], 2.6);
+  }, []);
+
+  return (
+    <div>
+      {/* Search + chord list */}
+      <div className="mb-4">
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search chord… e.g. Bm7, F#"
+          className="w-full px-3 py-2 rounded-xl text-sm outline-none mb-3"
+          style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+        />
+        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+          {filtered.map(name => (
+            <button key={name} onClick={() => selectChord(name)}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+              style={selectedName === name
+                ? { background: '#c9a96e', color: '#0f0f0f' }
+                : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+              {name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Voicings */}
+      {voicings.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
+            {selectedName} — {voicings.length} voicing{voicings.length > 1 ? 's' : ''} · tap to show on fretboard
+          </p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {voicings.map((v, i) => (
+              <ChordDiagram key={i} chord={v} isActive={activeVoicing === v} onClick={() => selectVoicing(v)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {voicings.length === 0 && (
+        <div className="mb-4 text-sm text-center py-6" style={{ color: '#3a3a3a' }}>
+          No voicings found for "{selectedName}"
+        </div>
+      )}
+
+      {/* Fretboard — shows selected voicing */}
+      {activeVoicing ? (
+        <>
+          <p className="text-xs mb-2" style={{ color: '#3a3a3a' }}>
+            Showing: <span style={{ color: '#c9a96e' }}>{activeVoicing.name} ({activeVoicing.type})</span>
+            &nbsp;· Tab: <span className="font-mono" style={{ color: '#5a5a5a' }}>{activeVoicing.tab}</span>
+          </p>
+          <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
+        </>
+      ) : (
+        <div className="rounded-2xl flex items-center justify-center text-sm"
+          style={{ background: '#141414', border: '1px dashed #2a2a2a', height: 120, color: '#3a3a3a' }}>
+          Select a voicing above to see it on the fretboard
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export default function GuitarStrings() {
+  const [mode, setMode] = useState('play');
+
+  return (
+    <div className="p-3 sm:p-5 select-none">
+      <ModeBar mode={mode} setMode={setMode} />
+      {mode === 'play'  && <PlayMode />}
+      {mode === 'scale' && <ScaleMode />}
+      {mode === 'chord' && <ChordFinderMode />}
     </div>
   );
 }
