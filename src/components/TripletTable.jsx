@@ -15,54 +15,72 @@ export default function TripletTable() {
     );
   }, [maxFret, sortBy]);
 
+  const pct = ((maxFret - 2) / 8) * 100;
+
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Max fret:</label>
+    <div className="p-3 sm:p-5">
+      <div className="flex flex-wrap items-center gap-3 sm:gap-5 mb-4 sm:mb-5 px-3 sm:px-4 py-3 rounded-xl" style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
+        <div className="flex items-center gap-3 flex-1 min-w-[140px]">
+          <label className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>Max fret</label>
           <input
             type="range" min={2} max={10} value={maxFret}
             onChange={e => setMaxFret(Number(e.target.value))}
-            className="w-32"
+            className="flex-1"
+            style={{ background: `linear-gradient(to right, #c9a96e ${pct}%, #2a2a2a ${pct}%)` }}
           />
-          <span className="text-gray-600">{maxFret}</span>
+          <span className="text-sm font-bold w-5 text-right tabular-nums" style={{ color: '#c9a96e' }}>{maxFret}</span>
         </div>
+
         <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Sort:</label>
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value)}
-            className="border rounded px-2 py-1 text-sm"
-          >
-            <option value="score">Easiest first</option>
-            <option value="score_desc">Hardest first</option>
-          </select>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Sort</label>
+          <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: '#111' }}>
+            {[['score', 'Easiest'], ['score_desc', 'Hardest']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setSortBy(val)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-md transition-all"
+                style={sortBy === val ? {
+                  background: '#252525',
+                  color: '#c9a96e',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                } : { color: '#5a5a5a' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-        <span className="text-sm text-gray-400">{rows.length} combinations</span>
+
+        <span className="text-xs tabular-nums ml-auto" style={{ color: '#3a3a3a' }}>
+          {rows.length.toLocaleString()} combinations
+        </span>
       </div>
-      <div className="overflow-auto max-h-[65vh]">
-        <table className="text-sm border-collapse w-full">
-          <thead className="sticky top-0 bg-white shadow-sm">
+
+      <div className="overflow-auto max-h-[65vh] rounded-xl" style={{ border: '1px solid #1e1e1e' }}>
+        <table className="text-sm w-full border-collapse">
+          <thead className="sticky top-0 z-10">
             <tr>
-              <th className="border px-3 py-2 text-left">Strings</th>
-              <th className="border px-3 py-2 text-left">Frets</th>
-              <th className="border px-3 py-2 text-left">Fret span</th>
-              <th className="border px-3 py-2 text-left">String span</th>
-              <th className="border px-3 py-2 text-left">Difficulty</th>
+              {['Strings', 'Frets', 'Fret span', 'String span', 'Difficulty'].map(h => (
+                <th key={h} className="px-4 py-2.5 text-left" style={{ borderBottom: '1px solid #1e1e1e' }}>{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={i} className="hover:bg-gray-50">
-                <td className="border px-3 py-1 font-mono">
-                  {r.strings.map(s => STRING_NAMES[s]).join('-')}
+              <tr
+                key={i}
+                className="transition-colors"
+                style={{ borderBottom: '1px solid #1a1a1a' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#1a1a1a'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td className="px-4 py-2 font-mono text-xs font-semibold" style={{ color: '#c9a96e' }}>
+                  {r.strings.map(s => STRING_NAMES[s]).join(' – ')}
                 </td>
-                <td className="border px-3 py-1 font-mono">
-                  {r.frets.join('-')}
-                </td>
-                <td className="border px-3 py-1">{r.fretSpan}</td>
-                <td className="border px-3 py-1">{r.stringSpan}</td>
-                <td className="border px-3 py-1"><DifficultyBadge score={r.score} /></td>
+                <td className="px-4 py-2 font-mono text-xs" style={{ color: '#6a6a6a' }}>{r.frets.join(' – ')}</td>
+                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.fretSpan}</td>
+                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.stringSpan}</td>
+                <td className="px-4 py-2"><DifficultyBadge score={r.score} /></td>
               </tr>
             ))}
           </tbody>

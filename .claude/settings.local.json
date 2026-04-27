@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(printf 'y\\\\n')",
+      "Bash(node -e \":*)",
+      "Bash(npx --yes create-vite@latest /tmp/vite-temp -- --template react)",
+      "Read(//c/Users/User/AppData/Local/Temp/**)",
+      "Read(//c/Users/User/claude_projects/guitar/$TEMP/**)",
+      "Read(//c/Users/User/claude_projects/guitar/$TMP/**)",
+      "Bash(cmd.exe /c \"dir %TEMP%\\\\vite-temp\")",
+      "Bash(cmd.exe /c \"dir %LOCALAPPDATA%\\\\Temp\\\\vite-temp\")",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\vite-temp\")",
+      "Bash(cmd.exe /c \"npx --yes create-vite@latest C:\\\\vitetemp -- --template react\")",
+      "Bash(cmd.exe /c \"dir C:\\\\vitetemp\")",
+      "Bash(npm install:*)",
+      "WebFetch(domain:www.e-chords.com)"
+    ]
+  }
+}

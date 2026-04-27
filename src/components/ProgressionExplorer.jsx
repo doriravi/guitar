@@ -108,14 +108,15 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
   }, [lyrics, status, progChordsWithVoicings]);
 
   if (status === 'loading') return (
-    <div className="px-4 py-3 text-xs text-gray-400 italic">Loading lyrics…</div>
+    <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>Loading lyrics…</div>
   );
   if (status === 'error' || status === 'empty') return (
-    <div className="px-4 py-3 text-xs text-gray-400 italic">Lyrics not available for this song.</div>
+    <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>Lyrics not available.</div>
   );
 
   return (
-    <div className="border-t border-gray-100 bg-white px-4 py-3 max-h-80 overflow-y-auto font-mono">
+    <div className="px-3 sm:px-4 py-3 max-h-72 overflow-y-auto font-mono"
+      style={{ borderTop: '1px solid #1a1a1a', background: '#0f0f0f' }}>
       {annotatedLines.map((line, i) => {
         if (line.blank) return <div key={i} className="mt-3" />;
         return (
@@ -123,9 +124,8 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
             {line.annotated.map(({ word, chord }, j) => (
               <span key={j} className="inline-flex flex-col items-start">
                 <span
-                  className={`text-xs font-bold h-4 leading-none ${
-                    chord ? 'text-indigo-600 cursor-default hover:text-indigo-800' : 'text-transparent select-none'
-                  }`}
+                  className="text-xs font-bold h-4 leading-none cursor-default"
+                  style={{ color: chord ? '#818cf8' : 'transparent', userSelect: chord ? 'auto' : 'none' }}
                   onMouseEnter={chord ? e => {
                     const v = chord.voicings[0];
                     if (!v) return;
@@ -141,7 +141,7 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
                 >
                   {chord ? chord.chordName : '·'}
                 </span>
-                <span className="text-xs text-gray-700">{word}</span>
+                <span className="text-xs" style={{ color: '#7a7a7a' }}>{word}</span>
               </span>
             ))}
           </div>
@@ -149,10 +149,10 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
       })}
       {tooltip && (
         <div
-          className="fixed z-50 bg-white border border-gray-300 rounded-lg shadow-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y }}
+          className="fixed z-50 rounded-xl p-3 pointer-events-none"
+          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
-          <div className="text-xs text-gray-400 mb-1 text-center">{tooltip.voicing.type}</div>
+          <div className="text-xs mb-1 text-center" style={{ color: '#5a5a5a' }}>{tooltip.voicing.type}</div>
           <FretboardDiagram chord={tooltip.voicing} />
         </div>
       )}
@@ -180,66 +180,58 @@ function SongRow({ song, cardChordNames }) {
   }, [song.key, song.scaleType, song.degrees]);
 
   return (
-    <div className="hover:bg-white transition-colors">
-      {/* Song metadata row */}
-      <div className="flex items-center justify-between gap-3 px-4 pt-2.5 pb-1">
-        <div className="min-w-0">
+    <div style={{ borderBottom: '1px solid #1a1a1a' }}>
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-2 pb-1">
+        <div className="min-w-0 flex-1">
           <a
             href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(song.title + ' ' + song.artist)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-gray-900 text-sm hover:underline"
+            target="_blank" rel="noopener noreferrer"
+            className="font-semibold text-sm hover:underline"
+            style={{ color: '#d0cdc8' }}
           >{song.title}</a>
-          <span className="text-gray-500 text-sm"> — {song.artist}</span>
-          {song.year > 0 && (
-            <span className="text-gray-400 text-xs ml-1">({song.year})</span>
-          )}
+          <span className="text-sm" style={{ color: '#5a5a5a' }}> — {song.artist}</span>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-xs px-1.5 py-0.5 rounded font-medium hidden sm:inline"
+            style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8' }}>
             {song.key}
-          </span>
-          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
-            {song.section}
           </span>
           <button
             onClick={() => {
-              if (isPlaying) {
-                stopAudio();
-                setIsPlaying(false);
-              } else {
+              if (isPlaying) { stopAudio(); setIsPlaying(false); }
+              else {
                 const voicings = songChordsWithVoicings.map(c => c.voicings[0]).filter(Boolean);
                 if (!voicings.length) return;
                 setIsPlaying(true);
                 playProgression(voicings, 72, () => {}, () => setIsPlaying(false));
               }
             }}
-            title={isPlaying ? 'Stop' : 'Play song chords'}
-            className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs transition-colors shrink-0 ${
-              isPlaying ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-500'
-            }`}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all"
+            style={isPlaying
+              ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
+              : { background: '#252525', color: '#7a7a7a' }}
           >
             {isPlaying ? '■' : '▶'}
           </button>
           <button
             onClick={() => setLyricsOpen(v => !v)}
-            className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
-              lyricsOpen ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+            className="text-xs px-2 py-0.5 rounded font-medium transition-all"
+            style={lyricsOpen
+              ? { background: 'rgba(99,102,241,0.12)', color: '#818cf8' }
+              : { background: '#1e1e1e', color: '#5a5a5a' }}
           >
             {lyricsOpen ? 'Hide' : 'Lyrics'}
           </button>
         </div>
       </div>
-      {/* Chord row aligned to progression columns */}
-      <div className="flex divide-x divide-gray-100 overflow-x-auto pb-2">
+      <div className="flex overflow-x-auto pb-2" style={{ borderTop: '1px solid #1a1a1a' }}>
         {cardChordNames.map((chord, j) => (
-          <div key={j} className="flex-1 min-w-[80px] px-3 py-1">
+          <div key={j} className="flex-1 px-2 sm:px-3 py-1" style={{ minWidth: 64 }}>
             <a
               href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2 py-0.5 rounded bg-white border border-gray-200 text-xs font-mono font-semibold text-gray-700 hover:border-gray-400 hover:text-gray-900"
+              target="_blank" rel="noopener noreferrer"
+              className="text-xs font-mono font-semibold hover:underline"
+              style={{ color: '#7a7a7a' }}
             >
               {chord}
             </a>
@@ -292,11 +284,11 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot })
   }
 
   return (
-    <div className="border-t border-gray-200 bg-gray-50">
-      <div className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        Famous songs using this progression
+    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>
+        Famous songs
       </div>
-      <div className="divide-y divide-gray-100">
+      <div style={{ borderTop: '1px solid #1a1a1a' }}>
         {songs.map((song, i) => (
           <SongRow key={i} song={song} cardChordNames={cardChordNames} />
         ))}
@@ -310,7 +302,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot })
 export default function ProgressionExplorer() {
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
-  const [maxDiff,     setMaxDiff]     = useState(7);
+  const [maxDiff,     setMaxDiff]     = useState(10);
   const [playState,   setPlayState]   = useState(null);  // { key, chordIdx }
   const [openSongs,   setOpenSongs]   = useState(new Set()); // Set of card keys
   const [tooltip,     setTooltip]     = useState(null);  // { voicing, x, y }
@@ -379,16 +371,17 @@ export default function ProgressionExplorer() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4">
+    <div className="p-3 sm:p-4">
 
       {/* ── Filters ── */}
-      <div className="flex flex-wrap gap-4 items-end mb-5">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-4 items-end mb-4 sm:mb-5">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Root</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Root</label>
           <select
             value={root}
             onChange={e => setRoot(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+            className="rounded px-2 py-1.5 text-sm"
+            style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
           >
             <option value="all">All roots</option>
             {ROOT_NOTES.map(n => <option key={n}>{n}</option>)}
@@ -396,11 +389,12 @@ export default function ProgressionExplorer() {
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Scale</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Scale</label>
           <select
             value={scaleType}
             onChange={e => setScaleType(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+            className="rounded px-2 py-1.5 text-sm"
+            style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
           >
             <option value="both">All scales</option>
             <option value="major">Major</option>
@@ -408,38 +402,40 @@ export default function ProgressionExplorer() {
           </select>
         </div>
 
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-            Max difficulty: <span className="text-gray-900 font-bold">{maxDiff}</span>
+        <div className="flex flex-col gap-1 col-span-2 sm:min-w-[180px]">
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+            Max difficulty: <span style={{ color: '#c9a96e', fontWeight: 700 }}>{maxDiff}</span>
           </label>
           <input
             type="range" min={1} max={10} step={0.5} value={maxDiff}
             onChange={e => setMaxDiff(Number(e.target.value))}
-            className="w-full accent-gray-800"
+            className="w-full"
+            style={{ background: `linear-gradient(to right, #c9a96e ${((maxDiff-1)/9)*100}%, #2a2a2a ${((maxDiff-1)/9)*100}%)` }}
           />
         </div>
       </div>
 
       {/* ── Scale summary (single key only) ── */}
       {!multiKey && diatonicChords && (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-5 px-3 py-2 bg-gray-50 border border-gray-200 rounded text-xs">
-          <span className="font-semibold text-gray-700">{root} {scaleType}:</span>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-4 sm:mb-5 px-3 py-2 rounded text-xs"
+          style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
+          <span className="font-semibold" style={{ color: '#c9a96e' }}>{root} {scaleType}:</span>
           {diatonicChords.map(c => (
-            <span key={c.degree} className="text-gray-600">
-              <span className="text-gray-400">{c.roman}</span>&thinsp;{c.chordName}
+            <span key={c.degree} style={{ color: '#5a5a5a' }}>
+              <span style={{ color: '#3a3a3a' }}>{c.roman}</span>&thinsp;{c.chordName}
             </span>
           ))}
         </div>
       )}
 
       {/* ── Result count ── */}
-      <p className="text-sm text-gray-500 mb-3">
+      <p className="text-xs mb-3" style={{ color: '#3a3a3a' }}>
         {resolved.length} progression{resolved.length !== 1 ? 's' : ''} within difficulty {maxDiff}
       </p>
 
       {/* ── Empty state ── */}
       {resolved.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
+        <div className="text-center py-16 text-sm" style={{ color: '#3a3a3a' }}>
           No progressions match — try raising the max difficulty.
         </div>
       )}
@@ -454,47 +450,44 @@ export default function ProgressionExplorer() {
           const songCount   = (SONGS_BY_PROGRESSION[prog.name] || []).length;
 
           return (
-            <div key={i} className="border border-gray-200 rounded-lg overflow-hidden">
+            <div key={i} className="rounded-lg overflow-hidden"
+              style={{ border: '1px solid #1e1e1e' }}>
 
               {/* Card header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-                <div className="flex items-baseline gap-2 flex-wrap">
+              <div className="flex items-center justify-between px-3 sm:px-4 py-2"
+                style={{ background: '#1a1a1a', borderBottom: '1px solid #1e1e1e' }}>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 flex-wrap min-w-0">
                   {multiKey && (
-                    <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
+                    <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
+                      style={{ background: '#252525', color: '#7a7a7a' }}>
                       {prog.root} {prog.scaleType === 'major' ? 'maj' : 'min'}
                     </span>
                   )}
-                  <span className="font-semibold text-gray-800 text-sm">{prog.name}</span>
-                  <span className="text-xs text-gray-400">{prog.genre}</span>
+                  <span className="font-semibold text-sm truncate" style={{ color: '#d0cdc8' }}>{prog.name}</span>
+                  <span className="text-xs hidden sm:inline" style={{ color: '#3a3a3a' }}>{prog.genre}</span>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="flex items-center gap-1 text-xs text-gray-400">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-2">
+                  <span className="hidden sm:flex items-center gap-1 text-xs" style={{ color: '#3a3a3a' }}>
                     max <DifficultyBadge score={prog.maxScore} />
                   </span>
 
-                  {/* Songs button */}
                   <button
                     onClick={() => toggleSongs(key)}
-                    title={songsOpen ? 'Hide songs' : `Show famous songs (${songCount})`}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                      songsOpen
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
+                    style={songsOpen
+                      ? { background: 'rgba(56,189,248,0.12)', color: '#38bdf8' }
+                      : { background: '#252525', color: '#5a5a5a' }}
                   >
-                    ♪ {songCount > 0 ? songCount : ''}
+                    ♪{songCount > 0 ? ` ${songCount}` : ''}
                   </button>
 
-                  {/* Play button */}
                   <button
                     onClick={() => handlePlay(prog, key)}
-                    title={isPlaying ? 'Stop' : 'Play progression'}
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs transition-colors ${
-                      isPlaying
-                        ? 'bg-red-500 hover:bg-red-600'
-                        : 'bg-gray-800 hover:bg-gray-600'
-                    }`}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all"
+                    style={isPlaying
+                      ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
+                      : { background: '#252525', color: '#7a7a7a' }}
                   >
                     {isPlaying ? '■' : '▶'}
                   </button>
@@ -502,22 +495,23 @@ export default function ProgressionExplorer() {
               </div>
 
               {/* Chord cells */}
-              <div className="flex divide-x divide-gray-100 overflow-x-auto">
+              <div className="flex overflow-x-auto" style={{ background: '#141414' }}>
                 {prog.chords.map((chord, j) => (
                   <div
                     key={j}
-                    className={`flex-1 min-w-[80px] px-3 py-2.5 transition-colors duration-100 ${
-                      activeChord === j ? 'bg-amber-50' : ''
-                    }`}
+                    className="flex-1 px-2 sm:px-3 py-2.5 transition-colors duration-100"
+                    style={{
+                      minWidth: 72,
+                      borderRight: j < prog.chords.length - 1 ? '1px solid #1e1e1e' : 'none',
+                      background: activeChord === j ? 'rgba(201,169,110,0.07)' : 'transparent',
+                    }}
                   >
-                    <div className="text-xs text-gray-400 mb-0.5">{chord.roman}</div>
-                    <div className={`font-bold text-sm mb-1.5 transition-colors ${
-                      activeChord === j ? 'text-amber-700' : 'text-gray-900'
-                    }`}>
+                    <div className="text-xs mb-0.5" style={{ color: '#3a3a3a' }}>{chord.roman}</div>
+                    <div className="font-bold text-sm mb-1.5 transition-colors"
+                      style={{ color: activeChord === j ? '#c9a96e' : '#d0cdc8' }}>
                       <a
                         href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        target="_blank" rel="noopener noreferrer"
                         className="hover:underline"
                       >
                         {chord.chordName}
@@ -525,12 +519,9 @@ export default function ProgressionExplorer() {
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {chord.voicings.map((v, k) => (
-                        <span
-                          key={k}
-                          className="cursor-default"
+                        <span key={k} className="cursor-default"
                           onMouseEnter={e => showTooltip(e, v)}
-                          onMouseLeave={hideTooltip}
-                        >
+                          onMouseLeave={hideTooltip}>
                           <DifficultyBadge score={v.score} />
                         </span>
                       ))}
@@ -550,10 +541,10 @@ export default function ProgressionExplorer() {
       {/* ── Fretboard tooltip ── */}
       {tooltip && (
         <div
-          className="fixed z-50 bg-white border border-gray-300 rounded-lg shadow-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y }}
+          className="fixed z-50 rounded-xl p-3 pointer-events-none"
+          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
-          <div className="text-xs text-gray-400 mb-1 text-center">{tooltip.voicing.type}</div>
+          <div className="text-xs mb-1 text-center" style={{ color: '#5a5a5a' }}>{tooltip.voicing.type}</div>
           <FretboardDiagram chord={tooltip.voicing} />
         </div>
       )}
