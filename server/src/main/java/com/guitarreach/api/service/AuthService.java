@@ -35,6 +35,9 @@ public class AuthService {
     @Value("${app.jwt.refresh-token-expiry-ms}")
     private long refreshTokenExpiryMs;
 
+    @Value("${app.cookie.secure:false}")
+    private boolean cookieSecure;
+
     @Transactional
     public AuthResponse register(RegisterRequest req, HttpServletResponse response) {
         if (userRepository.existsByEmail(req.getEmail())) {
@@ -103,7 +106,7 @@ public class AuthService {
     private void setAccessTokenCookie(HttpServletResponse response, String token) {
         Cookie cookie = new Cookie("jwt_access", token);
         cookie.setHttpOnly(true);
-        cookie.setSecure(false); // set to true in production (HTTPS)
+        cookie.setSecure(cookieSecure);
         cookie.setPath("/");
         cookie.setMaxAge(900); // 15 minutes
         response.addCookie(cookie);
@@ -112,7 +115,7 @@ public class AuthService {
     private void setRefreshTokenCookie(HttpServletResponse response, String token) {
         Cookie cookie = new Cookie("jwt_refresh", token);
         cookie.setHttpOnly(true);
-        cookie.setSecure(false); // set to true in production (HTTPS)
+        cookie.setSecure(cookieSecure);
         cookie.setPath("/api/auth/refresh");
         cookie.setMaxAge((int) (refreshTokenExpiryMs / 1000));
         response.addCookie(cookie);
