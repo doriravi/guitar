@@ -14,7 +14,8 @@
       "Bash(cmd.exe /c \"npx --yes create-vite@latest C:\\\\vitetemp -- --template react\")",
       "Bash(cmd.exe /c \"dir C:\\\\vitetemp\")",
       "Bash(npm install:*)",
-      "WebFetch(domain:www.e-chords.com)"
+      "WebFetch(domain:www.e-chords.com)",
+      "Read(//c/Program Files/Java/**)"
     ]
   }
 }
