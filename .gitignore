@@ -1,7 +1,15 @@
-node_modules
-dist
-.env
-.env.local
-.vercel
+# Client
+client/node_modules
+client/dist
+client/.env
+client/.env.local
+client/.vercel
 
-.vercel
+# Server
+server/target
+server/data/*.db
+server/.env
+
+# Misc
+.vscode/
+projects_summary.csv
