@@ -1,0 +1,128 @@
+package com.guitarreach.api.service;
+
+import com.guitarreach.api.dto.request.LoginRequest;
+import com.guitarreach.api.dto.request.RegisterRequest;
+import com.guitarreach.api.dto.response.AuthResponse;
+import com.guitarreach.api.entity.HandProfile;
+import com.guitarreach.api.entity.User;
+import com.guitarreach.api.exception.DuplicateEmailException;
+import com.guitarreach.api.repository.HandProfileRepository;
+import com.guitarreach.api.repository.UserRepository;
+import com.guitarreach.api.security.JwtTokenProvider;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+    private final UserRepository userRepository;
+    private final HandProfileRepository handProfileRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtTokenProvider tokenProvider;
+    private final AuthenticationManager authManager;
+    private final UserDetailsService userDetailsService;
+
+    @Value("${app.jwt.refresh-token-expiry-ms}")
+    private long refreshTokenExpiryMs;
+
+    @Transactional
+    public AuthResponse register(RegisterRequest req, HttpServletResponse response) {
+        if (userRepository.existsByEmail(req.getEmail())) {
+            throw new DuplicateEmailException(req.getEmail());
+        }
+
+        User user = User.builder()
+                .email(req.getEmail())
+                .passwordHash(passwordEncoder.encode(req.getPassword()))
+                .name(req.getName())
+                .build();
+        user = userRepository.save(user);
+
+        // Create default hand profile so the frontend can immediately sync
+        HandProfile profile = HandProfile.builder().user(user).build();
+        handProfileRepository.save(profile);
+
+        return issueTokensAndBuildResponse(user, response);
+    }
+
+    public AuthResponse login(LoginRequest req, HttpServletResponse response) {
+        authManager.authenticate(
+                new UsernamePasswordAuthenticationToken(req.getEmail(), req.getPassword()));
+
+        User user = userRepository.findByEmail(req.getEmail()).orElseThrow();
+        return issueTokensAndBuildResponse(user, response);
+    }
+
+    public AuthResponse refreshToken(String refreshToken, HttpServletResponse response) {
+        if (!tokenProvider.validateToken(refreshToken)) {
+            throw new com.guitarreach.api.exception.UnauthorizedException("Invalid refresh token");
+        }
+        String email = tokenProvider.getEmailFromToken(refreshToken);
+        User user = userRepository.findByEmail(email).orElseThrow();
+        UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+        String newAccessToken = tokenProvider.generateAccessToken(userDetails);
+        setAccessTokenCookie(response, newAccessToken);
+        return buildResponse(user);
+    }
+
+    public void logout(HttpServletResponse response) {
+        clearCookie(response, "jwt_access");
+        clearCookie(response, "jwt_refresh");
+    }
+
+    private AuthResponse issueTokensAndBuildResponse(User user, HttpServletResponse response) {
+        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
+        String accessToken = tokenProvider.generateAccessToken(userDetails);
+        String refreshToken = tokenProvider.generateRefreshToken(user.getEmail());
+
+        setAccessTokenCookie(response, accessToken);
+        setRefreshTokenCookie(response, refreshToken);
+
+        return buildResponse(user);
+    }
+
+    private AuthResponse buildResponse(User user) {
+        return AuthResponse.builder()
+                .userId(user.getId())
+                .email(user.getEmail())
+                .name(user.getName())
+                .role(user.getRole().name())
+                .build();
+    }
+
+    private void setAccessTokenCookie(HttpServletResponse response, String token) {
+        Cookie cookie = new Cookie("jwt_access", token);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(false); // set to true in production (HTTPS)
+        cookie.setPath("/");
+        cookie.setMaxAge(900); // 15 minutes
+        response.addCookie(cookie);
+    }
+
+    private void setRefreshTokenCookie(HttpServletResponse response, String token) {
+        Cookie cookie = new Cookie("jwt_refresh", token);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(false); // set to true in production (HTTPS)
+        cookie.setPath("/api/auth/refresh");
+        cookie.setMaxAge((int) (refreshTokenExpiryMs / 1000));
+        response.addCookie(cookie);
+    }
+
+    private void clearCookie(HttpServletResponse response, String name) {
+        Cookie cookie = new Cookie(name, "");
+        cookie.setHttpOnly(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(0);
+        response.addCookie(cookie);
+    }
+}
