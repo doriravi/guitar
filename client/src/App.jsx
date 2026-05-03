@@ -10,6 +10,10 @@ import AuthModal from './components/AuthModal';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 import { auth, handProfile as handProfileApi } from './lib/api';
 
+function isDefaultProfile(p) {
+  return Object.keys(DEFAULT_PROFILE).every(k => p[k] === DEFAULT_PROFILE[k]);
+}
+
 export const HandProfileContext = createContext(DEFAULT_PROFILE);
 export function useHandProfile() { return useContext(HandProfileContext); }
 
@@ -36,45 +40,51 @@ export default function App() {
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [currentUser, setCurrentUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Restore session from httpOnly cookie on mount
   useEffect(() => {
     auth.me()
       .then(user => {
         setCurrentUser(user);
-        return handProfileApi.get();
-      })
-      .then(profile => {
-        if (profile) {
-          const merged = { ...DEFAULT_PROFILE, ...profile };
-          setHandProfile(merged);
-          try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
-        }
+        return syncProfileOnLogin();
       })
       .catch(() => {}); // not logged in — stay with localStorage
   }, []);
 
+  // On login: if local profile is customised, push it to server.
+  // Otherwise pull server profile (another device may have saved one).
+  async function syncProfileOnLogin() {
+    const local = loadLocalProfile();
+    if (!isDefaultProfile(local)) {
+      await handProfileApi.save(local).catch(() => {});
+    } else {
+      const remote = await handProfileApi.get().catch(() => null);
+      if (remote && !isDefaultProfile(remote)) {
+        const merged = { ...DEFAULT_PROFILE, ...remote };
+        setHandProfile(merged);
+        try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
+      }
+    }
+  }
+
   async function handleSaveProfile(profile) {
     setHandProfile(profile);
+    setSaveError(false);
     try { localStorage.setItem('guitar_hand_profile', JSON.stringify(profile)); } catch {}
     if (currentUser) {
-      handProfileApi.save(profile).catch(() => {});
+      try {
+        await handProfileApi.save(profile);
+      } catch {
+        setSaveError(true);
+      }
     }
   }
 
   function handleAuthSuccess(user) {
     setCurrentUser(user);
     setShowAuth(false);
-    // Sync hand profile from server after login
-    handProfileApi.get()
-      .then(profile => {
-        if (profile) {
-          const merged = { ...DEFAULT_PROFILE, ...profile };
-          setHandProfile(merged);
-          try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
-        }
-      })
-      .catch(() => {});
+    syncProfileOnLogin().catch(() => {});
   }
 
   async function handleLogout() {
@@ -152,7 +162,7 @@ export default function App() {
 
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
-            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} />}
+            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} saveError={saveError} />}
             {activeTab === 'strings'      && <GuitarStrings />}
             {activeTab === 'tuner'        && <OscilloscopeTuner />}
             {activeTab === 'listen'       && <ChordListener />}

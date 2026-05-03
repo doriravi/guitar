@@ -176,7 +176,7 @@ function HandDiagram({ profile }) {
   );
 }
 
-export default function HandProfileSetup({ profile, onSave }) {
+export default function HandProfileSetup({ profile, onSave, saveError }) {
   const [local, setLocal] = useState({ ...DEFAULT_PROFILE, ...profile });
   const [saved, setSaved] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -266,7 +266,10 @@ export default function HandProfileSetup({ profile, onSave }) {
       <GuitarReachLevel profile={local} />
 
       {/* Save */}
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex flex-col items-end gap-2">
+        {saveError && (
+          <p className="text-xs" style={{ color: '#f87171' }}>Failed to save to server — profile saved locally only.</p>
+        )}
         <button
           onClick={handleSave}
           className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
