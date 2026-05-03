@@ -2,3 +2,6 @@ target/
 data/
 *.mv.db
 *.trace.db
+*.db
+*.db-shm
+*.db-wal
