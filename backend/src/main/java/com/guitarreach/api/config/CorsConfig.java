@@ -25,7 +25,7 @@ public class CorsConfig {
         if (frontendUrlExtra != null && !frontendUrlExtra.isBlank()) {
             origins.add(frontendUrlExtra);
         }
-        config.setAllowedOrigins(origins);
+        config.setAllowedOrigins(origins);  
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
