@@ -89,7 +89,8 @@ export default function App() {
 
   async function handleLogout() {
     await auth.logout().catch(() => {});
-    setCurrentUser(null);
+    localStorage.removeItem('guitar_hand_profile');
+    window.location.reload();
   }
 
   return (
