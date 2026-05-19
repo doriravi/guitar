@@ -176,6 +176,8 @@ function ConfigSlider({ label, hint, value, min, max, step, format, onChange, co
 }
 
 // ── useMic — shared mic setup hook ───────────────────────────────────────────
+// Returns a stable ref whose .current always has the latest API.
+// This avoids identity-change problems when passed to useCallback deps.
 
 function useMic() {
   const streamRef   = useRef(null);
@@ -184,49 +186,49 @@ function useMic() {
   const freqDataRef = useRef(null);
   const timeDataRef = useRef(null);
 
-  const open = useCallback(async (smoothing) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    streamRef.current = stream;
-    const ctx = new AudioContext({ sampleRate: 44100 });
-    audioCtxRef.current = ctx;
-    const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 4096;
-    analyser.smoothingTimeConstant = smoothing;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    freqDataRef.current = new Float32Array(analyser.frequencyBinCount);
-    timeDataRef.current = new Float32Array(analyser.fftSize);
-    return { ctx, analyser };
-  }, []);
+  // Stable API object — never reassigned, so it's safe as a useCallback dep
+  const api = useRef({
+    async open(smoothing) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      streamRef.current = stream;
+      const ctx = new AudioContext({ sampleRate: 44100 });
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 4096;
+      analyser.smoothingTimeConstant = smoothing;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      freqDataRef.current = new Float32Array(analyser.frequencyBinCount);
+      timeDataRef.current = new Float32Array(analyser.fftSize);
+    },
+    close() {
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      if (audioCtxRef.current) audioCtxRef.current.close();
+      streamRef.current = null; audioCtxRef.current = null; analyserRef.current = null;
+      freqDataRef.current = null; timeDataRef.current = null;
+    },
+    getRMS() {
+      const td = timeDataRef.current;
+      if (!td || !analyserRef.current) return 0;
+      analyserRef.current.getFloatTimeDomainData(td);
+      let sum = 0;
+      for (let i = 0; i < td.length; i++) sum += td[i] ** 2;
+      return Math.sqrt(sum / td.length);
+    },
+    getFreqData() {
+      if (!analyserRef.current) return null;
+      analyserRef.current.getFloatFrequencyData(freqDataRef.current);
+      return freqDataRef.current;
+    },
+    updateSmoothing(v) {
+      if (analyserRef.current) analyserRef.current.smoothingTimeConstant = v;
+    },
+    get audioCtx() { return audioCtxRef.current; },
+    get analyser() { return analyserRef.current; },
+  });
 
-  const close = useCallback(() => {
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    if (audioCtxRef.current) audioCtxRef.current.close();
-    streamRef.current = null; audioCtxRef.current = null; analyserRef.current = null;
-    freqDataRef.current = null; timeDataRef.current = null;
-  }, []);
-
-  const getRMS = useCallback(() => {
-    const td = timeDataRef.current;
-    if (!td) return 0;
-    analyserRef.current?.getFloatTimeDomainData(td);
-    let sum = 0;
-    for (let i = 0; i < td.length; i++) sum += td[i] ** 2;
-    return Math.sqrt(sum / td.length);
-  }, []);
-
-  const getFreqData = useCallback(() => {
-    if (!analyserRef.current) return null;
-    analyserRef.current.getFloatFrequencyData(freqDataRef.current);
-    return freqDataRef.current;
-  }, []);
-
-  const updateSmoothing = useCallback((v) => {
-    if (analyserRef.current) analyserRef.current.smoothingTimeConstant = v;
-  }, []);
-
-  return { open, close, getRMS, getFreqData, updateSmoothing, audioCtxRef, analyserRef };
+  return api;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,24 +250,24 @@ function TuneMode({ cfg, setCfg }) {
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    mic.close();
+    mic.current.close();
     setActive(false); setVolume(0); setPeaks([]); setMatched(null); setNotes([]);
   }, [mic]);
 
   const start = useCallback(async () => {
     setPermDenied(false);
     try {
-      await mic.open(cfg.smoothing);
+      await mic.current.open(cfgRef.current.smoothing);
       setActive(true);
       const loop = () => {
         rafRef.current = requestAnimationFrame(loop);
-        const rms = mic.getRMS();
+        const rms = mic.current.getRMS();
         setVolume(Math.min(1, rms * 8));
-        mic.updateSmoothing(cfgRef.current.smoothing);
-        const fd = mic.getFreqData();
-        if (!fd || !mic.audioCtxRef.current) return;
-        const sr   = mic.audioCtxRef.current.sampleRate;
-        const fftSz = mic.analyserRef.current.fftSize;
+        mic.current.updateSmoothing(cfgRef.current.smoothing);
+        const fd = mic.current.getFreqData();
+        if (!fd || !mic.current.audioCtx) return;
+        const sr    = mic.current.audioCtx.sampleRate;
+        const fftSz = mic.current.analyser.fftSize;
         const ps    = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
         const pNotes = ps.map(p => ({ ...p, note: hzToNote(p.hz) }));
         setPeaks(pNotes);
@@ -278,7 +280,7 @@ function TuneMode({ cfg, setCfg }) {
     } catch (e) {
       if (e.name === 'NotAllowedError') setPermDenied(true);
     }
-  }, [cfg.smoothing, mic]);
+  }, [mic]);
 
   useEffect(() => () => stop(), [stop]);
 
@@ -659,14 +661,14 @@ function RecorderMode({ cfg }) {
   };
 
   const analyseSegment = useCallback(() => {
-    if (!mic.audioCtxRef.current || !mic.analyserRef.current) return;
-    const rms = mic.getRMS();
+    if (!mic.current.audioCtx || !mic.current.analyser) return;
+    const rms = mic.current.getRMS();
     if (rms < cfgRef.current.silenceRms) return;
-    const fd   = mic.getFreqData();
+    const fd   = mic.current.getFreqData();
     if (!fd) return;
-    const sr   = mic.audioCtxRef.current.sampleRate;
-    const fftSz = mic.analyserRef.current.fftSize;
-    const ps   = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
+    const sr    = mic.current.audioCtx.sampleRate;
+    const fftSz = mic.current.analyser.fftSize;
+    const ps    = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
     if (!ps.length) return;
     const hzList = ps.map(p => p.hz);
     const m      = matchChordConfigured(hzList, cfgRef.current);
@@ -683,15 +685,15 @@ function RecorderMode({ cfg }) {
 
   const volLoop = useCallback(() => {
     rafRef.current = requestAnimationFrame(volLoop);
-    mic.updateSmoothing(cfgRef.current.smoothing);
-    setVolume(Math.min(1, mic.getRMS() * 8));
+    mic.current.updateSmoothing(cfgRef.current.smoothing);
+    setVolume(Math.min(1, mic.current.getRMS() * 8));
   }, [mic]);
 
   const stopHardware = useCallback(() => {
     if (rafRef.current)   cancelAnimationFrame(rafRef.current);
     if (timerRef.current)  clearInterval(timerRef.current);
     if (segTimerRef.current) clearInterval(segTimerRef.current);
-    mic.close();
+    mic.current.close();
   }, [mic]);
 
   const stopRecording = useCallback(() => {
@@ -703,7 +705,7 @@ function RecorderMode({ cfg }) {
   const startRecording = useCallback(async () => {
     setPermDenied(false);
     try {
-      await mic.open(cfgRef.current.smoothing);
+      await mic.current.open(cfgRef.current.smoothing);
       startMsRef.current = Date.now();
       setElapsed(0); setEntries([]); setActiveId(null); nextIdRef.current = 1;
       setPhase('recording');
@@ -920,35 +922,35 @@ function PracticeMode({ cfg, tr }) {
 
   const stopListening = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    mic.close();
+    mic.current.close();
     setListening(false); setStringResults(null); setDetectedNote(null); setAutoDetected(null); setVolume(0);
   }, [mic]);
 
   const startListening = useCallback(async () => {
     try {
-      await mic.open(cfg.smoothing);
+      await mic.current.open(cfgRef.current.smoothing);
       setListening(true); setPermissionDenied(false);
     } catch (err) {
       if (err.name === 'NotAllowedError') setPermissionDenied(true);
     }
-  }, [mic, cfg.smoothing]);
+  }, [mic]);
 
   useEffect(() => {
     if (!listening) return;
     let last = 0;
     const loop = (ts) => {
       rafRef.current = requestAnimationFrame(loop);
-      mic.updateSmoothing(cfgRef.current.smoothing);
-      const rms = mic.getRMS();
+      mic.current.updateSmoothing(cfgRef.current.smoothing);
+      const rms = mic.current.getRMS();
       setVolume(Math.min(1, rms * 8));
       if (ts - last < 120) return;
       last = ts;
       if (rms < cfgRef.current.silenceRms) { setStringResults(null); setDetectedNote(null); setAutoDetected(null); return; }
-      const fd = mic.getFreqData();
-      if (!fd || !mic.audioCtxRef.current) return;
-      const sr   = mic.audioCtxRef.current.sampleRate;
-      const fftSz = mic.analyserRef.current.fftSize;
-      const ps   = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
+      const fd = mic.current.getFreqData();
+      if (!fd || !mic.current.audioCtx) return;
+      const sr    = mic.current.audioCtx.sampleRate;
+      const fftSz = mic.current.analyser.fftSize;
+      const ps    = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
       if (!ps.length) return;
       setDetectedNote(hzToNote(ps[0].hz));
       const hzList = ps.map(p => p.hz);
