@@ -82,15 +82,17 @@ export default function App() {
   }, []);
 
   async function syncProfileOnLogin() {
-    const local = loadLocalProfile();
-    if (!isDefaultProfile(local)) {
-      await handProfileApi.save(local).catch(() => {});
+    const remote = await handProfileApi.get().catch(() => null);
+    if (remote && !isDefaultProfile(remote)) {
+      // Server has a real profile — always use it as source of truth
+      const merged = { ...DEFAULT_PROFILE, ...remote };
+      setHandProfile(merged);
+      try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
     } else {
-      const remote = await handProfileApi.get().catch(() => null);
-      if (remote && !isDefaultProfile(remote)) {
-        const merged = { ...DEFAULT_PROFILE, ...remote };
-        setHandProfile(merged);
-        try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
+      // Server has defaults — push local if the user customised it as a guest
+      const local = loadLocalProfile();
+      if (!isDefaultProfile(local)) {
+        await handProfileApi.save(local).catch(() => {});
       }
     }
   }
