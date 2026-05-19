@@ -10,4 +10,5 @@ WORKDIR /app
 RUN mkdir -p /app/data
 COPY --from=build /app/target/guitar-reach-api-0.0.1-SNAPSHOT.jar app.jar
 ENV SPRING_PROFILES_ACTIVE=prod
+ENV BUILD_DATE=2026-05-19
 ENTRYPOINT ["java", "-jar", "app.jar"]
