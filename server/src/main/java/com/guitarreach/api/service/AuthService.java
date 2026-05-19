@@ -31,6 +31,7 @@ public class AuthService {
     private final JwtTokenProvider tokenProvider;
     private final AuthenticationManager authManager;
     private final UserDetailsService userDetailsService;
+    private final UserService userService;
 
     @Value("${app.jwt.refresh-token-expiry-ms}")
     private long refreshTokenExpiryMs;
@@ -54,6 +55,9 @@ public class AuthService {
         // Create default hand profile so the frontend can immediately sync
         HandProfile profile = HandProfile.builder().user(user).build();
         handProfileRepository.save(profile);
+
+        // Send email verification (best-effort, don't fail registration if mail is down)
+        try { userService.sendVerificationToken(user); } catch (Exception ignored) {}
 
         return issueTokensAndBuildResponse(user, response);
     }

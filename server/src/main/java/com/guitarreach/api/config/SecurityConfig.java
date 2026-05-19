@@ -37,6 +37,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/users/verify-email").permitAll()
+                        .requestMatchers("/api/users/forgot-password").permitAll()
+                        .requestMatchers("/api/users/reset-password").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers("/actuator/health").permitAll()

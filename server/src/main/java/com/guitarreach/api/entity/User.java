@@ -32,6 +32,10 @@ public class User {
     @Builder.Default
     private Role role = Role.USER;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
