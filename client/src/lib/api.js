@@ -52,6 +52,26 @@ export const handProfile = {
     }),
 };
 
+export const user = {
+  update: (data) =>
+    apiFetch('/api/users/me', { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: () =>
+    apiFetch('/api/users/me', { method: 'DELETE' }),
+
+  resendVerification: () =>
+    apiFetch('/api/users/me/resend-verification', { method: 'POST' }),
+
+  verifyEmail: (token) =>
+    apiFetch(`/api/users/verify-email?token=${encodeURIComponent(token)}`, { method: 'POST' }),
+
+  forgotPassword: (email) =>
+    apiFetch('/api/users/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+
+  resetPassword: (token, newPassword) =>
+    apiFetch('/api/users/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
+};
+
 export const subscriptions = {
   getStatus: () => apiFetch('/api/subscriptions/me'),
 
