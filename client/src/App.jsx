@@ -20,6 +20,22 @@ function isDefaultProfile(p) {
 export const HandProfileContext = createContext(DEFAULT_PROFILE);
 export function useHandProfile() { return useContext(HandProfileContext); }
 
+export const LangContext = createContext('en');
+export function useLang() { return useContext(LangContext); }
+
+const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'zh', label: '中文' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'pt', label: 'Português' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
+];
+
 function loadLocalProfile() {
   try {
     const raw = localStorage.getItem('guitar_hand_profile');
@@ -50,6 +66,14 @@ export default function App() {
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [lang, setLang] = useState(() => localStorage.getItem('guitar_lang') || 'en');
+  const [showLangMenu, setShowLangMenu] = useState(false);
+
+  function handleLangSelect(code) {
+    setLang(code);
+    localStorage.setItem('guitar_lang', code);
+    setShowLangMenu(false);
+  }
 
   // Handle deep-link tokens from email links
   const resetToken = getTokenFromUrl('reset-password') ? getTokenFromUrl('reset-password') : null;
@@ -120,6 +144,7 @@ export default function App() {
   }
 
   return (
+    <LangContext.Provider value={lang}>
     <HandProfileContext.Provider value={handProfile}>
       <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
 
@@ -177,6 +202,42 @@ export default function App() {
                 Difficulty scores for your hand
               </p>
             </div>
+            {/* Language selector */}
+            <div className="relative">
+              <button
+                onClick={() => setShowLangMenu(v => !v)}
+                className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                style={{ color: '#888', border: '1px solid #2a2a2a' }}
+              >
+                🌐 {LANGUAGES.find(l => l.code === lang)?.label}
+              </button>
+              {showLangMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
+                  <div
+                    className="absolute right-0 mt-1 rounded-xl overflow-hidden z-50"
+                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '130px' }}
+                  >
+                  {LANGUAGES.map(l => (
+                    <button
+                      key={l.code}
+                      onClick={() => handleLangSelect(l.code)}
+                      className="w-full text-left text-xs px-3 py-2 transition-colors"
+                      style={{
+                        color: l.code === lang ? '#c9a96e' : '#aaa',
+                        background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
+                      }}
+                      onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
+                      onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+                </>
+              )}
+            </div>
+
             {currentUser ? (
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowSettings(true)}
@@ -252,5 +313,6 @@ export default function App() {
         </main>
       </div>
     </HandProfileContext.Provider>
+    </LangContext.Provider>
   );
 }
