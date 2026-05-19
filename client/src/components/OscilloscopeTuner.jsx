@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { detectPitchYIN, hzToNote } from '../lib/pitchDetect';
+import { useT } from '../lib/i18n';
 
 // Standard open-string frequencies for reference indicator
 const OPEN_STRINGS = [
@@ -150,7 +151,8 @@ function TunerNeedle({ cents, active }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function OscilloscopeTuner() {
+export default function OscilloscopeTuner({ lang }) {
+  const tr = useT(lang);
   const [listening, setListening]     = useState(false);
   const [permDenied, setPermDenied]   = useState(false);
   const [note, setNote]               = useState(null);   // { name, octave, cents, hz }
@@ -267,10 +269,10 @@ export default function OscilloscopeTuner() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base sm:text-lg font-bold mb-0.5" style={{ color: '#f0ede8' }}>
-            Oscilloscope &amp; Tuner
+            {tr.tunerTitle}
           </h2>
           <p className="text-xs" style={{ color: '#5a5a5a' }}>
-            Real-time waveform and chromatic tuner — pluck one string at a time.
+            {tr.tunerDesc}
           </p>
         </div>
 
@@ -278,26 +280,26 @@ export default function OscilloscopeTuner() {
           <button onClick={startListening}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold shrink-0"
             style={{ background: '#c9a96e', color: '#0f0f0f' }}>
-            🎙️ Start
+            {tr.start}
           </button>
         ) : (
           <button onClick={stopListening}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold shrink-0"
             style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
-            <span className="animate-pulse">●</span> Stop
+            <span className="animate-pulse">●</span> {tr.stop}
           </button>
         )}
       </div>
 
       {permDenied && (
         <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-          Microphone access denied. Please allow mic in your browser settings.
+          {tr.micDenied}
         </p>
       )}
 
       {/* View toggle */}
       <div className="flex gap-1 p-1 rounded-xl" style={{ background: '#161616' }}>
-        {[['both','Both'],['scope','Oscilloscope'],['tuner','Tuner']].map(([v, l]) => (
+        {[['both', tr.waveform + ' + ' + tr.chromaticTuner], ['scope', tr.waveform], ['tuner', tr.chromaticTuner]].map(([v, l]) => (
           <button key={v} onClick={() => setActiveView(v)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
             style={activeView === v
@@ -324,11 +326,11 @@ export default function OscilloscopeTuner() {
       {(activeView === 'both' || activeView === 'scope') && (
         <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #1a1a2a' }}>
           <div className="flex items-center justify-between px-3 py-2" style={{ background: '#0d0d1a', borderBottom: '1px solid #1a1a2a' }}>
-            <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>Waveform</span>
+            <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>{tr.waveform}</span>
             {listening && (
               <span className="flex items-center gap-1.5 text-xs" style={{ color: '#2a2a4a' }}>
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#38bdf8' }} />
-                Live
+                {tr.live}
               </span>
             )}
           </div>
@@ -341,7 +343,7 @@ export default function OscilloscopeTuner() {
           />
           {!listening && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ position: 'relative', height: 0, marginTop: -90 }}>
-              <span className="text-xs" style={{ color: '#2a2a3a' }}>Press Start to see your waveform</span>
+              <span className="text-xs" style={{ color: '#2a2a3a' }}>{tr.pressStart}</span>
             </div>
           )}
         </div>
@@ -351,7 +353,7 @@ export default function OscilloscopeTuner() {
       {(activeView === 'both' || activeView === 'tuner') && (
         <div className="rounded-2xl overflow-hidden" style={{ background: '#111118', border: '1px solid #1e1e2e' }}>
           <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e1e2e' }}>
-            <span className="text-xs font-semibold" style={{ color: '#c9a96e' }}>Chromatic Tuner</span>
+            <span className="text-xs font-semibold" style={{ color: '#c9a96e' }}>{tr.chromaticTuner}</span>
             <span className="text-xs" style={{ color: '#3a3a3a' }}>A4 = 440 Hz</span>
           </div>
 
@@ -382,7 +384,7 @@ export default function OscilloscopeTuner() {
                     {note.cents === 0 ? '± 0¢' : note.cents > 0 ? `+${note.cents}¢` : `${note.cents}¢`}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: inTune ? '#4ade80' : '#5a5a5a' }}>
-                    {inTune ? '✓ In tune' : note.cents > 0 ? '↑ Too sharp' : '↓ Too flat'}
+                    {inTune ? tr.inTune : note.cents > 0 ? tr.tooSharp : tr.tooFlat}
                   </div>
                 </div>
               )}
@@ -414,7 +416,7 @@ export default function OscilloscopeTuner() {
             {/* Open string reference */}
             <div className="pt-3" style={{ borderTop: '1px solid #1a1a1a' }}>
               <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
-                Standard tuning reference
+                {tr.standardTuning}
               </p>
               <div className="flex gap-1.5 flex-wrap">
                 {OPEN_STRINGS.map(s => {
@@ -446,7 +448,7 @@ export default function OscilloscopeTuner() {
       {!listening && (
         <div className="text-center py-6" style={{ color: '#3a3a3a' }}>
           <p className="text-3xl mb-2">🎸</p>
-          <p className="text-sm">Hit <strong style={{ color: '#c9a96e' }}>Start</strong>, then pluck a single string.</p>
+          <p className="text-sm">{tr.pluckString}</p>
         </div>
       )}
     </div>

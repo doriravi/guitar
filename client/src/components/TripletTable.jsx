@@ -1,10 +1,12 @@
 import { buildTripletTable } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
 import { useState, useMemo } from 'react';
+import { useT } from '../lib/i18n';
 
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
 
-export default function TripletTable() {
+export default function TripletTable({ lang }) {
+  const tr = useT(lang);
   const [maxFret, setMaxFret] = useState(5);
   const [sortBy, setSortBy] = useState('score');
 
@@ -21,7 +23,7 @@ export default function TripletTable() {
     <div className="p-3 sm:p-5">
       <div className="flex flex-wrap items-center gap-3 sm:gap-5 mb-4 sm:mb-5 px-3 sm:px-4 py-3 rounded-xl" style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
         <div className="flex items-center gap-3 flex-1 min-w-[140px]">
-          <label className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>Max fret</label>
+          <label className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>{tr.maxFret}</label>
           <input
             type="range" min={2} max={10} value={maxFret}
             onChange={e => setMaxFret(Number(e.target.value))}
@@ -32,9 +34,9 @@ export default function TripletTable() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Sort</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.sort}</label>
           <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: '#111' }}>
-            {[['score', 'Easiest'], ['score_desc', 'Hardest']].map(([val, label]) => (
+            {[['score', tr.easiest], ['score_desc', tr.hardest]].map(([val, label]) => (
               <button
                 key={val}
                 onClick={() => setSortBy(val)}
@@ -52,7 +54,7 @@ export default function TripletTable() {
         </div>
 
         <span className="text-xs tabular-nums ml-auto" style={{ color: '#3a3a3a' }}>
-          {rows.length.toLocaleString()} combinations
+          {rows.length.toLocaleString()} {tr.strings && ''}{/* count */}
         </span>
       </div>
 
@@ -60,7 +62,7 @@ export default function TripletTable() {
         <table className="text-sm w-full border-collapse">
           <thead className="sticky top-0 z-10">
             <tr>
-              {['Strings', 'Frets', 'Fret span', 'String span', 'Difficulty'].map(h => (
+              {[tr.strings, tr.frets, tr.fretSpan, tr.stringSpan, tr.difficulty].map(h => (
                 <th key={h} className="px-4 py-2.5 text-left" style={{ borderBottom: '1px solid #1e1e1e' }}>{h}</th>
               ))}
             </tr>
