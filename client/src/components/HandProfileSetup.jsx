@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { DEFAULT_PROFILE, abilityLabel, reachMultiplier } from '../lib/handProfile';
 import CameraHandMeasure from './CameraHandMeasure';
 
@@ -180,6 +180,11 @@ export default function HandProfileSetup({ profile, onSave, saveError }) {
   const [local, setLocal] = useState({ ...DEFAULT_PROFILE, ...profile });
   const [saved, setSaved] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+
+  // Sync when profile loads from server after login
+  useEffect(() => {
+    setLocal({ ...DEFAULT_PROFILE, ...profile });
+  }, [profile]);
 
   const handleChange = useCallback((key, val) => {
     setLocal(prev => ({ ...prev, [key]: val }));
