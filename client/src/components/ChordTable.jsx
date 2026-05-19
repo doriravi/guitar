@@ -5,10 +5,12 @@ import { personalDifficulty } from '../lib/handProfile';
 import { useHandProfile } from '../App';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
+import { useT } from '../lib/i18n';
 
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
 
-export default function ChordTable() {
+export default function ChordTable({ lang }) {
+  const tr = useT(lang);
   const handProfile = useHandProfile();
   const [tooltip, setTooltip] = useState(null);
   const [mode, setMode] = useState('personal');
@@ -38,7 +40,7 @@ export default function ChordTable() {
     <div className="p-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 gap-4">
-        <p className="text-sm" style={{ color: '#5a5a5a' }}>Hover a chord name to preview its shape.</p>
+        <p className="text-sm" style={{ color: '#5a5a5a' }}>{tr.hoverChord}</p>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: '#1a1a1a' }}>
           {['standard', 'personal'].map(m => (
             <button
@@ -51,7 +53,7 @@ export default function ChordTable() {
                 boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
               } : { color: '#5a5a5a' }}
             >
-              {m === 'personal' ? '✋ My Hand' : 'Standard'}
+              {m === 'personal' ? tr.myHand : tr.standard}
             </button>
           ))}
         </div>
@@ -60,7 +62,7 @@ export default function ChordTable() {
       {isPersonal && (
         <div className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-4 text-xs" style={{ background: 'rgba(201,169,110,0.08)', border: '1px solid rgba(201,169,110,0.15)', color: '#c9a96e' }}>
           <span className="shrink-0 mt-0.5">✋</span>
-          <span>Scores adjusted for your hand measurements, re-sorted by feel. Grey number = standard score.</span>
+          <span>{tr.myHandDesc}</span>
         </div>
       )}
 
@@ -68,7 +70,7 @@ export default function ChordTable() {
         <table className="text-sm w-full border-collapse">
           <thead className="sticky top-0 z-10">
             <tr>
-              {['Chord', 'Type', 'Tab', 'Notes', isPersonal ? 'My Difficulty' : 'Difficulty'].map(h => (
+              {[tr.chord, tr.type, tr.tab, tr.notes, isPersonal ? tr.myDifficulty : tr.difficulty].map(h => (
                 <th key={h} className="px-4 py-2.5 text-left" style={{ borderBottom: '1px solid #1e1e1e' }}>{h}</th>
               ))}
             </tr>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { user as userApi } from '../lib/api';
+import { useT } from '../lib/i18n';
 
 function Section({ title, children }) {
   return (
@@ -24,7 +25,8 @@ const inputStyle = {
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
 
-export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
+export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang }) {
+  const tr = useT(lang);
   const [name, setName] = useState(currentUser.name || '');
   const [email, setEmail] = useState(currentUser.email || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -32,40 +34,34 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [profileMsg, setProfileMsg] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
-
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-
   const [resendMsg, setResendMsg] = useState('');
 
   async function handleUpdateProfile(e) {
     e.preventDefault();
     setProfileMsg(null);
-
     if (newPassword && newPassword !== confirmPassword) {
-      setProfileMsg({ type: 'error', text: 'New passwords do not match.' });
+      setProfileMsg({ type: 'error', text: tr.newPasswordMismatch });
       return;
     }
-
     setProfileLoading(true);
     try {
       const payload = {};
       if (name !== currentUser.name) payload.name = name;
       if (email !== currentUser.email) payload.email = email;
       if (newPassword) { payload.currentPassword = currentPassword; payload.newPassword = newPassword; }
-
       if (Object.keys(payload).length === 0) {
-        setProfileMsg({ type: 'info', text: 'No changes to save.' });
+        setProfileMsg({ type: 'info', text: tr.noChanges });
         return;
       }
-
       const updated = await userApi.update(payload);
-      setProfileMsg({ type: 'success', text: 'Profile updated.' });
+      setProfileMsg({ type: 'success', text: tr.profileUpdated });
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
       onUpdated(updated);
     } catch (err) {
-      setProfileMsg({ type: 'error', text: err.message || 'Update failed.' });
+      setProfileMsg({ type: 'error', text: err.message || tr.updateFailed });
     } finally {
       setProfileLoading(false);
     }
@@ -88,9 +84,9 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
     setResendMsg('');
     try {
       await userApi.resendVerification();
-      setResendMsg('Verification email sent.');
+      setResendMsg(tr.verificationSent);
     } catch {
-      setResendMsg('Failed to send email.');
+      setResendMsg(tr.failedToSendEmail);
     }
   }
 
@@ -98,38 +94,36 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
 
   return (
     <div className="p-3 sm:p-6 max-w-lg mx-auto">
-      <h2 className="text-xl font-bold mb-6" style={{ color: '#f0ede8' }}>Account Settings</h2>
+      <h2 className="text-xl font-bold mb-6" style={{ color: '#f0ede8' }}>{tr.accountSettings}</h2>
 
-      {/* Email verification banner */}
       {!currentUser.emailVerified && (
         <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-5 text-xs"
           style={{ background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)', color: '#fb923c' }}>
-          <span>⚠ Your email is not verified.</span>
+          <span>{tr.emailNotVerified}</span>
           <button onClick={handleResend} className="underline font-semibold">
-            {resendMsg || 'Resend email'}
+            {resendMsg || tr.resendEmail}
           </button>
         </div>
       )}
 
-      {/* Profile form */}
-      <Section title="Profile">
+      <Section title={tr.profile}>
         <form onSubmit={handleUpdateProfile}>
-          <Field label="Name">
-            <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Your name" />
+          <Field label={tr.name}>
+            <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder={tr.yourName} />
           </Field>
-          <Field label="Email">
-            <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
+          <Field label={tr.email}>
+            <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder={tr.email} />
           </Field>
           <div className="mt-4 pt-4" style={{ borderTop: '1px solid #222' }}>
-            <p className="text-xs mb-3" style={{ color: '#555' }}>Leave blank to keep your current password.</p>
-            <Field label="Current password">
-              <input style={inputStyle} type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Required to change password" />
+            <p className="text-xs mb-3" style={{ color: '#555' }}>{tr.leaveBlankPassword}</p>
+            <Field label={tr.currentPassword}>
+              <input style={inputStyle} type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={tr.requiredToChange} />
             </Field>
-            <Field label="New password">
-              <input style={inputStyle} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="8+ characters" minLength={newPassword ? 8 : undefined} />
+            <Field label={tr.newPasswordShort}>
+              <input style={inputStyle} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={tr.eightPlus} minLength={newPassword ? 8 : undefined} />
             </Field>
-            <Field label="Confirm new password">
-              <input style={inputStyle} type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
+            <Field label={tr.confirmPassword}>
+              <input style={inputStyle} type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={tr.repeatNewPassword} />
             </Field>
           </div>
           {profileMsg && <p className="text-xs mt-2" style={{ color: msgColor }}>{profileMsg.text}</p>}
@@ -137,18 +131,14 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
             <button type="submit" disabled={profileLoading}
               className="px-5 py-2 rounded-xl text-sm font-semibold"
               style={{ background: '#c9a96e', color: '#0f0f0f', opacity: profileLoading ? 0.6 : 1 }}>
-              {profileLoading ? 'Saving…' : 'Save changes'}
+              {profileLoading ? tr.saving : tr.saveChanges}
             </button>
           </div>
         </form>
       </Section>
 
-      {/* Delete account */}
-      <Section title="Danger zone">
-        <p className="text-xs mb-3" style={{ color: '#666' }}>
-          Permanently delete your account and all data. This cannot be undone.
-          Type your email address to confirm.
-        </p>
+      <Section title={tr.dangerZone}>
+        <p className="text-xs mb-3" style={{ color: '#666' }}>{tr.deleteAccountWarning}</p>
         <input
           style={{ ...inputStyle, borderColor: deleteConfirm === currentUser.email ? '#f87171' : '#333' }}
           value={deleteConfirm}
@@ -162,13 +152,12 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted }) {
             disabled={deleteConfirm !== currentUser.email || deleteLoading}
             className="px-5 py-2 rounded-xl text-sm font-semibold transition-opacity"
             style={{
-              background: 'rgba(248,113,113,0.1)',
-              color: '#f87171',
+              background: 'rgba(248,113,113,0.1)', color: '#f87171',
               border: '1px solid rgba(248,113,113,0.3)',
               opacity: deleteConfirm !== currentUser.email || deleteLoading ? 0.4 : 1,
               cursor: deleteConfirm !== currentUser.email ? 'not-allowed' : 'pointer',
             }}>
-            {deleteLoading ? 'Deleting…' : 'Delete account'}
+            {deleteLoading ? tr.deleting : tr.deleteAccount}
           </button>
         </div>
       </Section>

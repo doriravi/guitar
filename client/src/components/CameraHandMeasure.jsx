@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { useT } from '../lib/i18n';
 
 const TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
 const MCP = { index: 5, pinky: 17 };
@@ -82,7 +83,8 @@ function loadMediaPipeScript() {
   return scriptPromise;
 }
 
-export default function CameraHandMeasure({ onMeasured }) {
+export default function CameraHandMeasure({ onMeasured, lang }) {
+  const tr = useT(lang);
   const videoRef  = useRef(null);
   const canvasRef = useRef(null);
   const handsRef  = useRef(null);
@@ -108,7 +110,7 @@ export default function CameraHandMeasure({ onMeasured }) {
 
   const startCamera = useCallback(async () => {
     setPhase('loading');
-    setStatus('Loading hand detection model…');
+    setStatus(tr.loadingModel);
     try {
       await loadMediaPipeScript();
 
@@ -159,7 +161,7 @@ export default function CameraHandMeasure({ onMeasured }) {
       setPhase('error');
       setStatus(err.message || 'Camera or model failed to load.');
     }
-  }, []);
+  }, [tr]);
 
   const capture = useCallback(() => {
     if (!latestLm.current) return;
@@ -216,10 +218,10 @@ export default function CameraHandMeasure({ onMeasured }) {
   };
 
   const GAP_LABELS = [
-    { key: 'thumbToIndex',  label: 'Thumb → Index',  color: '#a78bfa' },
-    { key: 'indexToMiddle', label: 'Index → Middle', color: '#38bdf8' },
-    { key: 'middleToRing',  label: 'Middle → Ring',  color: '#34d399' },
-    { key: 'ringToLittle',  label: 'Ring → Pinky',   color: '#c9a96e' },
+    { key: 'thumbToIndex',  label: tr.thumbIndex,  color: '#a78bfa' },
+    { key: 'indexToMiddle', label: tr.indexMiddle, color: '#38bdf8' },
+    { key: 'middleToRing',  label: tr.middleRing,  color: '#34d399' },
+    { key: 'ringToLittle',  label: tr.ringPinky,   color: '#c9a96e' },
   ];
 
   return (
@@ -227,7 +229,7 @@ export default function CameraHandMeasure({ onMeasured }) {
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #222' }}>
         <div className="flex items-center gap-2">
           <span className="text-base">📷</span>
-          <span className="text-sm font-semibold" style={{ color: '#f0ede8' }}>Camera Measurement</span>
+          <span className="text-sm font-semibold" style={{ color: '#f0ede8' }}>{tr.cameraMeasurement}</span>
         </div>
         {(phase === 'ready' || phase === 'measuring') && (
           <button
@@ -235,26 +237,21 @@ export default function CameraHandMeasure({ onMeasured }) {
             className="text-xs px-3 py-1 rounded-lg"
             style={{ color: '#5a5a5a', border: '1px solid #2a2a2a' }}
           >
-            Cancel
+            {tr.cancel}
           </button>
         )}
       </div>
 
       {phase === 'idle' && (
         <div className="p-5 text-center">
-          <p className="text-sm mb-1" style={{ color: '#7a7a7a' }}>
-            Hold your hand flat in front of the camera with fingers fully spread.
-          </p>
-          <p className="text-xs mb-4" style={{ color: '#4a4a4a' }}>
-            MediaPipe detects your fingertips and computes gaps automatically.
-            Scale is estimated using palm width as a reference (~8.5 cm).
-          </p>
+          <p className="text-sm mb-1" style={{ color: '#7a7a7a' }}>{tr.cameraInstruction}</p>
+          <p className="text-xs mb-4" style={{ color: '#4a4a4a' }}>{tr.cameraDesc}</p>
           <button
             onClick={startCamera}
             className="px-5 py-2.5 rounded-xl text-sm font-semibold"
             style={{ background: '#c9a96e', color: '#0f0f0f' }}
           >
-            Open Camera
+            {tr.openCamera}
           </button>
         </div>
       )}
@@ -263,7 +260,7 @@ export default function CameraHandMeasure({ onMeasured }) {
         <div className="p-5 flex items-center justify-center gap-3">
           <div className="w-4 h-4 rounded-full border-2 animate-spin"
             style={{ borderColor: '#c9a96e', borderTopColor: 'transparent' }} />
-          <span className="text-sm" style={{ color: '#5a5a5a' }}>{statusMsg}</span>
+          <span className="text-sm" style={{ color: '#5a5a5a' }}>{tr.loadingModel}</span>
         </div>
       )}
 
@@ -284,7 +281,7 @@ export default function CameraHandMeasure({ onMeasured }) {
             <div className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
               style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? '#4ade80' : '#f87171' }}>
               <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? '#4ade80' : '#f87171' }} />
-              {handVisible ? 'Hand detected' : 'No hand detected'}
+              {handVisible ? tr.handDetected : tr.noHandDetected}
             </div>
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -296,9 +293,7 @@ export default function CameraHandMeasure({ onMeasured }) {
             )}
           </div>
           <div className="p-4 flex items-center justify-between gap-4">
-            <p className="text-xs" style={{ color: '#5a5a5a' }}>
-              Splay fingers as wide as possible, palm facing camera.
-            </p>
+            <p className="text-xs" style={{ color: '#5a5a5a' }}>{tr.splayFingers}</p>
             <button
               onClick={startCountdown}
               disabled={!handVisible || phase === 'measuring'}
@@ -307,7 +302,7 @@ export default function CameraHandMeasure({ onMeasured }) {
                 ? { background: '#c9a96e', color: '#0f0f0f' }
                 : { background: '#1e1e1e', color: '#3a3a3a', cursor: 'not-allowed' }}
             >
-              {phase === 'measuring' ? 'Capturing…' : 'Measure (3s)'}
+              {phase === 'measuring' ? tr.capturing : tr.measure}
             </button>
           </div>
         </div>
@@ -317,7 +312,7 @@ export default function CameraHandMeasure({ onMeasured }) {
         <div className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <span>✅</span>
-            <span className="text-sm font-semibold" style={{ color: '#4ade80' }}>Measurement complete</span>
+            <span className="text-sm font-semibold" style={{ color: '#4ade80' }}>{tr.measurementComplete}</span>
           </div>
           <div className="space-y-2 mb-4">
             {GAP_LABELS.map(({ key, label, color }) => (
@@ -330,23 +325,21 @@ export default function CameraHandMeasure({ onMeasured }) {
               </div>
             ))}
           </div>
-          <p className="text-xs mb-4" style={{ color: '#3a3a3a' }}>
-            Fine-tune values with the sliders below after applying.
-          </p>
+          <p className="text-xs mb-4" style={{ color: '#3a3a3a' }}>{tr.fineTune}</p>
           <div className="flex gap-2">
             <button
               onClick={() => onMeasured(captured)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
               style={{ background: '#c9a96e', color: '#0f0f0f' }}
             >
-              Apply Measurements
+              {tr.applyMeasurements}
             </button>
             <button
               onClick={retry}
               className="px-4 py-2.5 rounded-xl text-sm font-semibold"
               style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
             >
-              Retake
+              {tr.retake}
             </button>
           </div>
         </div>
@@ -360,7 +353,7 @@ export default function CameraHandMeasure({ onMeasured }) {
             className="px-5 py-2 rounded-xl text-sm font-semibold"
             style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
           >
-            Try Again
+            {tr.tryAgain}
           </button>
         </div>
       )}

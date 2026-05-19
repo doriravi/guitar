@@ -12,6 +12,7 @@ import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
+import { useT } from './lib/i18n';
 
 function isDefaultProfile(p) {
   return Object.keys(DEFAULT_PROFILE).every(k => p[k] === DEFAULT_PROFILE[k]);
@@ -48,15 +49,17 @@ function getTokenFromUrl(param) {
   return new URLSearchParams(window.location.search).get(param);
 }
 
-const TABS = [
-  { id: 'hand',         label: 'My Hand',     icon: '✋' },
-  { id: 'strings',      label: 'Strings',     icon: '🎶' },
-  { id: 'tuner',        label: 'Tuner',        icon: '🎚️' },
-  { id: 'listen',       label: 'Listen',       icon: '🎙️' },
-  { id: 'chords',       label: 'Chords',       icon: '🎸' },
-  { id: 'triplets',     label: 'Triplets',     icon: '🎵' },
-  { id: 'progressions', label: 'Progressions', icon: '🎼' },
-];
+function getTabs(tr) {
+  return [
+    { id: 'hand',         label: tr.tabHand,         icon: '✋' },
+    { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
+    { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️' },
+    { id: 'listen',       label: tr.tabListen,       icon: '🎙️' },
+    { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
+    { id: 'triplets',     label: tr.tabTriplets,     icon: '🎵' },
+    { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
+  ];
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('hand');
@@ -68,6 +71,7 @@ export default function App() {
   const [saveError, setSaveError] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('guitar_lang') || 'en');
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const tr = useT(lang);
 
   function handleLangSelect(code) {
     setLang(code);
@@ -153,6 +157,7 @@ export default function App() {
             onSuccess={handleAuthSuccess}
             onClose={() => setShowAuth(false)}
             onForgotPassword={() => { setShowAuth(false); setShowForgot(true); }}
+            lang={lang}
           />
         )}
 
@@ -160,6 +165,7 @@ export default function App() {
           <ForgotPassword
             onClose={() => setShowForgot(false)}
             onSwitchToLogin={() => { setShowForgot(false); setShowAuth(true); }}
+            lang={lang}
           />
         )}
 
@@ -171,6 +177,7 @@ export default function App() {
               window.history.replaceState({}, '', window.location.pathname);
               setShowAuth(true);
             }}
+            lang={lang}
           />
         )}
 
@@ -184,6 +191,7 @@ export default function App() {
                   currentUser={currentUser}
                   onUpdated={updated => setCurrentUser(updated)}
                   onDeleted={() => { localStorage.removeItem('guitar_hand_profile'); window.location.reload(); }}
+                  lang={lang}
                 />
               </div>
             </div>
@@ -199,7 +207,7 @@ export default function App() {
                 Guitar Reach
               </h1>
               <p className="text-xs mt-0.5 hidden sm:block" style={{ color: '#5a5a5a' }}>
-                Difficulty scores for your hand
+                {tr.appSubtitle}
               </p>
             </div>
             {/* Language selector */}
@@ -248,19 +256,19 @@ export default function App() {
                 <button onClick={() => setShowSettings(true)}
                   className="text-xs px-2 py-1 rounded"
                   style={{ color: '#c9a96e', border: '1px solid #2a2a2a' }}>
-                  Settings
+                  {tr.settings}
                 </button>
                 <button onClick={handleLogout}
                   className="text-xs px-2 py-1 rounded"
                   style={{ color: '#888', border: '1px solid #2a2a2a' }}>
-                  Sign out
+                  {tr.signOut}
                 </button>
               </div>
             ) : (
               <button onClick={() => setShowAuth(true)}
                 className="text-xs px-3 py-1.5 rounded-lg font-semibold"
                 style={{ background: '#c9a96e', color: '#0f0f0f' }}>
-                Sign in
+                {tr.signIn}
               </button>
             )}
           </div>
@@ -276,14 +284,14 @@ export default function App() {
                 border: `1px solid ${verifyMsg.type === 'success' ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)'}`,
                 color: verifyMsg.type === 'success' ? '#4ade80' : '#f87171',
               }}>
-              <span>{verifyMsg.text}</span>
+              <span>{verifyMsg.type === 'success' ? tr.emailVerified : tr.emailVerifyFailed}</span>
               <button onClick={() => setVerifyMsg(null)} style={{ color: 'inherit', opacity: 0.6 }}>×</button>
             </div>
           )}
 
           {/* Tab bar */}
           <div className="flex gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}>
-            {TABS.map(tab => (
+            {getTabs(tr).map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -302,13 +310,13 @@ export default function App() {
 
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
-            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} saveError={saveError} />}
-            {activeTab === 'strings'      && <GuitarStrings />}
-            {activeTab === 'tuner'        && <OscilloscopeTuner />}
-            {activeTab === 'listen'       && <ChordListener />}
-            {activeTab === 'chords'       && <ChordTable />}
-            {activeTab === 'triplets'     && <TripletTable />}
-            {activeTab === 'progressions' && <ProgressionExplorer />}
+            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} saveError={saveError} lang={lang} />}
+            {activeTab === 'strings'      && <GuitarStrings lang={lang} />}
+            {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
+            {activeTab === 'listen'       && <ChordListener lang={lang} />}
+            {activeTab === 'chords'       && <ChordTable lang={lang} />}
+            {activeTab === 'triplets'     && <TripletTable lang={lang} />}
+            {activeTab === 'progressions' && <ProgressionExplorer lang={lang} />}
           </div>
         </main>
       </div>

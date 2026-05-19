@@ -10,6 +10,7 @@ import {
 } from '../lib/pitchDetect';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
+import { useT } from '../lib/i18n';
 
 const STRING_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#a855f7'];
 
@@ -97,7 +98,8 @@ function VolumeBar({ level }) {
   );
 }
 
-export default function ChordListener() {
+export default function ChordListener({ lang }) {
+  const tr = useT(lang);
   const [listening, setListening]           = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [targetChord, setTargetChord]       = useState(CHORDS_WITH_SCORE[0]);
@@ -207,7 +209,7 @@ export default function ChordListener() {
       <div className="flex items-center gap-3 px-3 sm:px-4 py-3 rounded-xl"
         style={{ background: '#1a1a1a', border: '1px solid #222' }}>
         <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
-          Max diff
+          {tr.maxDiff}
         </span>
         <input
           type="range" min={1} max={10} step={1} value={maxDiff}
@@ -225,7 +227,7 @@ export default function ChordListener() {
       <div className="rounded-xl overflow-hidden" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
         <div className="px-3 sm:px-4 pt-3 pb-2">
           <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
-            Target chord
+            {tr.targetChord}
           </p>
           <div className="flex flex-wrap gap-y-2 gap-x-3">
             {groups.map(g => (
@@ -289,7 +291,7 @@ export default function ChordListener() {
             className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
             style={{ background: '#c9a96e', color: '#0f0f0f' }}
           >
-            <span>🎙️</span> Start Listening
+            {tr.startListening}
           </button>
         ) : (
           <button
@@ -297,11 +299,11 @@ export default function ChordListener() {
             className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
             style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}
           >
-            <span className="animate-pulse">●</span> Stop
+            <span className="animate-pulse">●</span> {tr.stop}
           </button>
         )}
         {permissionDenied && (
-          <p className="text-xs" style={{ color: '#f87171' }}>Mic access denied.</p>
+          <p className="text-xs" style={{ color: '#f87171' }}>{tr.micAccessDenied}</p>
         )}
         {listening && (
           <div className="flex-1">
@@ -324,7 +326,7 @@ export default function ChordListener() {
               }}>
               <span className="text-xl">{autoDetected.chord === targetChord ? '🎯' : '🎵'}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Detected</p>
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>{tr.detected}</p>
                 <p className="font-bold text-base" style={{
                   color: autoDetected.chord === targetChord ? '#4ade80' : '#f0ede8'
                 }}>
@@ -335,8 +337,8 @@ export default function ChordListener() {
                 </p>
               </div>
               {autoDetected.chord === targetChord
-                ? <span className="text-xs font-bold" style={{ color: '#4ade80' }}>Correct!</span>
-                : <span className="text-xs" style={{ color: '#5a5a5a' }}>Expected: <strong style={{ color: '#c9a96e' }}>{targetChord.name}</strong></span>
+                ? <span className="text-xs font-bold" style={{ color: '#4ade80' }}>{tr.correct}</span>
+                : <span className="text-xs" style={{ color: '#5a5a5a' }}>{tr.expected} <strong style={{ color: '#c9a96e' }}>{targetChord.name}</strong></span>
               }
             </div>
           )}
@@ -344,7 +346,7 @@ export default function ChordListener() {
           {/* Dominant note */}
           {detectedNote && (
             <div className="flex items-center gap-2 text-xs" style={{ color: '#5a5a5a' }}>
-              <span>Strongest:</span>
+              <span>{tr.strongest}</span>
               <span className="font-bold" style={{ color: '#f0ede8' }}>
                 {detectedNote.name}{detectedNote.octave}
               </span>
@@ -362,7 +364,7 @@ export default function ChordListener() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>
-                  String analysis
+                  {tr.stringAnalysis}
                 </p>
                 {playCount > 0 && (
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full"
@@ -381,7 +383,7 @@ export default function ChordListener() {
           {!stringResults && volume < 0.05 && (
             <div className="text-center py-8" style={{ color: '#3a3a3a' }}>
               <p className="text-3xl mb-2">🎸</p>
-              <p className="text-sm">Play your guitar — listening…</p>
+              <p className="text-sm">{tr.playGuitar}</p>
             </div>
           )}
 

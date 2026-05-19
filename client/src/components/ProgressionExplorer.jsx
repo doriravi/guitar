@@ -7,6 +7,7 @@ import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION } from '../lib/songs';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
+import { useT } from '../lib/i18n';
 
 const ENHARMONIC = {
   'C#': 'Db', Db: 'C#', 'D#': 'Eb', Eb: 'D#',
@@ -162,7 +163,7 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
 
 // ─── Song row ─────────────────────────────────────────────────────────────────
 
-function SongRow({ song, cardChordNames }) {
+function SongRow({ song, cardChordNames, tr }) {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -220,7 +221,7 @@ function SongRow({ song, cardChordNames }) {
               ? { background: 'rgba(99,102,241,0.12)', color: '#818cf8' }
               : { background: '#1e1e1e', color: '#5a5a5a' }}
           >
-            {lyricsOpen ? 'Hide' : 'Lyrics'}
+            {lyricsOpen ? tr.hide : tr.lyrics}
           </button>
         </div>
       </div>
@@ -253,7 +254,7 @@ function containsProgression(songDegrees, progDegrees) {
   return false;
 }
 
-function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot }) {
+function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, tr }) {
   // Chord names + voicings for the card's current key — same for every matching song
   const progChordsWithVoicings = useMemo(() => {
     const diatonic = getDiatonicChords(targetRoot, progScaleType);
@@ -286,11 +287,11 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot })
   return (
     <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
       <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>
-        Famous songs
+        {tr.famousSongs}
       </div>
       <div style={{ borderTop: '1px solid #1a1a1a' }}>
         {songs.map((song, i) => (
-          <SongRow key={i} song={song} cardChordNames={cardChordNames} />
+          <SongRow key={i} song={song} cardChordNames={cardChordNames} tr={tr} />
         ))}
       </div>
     </div>
@@ -299,7 +300,8 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot })
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProgressionExplorer() {
+export default function ProgressionExplorer({ lang }) {
+  const tr = useT(lang);
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
   const [maxDiff,     setMaxDiff]     = useState(10);
@@ -376,35 +378,35 @@ export default function ProgressionExplorer() {
       {/* ── Filters ── */}
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-4 items-end mb-4 sm:mb-5">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Root</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.root}</label>
           <select
             value={root}
             onChange={e => setRoot(e.target.value)}
             className="rounded px-2 py-1.5 text-sm"
             style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
           >
-            <option value="all">All roots</option>
+            <option value="all">{tr.allRoots}</option>
             {ROOT_NOTES.map(n => <option key={n}>{n}</option>)}
           </select>
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Scale</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.scale}</label>
           <select
             value={scaleType}
             onChange={e => setScaleType(e.target.value)}
             className="rounded px-2 py-1.5 text-sm"
             style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
           >
-            <option value="both">All scales</option>
-            <option value="major">Major</option>
-            <option value="minor">Minor</option>
+            <option value="both">{tr.allScales}</option>
+            <option value="major">{tr.major}</option>
+            <option value="minor">{tr.minor}</option>
           </select>
         </div>
 
         <div className="flex flex-col gap-1 col-span-2 sm:min-w-[180px]">
           <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
-            Max difficulty: <span style={{ color: '#c9a96e', fontWeight: 700 }}>{maxDiff}</span>
+            {tr.maxDifficulty}: <span style={{ color: '#c9a96e', fontWeight: 700 }}>{maxDiff}</span>
           </label>
           <input
             type="range" min={1} max={10} step={0.5} value={maxDiff}
@@ -436,7 +438,7 @@ export default function ProgressionExplorer() {
       {/* ── Empty state ── */}
       {resolved.length === 0 && (
         <div className="text-center py-16 text-sm" style={{ color: '#3a3a3a' }}>
-          No progressions match — try raising the max difficulty.
+          {tr.noProgressions}
         </div>
       )}
 
@@ -531,7 +533,7 @@ export default function ProgressionExplorer() {
               </div>
 
               {/* Songs panel (collapsible) */}
-              {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} />}
+              {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} tr={tr} />}
 
             </div>
           );

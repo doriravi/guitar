@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo } from 'react';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
+import { useT } from '../lib/i18n';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -237,7 +238,7 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick }) {
 
 // ── MODE: PLAY ────────────────────────────────────────────────────────────────
 
-function PlayMode() {
+function PlayMode({ tr }) {
   const [selected, setSelected] = useState([0, 0, 0, 0, 0, 0]);
   const [ripple, setRipple]     = useState({});
   const [strumming, setStrumming] = useState(false);
@@ -296,12 +297,12 @@ function PlayMode() {
         <button onClick={() => { setSelected([0,0,0,0,0,0]); strum([0,0,0,0,0,0]); }}
           className="px-4 py-2.5 rounded-xl text-sm font-semibold"
           style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
-          All Open
+          {tr.allOpen}
         </button>
         <button onClick={() => setSelected([null,null,null,null,null,null])}
           className="px-4 py-2.5 rounded-xl text-sm font-semibold"
           style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
-          Mute All
+          {tr.muteAll}
         </button>
       </div>
 
@@ -309,7 +310,7 @@ function PlayMode() {
 
       {activeCount > 0 && (
         <div className="mt-3 flex flex-wrap gap-2 items-center">
-          <span className="text-xs" style={{ color: '#3a3a3a' }}>Playing:</span>
+          <span className="text-xs" style={{ color: '#3a3a3a' }}>{tr.playing}</span>
           {[0,1,2,3,4,5].map(s => {
             const f = selected[s];
             if (f === null) return null;
@@ -328,7 +329,7 @@ function PlayMode() {
 
 // ── MODE: SCALE ───────────────────────────────────────────────────────────────
 
-function ScaleMode() {
+function ScaleMode({ tr }) {
   const [root, setRoot]           = useState('C');
   const [scaleName, setScaleName] = useState('Major');
 
@@ -395,7 +396,7 @@ function ScaleMode() {
       {/* Controls */}
       <div className="flex flex-wrap gap-2 mb-4 items-end">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Root</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.root}</label>
           <div className="flex flex-wrap gap-1">
             {ROOTS.map(r => (
               <button key={r} onClick={() => setRoot(r)}
@@ -412,7 +413,7 @@ function ScaleMode() {
 
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="flex flex-col gap-1 flex-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>Scale</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.scale}</label>
           <div className="flex flex-wrap gap-1">
             {Object.keys(SCALE_TYPES).map(sn => (
               <button key={sn} onClick={() => setScaleName(sn)}
@@ -449,11 +450,11 @@ function ScaleMode() {
       <div className="flex gap-3 text-xs mb-3" style={{ color: '#3a3a3a' }}>
         <span className="flex items-center gap-1.5">
           <span className="w-4 h-4 rounded-full inline-block" style={{ background: '#c9a96e' }} />
-          Root note
+          {tr.rootNote}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-4 h-4 rounded-full inline-block" style={{ background: `${STRING_COLORS[0]}44`, border: `1px solid ${STRING_COLORS[0]}` }} />
-          Scale note (tap to hear)
+          {tr.scaleNote}
         </span>
       </div>
 
@@ -567,7 +568,7 @@ function ChordDiagram({ chord, isActive, onClick }) {
   );
 }
 
-function ChordFinderMode({ diffMax }) {
+function ChordFinderMode({ diffMax, tr }) {
   const [search, setSearch]       = useState('');
   const [selectedName, setSelectedName] = useState('Am');
   const [activeVoicing, setActiveVoicing] = useState(null);
@@ -633,7 +634,7 @@ function ChordFinderMode({ diffMax }) {
       <div className="mb-4">
         <input
           value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search chord… e.g. Bm7, F#"
+          placeholder={tr.searchChord}
           className="w-full px-3 py-2 rounded-xl text-sm outline-none mb-3"
           style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
         />
@@ -693,7 +694,7 @@ function ChordFinderMode({ diffMax }) {
 
 const EMPTY_BEAT = () => [null, null, null, null, null, null];
 
-function ChordPicker({ onApply, diffMax }) {
+function ChordPicker({ onApply, diffMax, tr }) {
   const [search, setSearch] = useState('');
   const [selectedName, setSelectedName] = useState('');
   const [open, setOpen] = useState(false);
@@ -715,7 +716,7 @@ function ChordPicker({ onApply, diffMax }) {
         onClick={() => setOpen(true)}
         className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
         style={{ background: '#1a1a1a', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
-        + Add chord
+        {tr.addChord}
       </button>
     );
   }
@@ -723,14 +724,14 @@ function ChordPicker({ onApply, diffMax }) {
   return (
     <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>Add chord to beat</span>
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>{tr.addChordToBeat}</span>
         <button onClick={() => { setOpen(false); setSelectedName(''); setSearch(''); }}
-          className="text-xs" style={{ color: '#5a5a5a' }}>✕ close</button>
+          className="text-xs" style={{ color: '#5a5a5a' }}>{tr.close}</button>
       </div>
 
       <input
         value={search} onChange={e => { setSearch(e.target.value); setSelectedName(''); }}
-        placeholder="Search chord… e.g. Am, Bm7"
+        placeholder={tr.searchChordShort}
         className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2"
         style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
         autoFocus
@@ -750,7 +751,7 @@ function ChordPicker({ onApply, diffMax }) {
 
       {voicings.length > 0 && (
         <div>
-          <p className="text-[10px] mb-1.5" style={{ color: '#3a3a3a' }}>Pick voicing:</p>
+          <p className="text-[10px] mb-1.5" style={{ color: '#3a3a3a' }}>{tr.pickVoicing}</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {voicings.map((v, i) => (
               <button
@@ -854,7 +855,7 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
   );
 }
 
-function MusicEditorMode({ diffMax }) {
+function MusicEditorMode({ diffMax, tr }) {
   const [beats, setBeats] = useState([{ frets: EMPTY_BEAT(), id: 0 }]);
   const [editIdx, setEditIdx] = useState(0);
   const [playIdx, setPlayIdx] = useState(null);
@@ -1041,7 +1042,7 @@ function MusicEditorMode({ diffMax }) {
       </div>
 
       {/* Chord picker */}
-      <ChordPicker onApply={applyChord} diffMax={diffMax} />
+      <ChordPicker onApply={applyChord} diffMax={diffMax} tr={tr} />
 
       {/* Fretboard editor */}
       <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
@@ -1084,14 +1085,14 @@ function MusicEditorMode({ diffMax }) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-function DiffSlider({ diffMax, setDiffMax }) {
+function DiffSlider({ diffMax, setDiffMax, tr }) {
   const pct = ((diffMax - 1) / 9) * 100;
   const color = diffMax <= 3 ? '#4ade80' : diffMax <= 6 ? '#c9a96e' : '#f87171';
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-3"
       style={{ background: '#161616', border: '1px solid #1e1e1e' }}>
       <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
-        Max difficulty
+        {tr.maxDifficulty}
       </span>
       <input
         type="range" min={1} max={10} value={diffMax}
@@ -1106,7 +1107,8 @@ function DiffSlider({ diffMax, setDiffMax }) {
   );
 }
 
-export default function GuitarStrings() {
+export default function GuitarStrings({ lang }) {
+  const tr = useT(lang);
   const [mode, setMode] = useState('play');
   const [diffMax, setDiffMax] = useState(10);
 
@@ -1114,12 +1116,12 @@ export default function GuitarStrings() {
     <div className="p-3 sm:p-5 select-none">
       <ModeBar mode={mode} setMode={setMode} />
       {(mode === 'chord' || mode === 'editor') && (
-        <DiffSlider diffMax={diffMax} setDiffMax={setDiffMax} />
+        <DiffSlider diffMax={diffMax} setDiffMax={setDiffMax} tr={tr} />
       )}
-      {mode === 'play'   && <PlayMode />}
-      {mode === 'scale'  && <ScaleMode />}
-      {mode === 'chord'  && <ChordFinderMode diffMax={diffMax} />}
-      {mode === 'editor' && <MusicEditorMode diffMax={diffMax} />}
+      {mode === 'play'   && <PlayMode tr={tr} />}
+      {mode === 'scale'  && <ScaleMode tr={tr} />}
+      {mode === 'chord'  && <ChordFinderMode diffMax={diffMax} tr={tr} />}
+      {mode === 'editor' && <MusicEditorMode diffMax={diffMax} tr={tr} />}
     </div>
   );
 }
