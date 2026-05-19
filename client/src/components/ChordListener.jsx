@@ -320,19 +320,98 @@ function TuneMode({ cfg, setCfg }) {
 
         {/* Live readout */}
         {active && (
-          <div className="grid grid-cols-2 gap-3 mt-2">
-            {/* Detected peaks */}
+          <div className="space-y-3 mt-2">
+
+            {/* ── Chord / fretboard monitor ── */}
+            <div className="rounded-xl overflow-hidden" style={{ background: '#111', border: `1.5px solid ${matched ? (matched.score >= 0.6 ? 'rgba(74,222,128,0.3)' : matched.score >= 0.4 ? 'rgba(201,169,110,0.35)' : 'rgba(251,146,60,0.3)') : '#1e1e1e'}`, transition: 'border-color 0.3s' }}>
+              <div className="px-3 pt-3 pb-2 flex items-start gap-3">
+                {/* left: diagram or placeholder */}
+                <div className="shrink-0">
+                  {matched ? (
+                    <FretboardDiagram chord={matched.chord} />
+                  ) : (
+                    <div className="flex items-center justify-center rounded-lg" style={{ width: 72, height: 90, background: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+                      <span style={{ fontSize: 28, opacity: 0.25 }}>🎸</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* right: chord info */}
+                <div className="flex-1 min-w-0 pt-1">
+                  {matched ? (
+                    <>
+                      <div className="flex items-baseline gap-2 mb-0.5 flex-wrap">
+                        <span className="text-2xl font-black leading-none" style={{ color: '#f0ede8' }}>{matched.chord.name}</span>
+                        <span className="text-xs" style={{ color: '#5a5a5a' }}>{matched.chord.type}</span>
+                        <DifficultyBadge score={calcDifficulty(matched.chord.notes)} />
+                      </div>
+                      <p className="text-xs font-mono mb-2" style={{ color: '#4a4a4a' }}>{matched.chord.tab}</p>
+                      {/* score bar */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#2a2a2a' }}>
+                          <div className="h-full rounded-full transition-all duration-200"
+                            style={{ width: `${matched.score * 100}%`,
+                              background: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }} />
+                        </div>
+                        <span className="text-xs tabular-nums font-bold w-9 text-right"
+                          style={{ color: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }}>
+                          {Math.round(matched.score * 100)}%
+                        </span>
+                      </div>
+                      {/* string indicators */}
+                      <div className="flex gap-1">
+                        {matched.chord.tab.split('').map((ch, s) => (
+                          <span key={s} className="inline-flex flex-col items-center px-1 py-0.5 rounded text-[10px]"
+                            style={{
+                              border: `1px solid ${ch === 'x' ? '#2a2a2a' : STRING_COLORS[s] + '55'}`,
+                              background: ch === 'x' ? '#141414' : STRING_COLORS[s] + '18',
+                              color: ch === 'x' ? '#3a3a3a' : STRING_COLORS[s],
+                            }}>
+                            <span className="font-bold leading-none">{STRING_LABELS[s]}</span>
+                            <span className="leading-none mt-0.5">{ch === 'x' ? '×' : ch === '0' ? 'o' : ch}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col justify-center h-full">
+                      <p className="text-sm font-semibold mb-1" style={{ color: '#3a3a3a' }}>No chord detected</p>
+                      <p className="text-xs" style={{ color: '#2a2a2a' }}>
+                        {peaks.length ? `Match score below ${Math.round(cfg.minScore * 100)}% threshold` : 'No signal — play or sing louder'}
+                      </p>
+                      {notes.length > 0 && (
+                        <p className="text-xs mt-1" style={{ color: '#4a4a4a' }}>Notes heard: {notes.join(' · ')}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* detected note classes row */}
+              {notes.length > 0 && (
+                <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs" style={{ color: '#3a3a3a' }}>Notes:</span>
+                  {notes.map(n => (
+                    <span key={n} className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: '#1e1e1e', color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+                      {n}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── Peaks panel ── */}
             <div className="rounded-lg p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
               <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
-                Peaks ({peaks.length})
+                Detected peaks ({peaks.length})
               </p>
               {peaks.length === 0 ? (
-                <p className="text-xs italic" style={{ color: '#2a2a2a' }}>no peaks — try singing louder</p>
+                <p className="text-xs italic" style={{ color: '#2a2a2a' }}>no peaks — try playing or singing louder</p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {peaks.slice(0, 6).map((p, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      {/* amplitude bar */}
                       <div className="w-16 h-1.5 rounded-full overflow-hidden shrink-0" style={{ background: '#2a2a2a' }}>
                         <div className="h-full rounded-full"
                           style={{ width: `${Math.max(0, ((p.amplitude - cfg.ampThresh) / Math.abs(cfg.ampThresh)) * 100)}%`, background: '#c9a96e' }} />
@@ -355,44 +434,6 @@ function TuneMode({ cfg, setCfg }) {
               )}
             </div>
 
-            {/* Chord match */}
-            <div className="rounded-lg p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
-                Best match
-              </p>
-              {matched ? (
-                <div>
-                  <p className="text-xl font-black mb-0.5" style={{ color: '#f0ede8' }}>
-                    {matched.chord.name}
-                  </p>
-                  <p className="text-xs mb-2" style={{ color: '#5a5a5a' }}>{matched.chord.type}</p>
-                  {/* Jaccard score bar */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#2a2a2a' }}>
-                      <div className="h-full rounded-full transition-all"
-                        style={{ width: `${matched.score * 100}%`,
-                          background: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }} />
-                    </div>
-                    <span className="text-xs tabular-nums font-bold"
-                      style={{ color: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }}>
-                      {Math.round(matched.score * 100)}%
-                    </span>
-                  </div>
-                  <p className="text-xs mt-2" style={{ color: '#3a3a3a' }}>
-                    Notes: {notes.join(' · ')}
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-xs italic mb-2" style={{ color: '#2a2a2a' }}>
-                    {peaks.length ? `score below ${Math.round(cfg.minScore * 100)}% threshold` : 'no signal'}
-                  </p>
-                  {notes.length > 0 && (
-                    <p className="text-xs" style={{ color: '#4a4a4a' }}>Notes: {notes.join(' · ')}</p>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
