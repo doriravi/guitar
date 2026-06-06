@@ -225,39 +225,14 @@ function AIHandAnalysis({ lang }) {
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
-      const SYSTEM_PROMPT = `You are an expert biomechanical analysis agent specializing in guitar ergonomics. Analyze the photograph of the user's left hand and determine their physiological capacity for executing various guitar chord voicings.
-
-Evaluate: absolute span (index to pinky), thumb length/pivot, index finger linearity, middle/ring lateral splay, pinky reach and arch.
-
-Grade levels:
-- Grade 1 (Fundamentals): Open chords, basic triads.
-- Grade 2 (Clustered Complexity): High lateral splay, low span. Drop-2 jazz voicings, diminished inversions.
-- Grade 3 (The Standard): Moderate span, linear index. 6-string barres, minor 9ths.
-- Grade 4 (Brute Force): Large span, long thumb. 5-fret power chords, Hendrix thumb chords.
-- Grade 5 (Extended Range): Maximum span AND high splay/pinky. Wide add9, Holdsworth voicings.
-
-Return ONLY valid JSON (no markdown):
-{"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","digit_analysis":{"thumb":"...","index":"...","middle_ring_cluster":"...","pinky":"..."}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["..."],"anatomical_reasoning":"..."}],"recommended_focus":"..."}`;
-
-      const API_KEY = 'AIzaSyCtiStvl9snyRWArfKba4Gn1sNRnecc2FQ';
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { text: SYSTEM_PROMPT },
-              { inline_data: { mime_type: 'image/jpeg', data: b64 } },
-            ]}],
-          }),
-        }
-      );
-      if (!res.ok) throw new Error(`Gemini error ${res.status}`);
-      const data = await res.json();
-      let raw = data.candidates[0].content.parts[0].text.trim();
-      if (raw.startsWith('```')) { raw = raw.split('\n').slice(1).join('\n').replace(/```$/, '').trim(); }
-      setReport(JSON.parse(raw));
+      const res = await fetch('/api/analyze-hand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageB64: b64 }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const text = await res.text();
+      setReport(JSON.parse(text));
       setPhase('done');
     } catch (e) {
       setErrMsg(e.message || 'Analysis failed.');

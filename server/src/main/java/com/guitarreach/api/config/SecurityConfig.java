@@ -45,6 +45,7 @@ public class SecurityConfig {
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/api/analyze-hand").permitAll()
                         .anyRequest().authenticated()
                 )
                 // Allow H2 console iframes in dev
