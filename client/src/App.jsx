@@ -21,6 +21,9 @@ function isDefaultProfile(p) {
 export const HandProfileContext = createContext(DEFAULT_PROFILE);
 export function useHandProfile() { return useContext(HandProfileContext); }
 
+export const AIFingerContext = createContext(null);
+export function useAIFingers() { return useContext(AIFingerContext); }
+
 export const LangContext = createContext('en');
 export function useLang() { return useContext(LangContext); }
 
@@ -70,6 +73,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('guitar_lang') || 'en');
+  const [aiFingers, setAIFingers] = useState(() => {
+    try { const r = localStorage.getItem('guitar_ai_fingers'); return r ? JSON.parse(r) : null; } catch { return null; }
+  });
   const [showLangMenu, setShowLangMenu] = useState(false);
   const tr = useT(lang);
 
@@ -147,8 +153,14 @@ export default function App() {
     window.location.reload();
   }
 
+  function handleSaveAIFingers(fingers) {
+    setAIFingers(fingers);
+    try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
+  }
+
   return (
     <LangContext.Provider value={lang}>
+    <AIFingerContext.Provider value={aiFingers}>
     <HandProfileContext.Provider value={handProfile}>
       <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
 
@@ -310,17 +322,18 @@ export default function App() {
 
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
-            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} saveError={saveError} lang={lang} />}
+            {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} onSaveAIFingers={handleSaveAIFingers} saveError={saveError} lang={lang} />}
             {activeTab === 'strings'      && <GuitarStrings lang={lang} />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} />}
             {activeTab === 'chords'       && <ChordTable lang={lang} />}
             {activeTab === 'triplets'     && <TripletTable lang={lang} />}
-            {activeTab === 'progressions' && <ProgressionExplorer lang={lang} />}
+            {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
           </div>
         </main>
       </div>
     </HandProfileContext.Provider>
+    </AIFingerContext.Provider>
     </LangContext.Provider>
   );
 }

@@ -3,11 +3,13 @@ import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
+import { personalDifficulty, reachMultiplier, DEFAULT_PROFILE } from '../lib/handProfile';
 import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION } from '../lib/songs';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import { useT } from '../lib/i18n';
+import { useHandProfile, useAIFingers } from '../App';
 
 const ENHARMONIC = {
   'C#': 'Db', Db: 'C#', 'D#': 'Eb', Eb: 'D#',
@@ -270,9 +272,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, t
   const songs = (SONGS_BY_PROGRESSION[progressionName] || [])
     .filter(song => {
       if (song.scaleType !== progScaleType) return false;
-      if (!containsProgression(song.degrees, progDegrees)) return false;
-      const songRoot = song.key.match(/^([A-G][#b]?)/)?.[1] ?? song.key;
-      return songRoot === targetRoot;
+      return containsProgression(song.degrees, progDegrees);
     })
     .slice(0, 10);
 
@@ -298,13 +298,253 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, t
   );
 }
 
+// ─── Hand filter helpers ──────────────────────────────────────────────────────
+
+const FINGER_COLORS = { thumb: '#a78bfa', index: '#38bdf8', middle: '#34d399', ring: '#c9a96e', pinky: '#f87171' };
+const FINGER_LABELS = { thumb: 'T', index: 'I', middle: 'M', ring: 'R', pinky: 'P' };
+
+const LENGTH_ORDER  = { Short: 0, Medium: 1, Long: 2 };
+const FLEX_ORDER    = { Low: 0, Medium: 1, High: 2 };
+const REACH_ORDER   = { Weak: 0, Moderate: 1, Strong: 2 };
+const STRAIGHT_ORDER = { Curved: 0, Straight: 1 };
+const INDEP_ORDER   = { Low: 0, Medium: 1, High: 2 };
+
+// Returns true if a progression's max personal difficulty is within the threshold
+function progressionFitsHand(prog, profile) {
+  const m = reachMultiplier(profile);
+  const personalMax = prog.chords.reduce((acc, chord) => {
+    const best = chord.voicings.length ? chord.voicings[0].score : 10;
+    return Math.max(acc, personalDifficulty(best, profile));
+  }, 0);
+  return personalMax;
+}
+
+// ─── Hand Filters Panel ───────────────────────────────────────────────────────
+
+function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onSaveProfile, onGapsChange }) {
+  const GAPS = [
+    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [8, 18],  step: 0.5, color: '#a78bfa' },
+    { key: 'indexToMiddle', label: 'Index → Middle', range: [4, 12],  step: 0.5, color: '#38bdf8' },
+    { key: 'middleToRing',  label: 'Middle → Ring',  range: [3, 10],  step: 0.5, color: '#34d399' },
+    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [5, 14],  step: 0.5, color: '#c9a96e' },
+  ];
+
+  const [localGaps, setLocalGaps] = useState({
+    thumbToIndex:  profile.thumbToIndex  ?? DEFAULT_PROFILE.thumbToIndex,
+    indexToMiddle: profile.indexToMiddle ?? DEFAULT_PROFILE.indexToMiddle,
+    middleToRing:  profile.middleToRing  ?? DEFAULT_PROFILE.middleToRing,
+    ringToLittle:  profile.ringToLittle  ?? DEFAULT_PROFILE.ringToLittle,
+  });
+  const [saved, setSaved] = useState(false);
+
+  // Sync if profile changes externally
+  useEffect(() => {
+    setLocalGaps({
+      thumbToIndex:  profile.thumbToIndex  ?? DEFAULT_PROFILE.thumbToIndex,
+      indexToMiddle: profile.indexToMiddle ?? DEFAULT_PROFILE.indexToMiddle,
+      middleToRing:  profile.middleToRing  ?? DEFAULT_PROFILE.middleToRing,
+      ringToLittle:  profile.ringToLittle  ?? DEFAULT_PROFILE.ringToLittle,
+    });
+  }, [profile]);
+
+  function handleGapChange(key, val) {
+    const updated = { ...localGaps, [key]: val };
+    setLocalGaps(updated);
+    setSaved(false);
+    if (onGapsChange) onGapsChange(updated);
+  }
+
+  function handleSave() {
+    if (onSaveProfile) onSaveProfile({ ...profile, ...localGaps });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  const fingers = aiFingers || {};
+
+  function toggleFilter(key, val) {
+    setHandFilters(prev => {
+      const cur = prev[key];
+      if (cur === val) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: val };
+    });
+  }
+
+  function FilterChip({ label, active, color, onClick }) {
+    return (
+      <button
+        onClick={onClick}
+        className="text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all"
+        style={active
+          ? { background: `${color}25`, color, border: `1px solid ${color}50` }
+          : { background: '#1a1a1a', color: '#3a3a3a', border: '1px solid #222' }}
+      >{label}</button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-4 mb-4 space-y-4" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+      <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: '#5a5a5a' }}>My Hand Filters</p>
+
+      {/* Gap sliders — editable, saves to profile */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold" style={{ color: '#3a3a3a' }}>Finger Gap Measurements</p>
+          <button
+            onClick={handleSave}
+            className="text-xs px-3 py-1 rounded-lg font-semibold transition-all"
+            style={saved
+              ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }
+              : { background: '#c9a96e', color: '#0f0f0f' }}
+          >
+            {saved ? '✓ Saved' : 'Save'}
+          </button>
+        </div>
+        <div className="space-y-2">
+          {GAPS.map(({ key, label, range, step, color }) => {
+            const val = localGaps[key];
+            const pct = ((val - range[0]) / (range[1] - range[0])) * 100;
+            return (
+              <div key={key} className="rounded-lg px-3 py-2" style={{ background: '#0a0a0a', border: `1px solid ${color}18` }}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10px]" style={{ color: '#4a4a4a' }}>{label}</span>
+                  <span className="text-xs font-bold tabular-nums" style={{ color }}>{val.toFixed(1)} cm</span>
+                </div>
+                <input
+                  type="range" min={range[0]} max={range[1]} step={step} value={val}
+                  onChange={e => handleGapChange(key, parseFloat(e.target.value))}
+                  className="w-full"
+                  style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)`, color }}
+                />
+                <div className="flex justify-between text-[9px] mt-0.5" style={{ color: '#2a2a2a' }}>
+                  <span>{range[0]} cm</span><span>{range[1]} cm</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Per-finger filters — only shown if AI data available */}
+      {Object.keys(fingers).length > 0 ? (
+        <div>
+          <p className="text-xs font-semibold mb-2" style={{ color: '#3a3a3a' }}>Finger Attributes (from AI Analysis)</p>
+          <div className="space-y-2">
+            {['thumb', 'index', 'middle', 'ring', 'pinky'].map(name => {
+              const f = fingers[name];
+              if (!f) return null;
+              const color = FINGER_COLORS[name];
+              return (
+                <div key={name} className="flex items-start gap-3 rounded-lg px-3 py-2" style={{ background: '#0a0a0a', border: `1px solid ${color}15` }}>
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black shrink-0 mt-0.5" style={{ background: color }}>
+                    {FINGER_LABELS[name]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold capitalize mb-1.5" style={{ color }}>{name}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {/* Length */}
+                      {f.length && ['Short','Medium','Long'].map(v => (
+                        <FilterChip key={v} label={v} color={color}
+                          active={handFilters[`${name}_length_min`] !== undefined && LENGTH_ORDER[v] >= LENGTH_ORDER[handFilters[`${name}_length_min`]]}
+                          onClick={() => toggleFilter(`${name}_length_min`, v)} />
+                      ))}
+                      {/* Flexibility (thumb) */}
+                      {f.flexibility && ['Low','Medium','High'].map(v => (
+                        <FilterChip key={v} label={`${v} flex`} color={color}
+                          active={handFilters[`${name}_flex_min`] !== undefined && FLEX_ORDER[v] >= FLEX_ORDER[handFilters[`${name}_flex_min`]]}
+                          onClick={() => toggleFilter(`${name}_flex_min`, v)} />
+                      ))}
+                      {/* Straightness (index) */}
+                      {f.straightness && ['Curved','Straight'].map(v => (
+                        <FilterChip key={v} label={v} color={color}
+                          active={handFilters[`${name}_straight_min`] === v}
+                          onClick={() => toggleFilter(`${name}_straight_min`, v)} />
+                      ))}
+                      {/* Independence (middle, ring) */}
+                      {f.independence && ['Low','Medium','High'].map(v => (
+                        <FilterChip key={v} label={`${v} indep`} color={color}
+                          active={handFilters[`${name}_indep_min`] !== undefined && INDEP_ORDER[v] >= INDEP_ORDER[handFilters[`${name}_indep_min`]]}
+                          onClick={() => toggleFilter(`${name}_indep_min`, v)} />
+                      ))}
+                      {/* Reach (pinky) */}
+                      {f.reach && ['Weak','Moderate','Strong'].map(v => (
+                        <FilterChip key={v} label={v} color={color}
+                          active={handFilters[`pinky_reach_min`] !== undefined && REACH_ORDER[v] >= REACH_ORDER[handFilters[`pinky_reach_min`]]}
+                          onClick={() => toggleFilter(`pinky_reach_min`, v)} />
+                      ))}
+                    </div>
+                    {f.note && <p className="text-[10px] mt-1.5" style={{ color: '#3a3a3a' }}>{f.note}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#0a0a0a', border: '1px solid #1e1e1e', color: '#3a3a3a' }}>
+          Per-finger data not yet available. Use <strong style={{ color: '#818cf8' }}>AI Hand Analysis</strong> on the My Hand tab to unlock finger-level filters.
+        </div>
+      )}
+
+      {/* Clear filters */}
+      {Object.keys(handFilters).length > 0 && (
+        <button
+          onClick={() => setHandFilters({})}
+          className="text-xs px-3 py-1 rounded-lg"
+          style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', background: 'rgba(248,113,113,0.05)' }}
+        >
+          Clear all filters
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Filter progressions by active hand filters
+function filterByHandData(progs, profile, aiFingers, handFilters, maxPersonalDiff) {
+  const fingers = aiFingers || {};
+
+  function fingerPasses(name) {
+    const f = fingers[name];
+    if (!f) return true;
+    const lk = `${name}_length_min`;
+    if (handFilters[lk] && LENGTH_ORDER[f.length] < LENGTH_ORDER[handFilters[lk]]) return false;
+    const fk = `${name}_flex_min`;
+    if (handFilters[fk] && FLEX_ORDER[f.flexibility] < FLEX_ORDER[handFilters[fk]]) return false;
+    const sk = `${name}_straight_min`;
+    if (handFilters[sk] && STRAIGHT_ORDER[f.straightness] < STRAIGHT_ORDER[handFilters[sk]]) return false;
+    const ik = `${name}_indep_min`;
+    if (handFilters[ik] && INDEP_ORDER[f.independence] < INDEP_ORDER[handFilters[ik]]) return false;
+    if (handFilters['pinky_reach_min'] && name === 'pinky' && REACH_ORDER[f.reach] < REACH_ORDER[handFilters['pinky_reach_min']]) return false;
+    return true;
+  }
+
+  const fingerOk = ['thumb','index','middle','ring','pinky'].every(fingerPasses);
+  if (!fingerOk) return [];
+
+  return progs.filter(prog => {
+    const personalMax = progressionFitsHand(prog, profile);
+    return personalMax <= maxPersonalDiff;
+  });
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProgressionExplorer({ lang }) {
+export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const tr = useT(lang);
+  const handProfile = useHandProfile();
+  const aiFingers   = useAIFingers();
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
   const [maxDiff,     setMaxDiff]     = useState(10);
+  const [maxPersonal, setMaxPersonal] = useState(10);
+  const [showHandFilters, setShowHandFilters] = useState(false);
+  const [handFilters, setHandFilters] = useState({});
+  const [liveGaps, setLiveGaps] = useState(null); // overrides handProfile gaps for live preview
   const [playState,   setPlayState]   = useState(null);  // { key, chordIdx }
   const [openSongs,   setOpenSongs]   = useState(new Set()); // Set of card keys
   const [tooltip,     setTooltip]     = useState(null);  // { voicing, x, y }
@@ -328,6 +568,16 @@ export default function ProgressionExplorer({ lang }) {
         all.push(...resolveForKey(r, st, maxDiff));
     return all.sort((a, b) => a.maxScore - b.maxScore);
   }, [root, scaleType, maxDiff, allRoots, bothScales]);
+
+  const activeProfile = useMemo(
+    () => liveGaps ? { ...handProfile, ...liveGaps } : handProfile,
+    [handProfile, liveGaps],
+  );
+
+  const filtered = useMemo(() => {
+    if (!showHandFilters) return resolved;
+    return filterByHandData(resolved, activeProfile, aiFingers, handFilters, maxPersonal);
+  }, [resolved, activeProfile, aiFingers, handFilters, maxPersonal, showHandFilters]);
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -415,7 +665,52 @@ export default function ProgressionExplorer({ lang }) {
             style={{ background: `linear-gradient(to right, #c9a96e ${((maxDiff-1)/9)*100}%, #2a2a2a ${((maxDiff-1)/9)*100}%)` }}
           />
         </div>
+
+        {/* My Hand filter toggle */}
+        <div className="col-span-2 sm:col-span-1 flex items-end">
+          <button
+            onClick={() => setShowHandFilters(v => !v)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            style={showHandFilters
+              ? { background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }
+              : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+          >
+            ✋ {showHandFilters ? 'Hide Hand Filters' : 'My Hand Filters'}
+            {Object.keys(handFilters).length > 0 && (
+              <span className="rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold" style={{ background: '#818cf8', color: '#fff' }}>
+                {Object.keys(handFilters).length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* ── Hand filters panel ── */}
+      {showHandFilters && (
+        <>
+          <HandFiltersPanel
+            profile={activeProfile}
+            aiFingers={aiFingers}
+            handFilters={handFilters}
+            setHandFilters={setHandFilters}
+            onSaveProfile={onSaveProfile}
+            onGapsChange={setLiveGaps}
+          />
+          {/* Personal difficulty slider */}
+          <div className="flex flex-col gap-1 mb-4">
+            <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+              Max Personal Difficulty: <span style={{ color: '#818cf8', fontWeight: 700 }}>{maxPersonal}</span>
+            </label>
+            <input
+              type="range" min={1} max={10} step={0.5} value={maxPersonal}
+              onChange={e => setMaxPersonal(Number(e.target.value))}
+              className="w-full"
+              style={{ background: `linear-gradient(to right, #818cf8 ${((maxPersonal-1)/9)*100}%, #2a2a2a ${((maxPersonal-1)/9)*100}%)` }}
+            />
+            <p className="text-xs" style={{ color: '#3a3a3a' }}>Filters progressions by difficulty adjusted for your hand measurements</p>
+          </div>
+        </>
+      )}
 
       {/* ── Scale summary (single key only) ── */}
       {!multiKey && diatonicChords && (
@@ -432,19 +727,21 @@ export default function ProgressionExplorer({ lang }) {
 
       {/* ── Result count ── */}
       <p className="text-xs mb-3" style={{ color: '#3a3a3a' }}>
-        {resolved.length} progression{resolved.length !== 1 ? 's' : ''} within difficulty {maxDiff}
+        {filtered.length} progression{filtered.length !== 1 ? 's' : ''}
+        {showHandFilters ? ` matching your hand` : ` within difficulty ${maxDiff}`}
+        {filtered.length < resolved.length && <span style={{ color: '#5a5a5a' }}> (filtered from {resolved.length})</span>}
       </p>
 
       {/* ── Empty state ── */}
-      {resolved.length === 0 && (
+      {filtered.length === 0 && (
         <div className="text-center py-16 text-sm" style={{ color: '#3a3a3a' }}>
-          {tr.noProgressions}
+          {showHandFilters ? 'No progressions match your current hand filters. Try raising the personal difficulty or relaxing finger filters.' : tr.noProgressions}
         </div>
       )}
 
       {/* ── Progression cards ── */}
       <div className="space-y-3">
-        {resolved.map((prog, i) => {
+        {filtered.map((prog, i) => {
           const key         = cardKey(prog);
           const isPlaying   = playState?.key === key;
           const activeChord = isPlaying ? playState.chordIdx : -1;
