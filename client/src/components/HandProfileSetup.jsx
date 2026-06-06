@@ -177,9 +177,35 @@ function HandDiagram({ profile }) {
   );
 }
 
-// ── AI Hand Analysis (Gemini vision) ─────────────────────────────────────────
+// Map AI report → hand profile cm measurements.
+// Uses direct cm estimates if present, falls back to span/splay buckets.
+function aiReportToProfile(report) {
+  const m = report.measurements;
+  if (m && typeof m.thumb_to_index_cm === 'number') {
+    return {
+      thumbToIndex:  clamp(m.thumb_to_index_cm,  8,  18),
+      indexToMiddle: clamp(m.index_to_middle_cm, 4,  12),
+      middleToRing:  clamp(m.middle_to_ring_cm,  3,  10),
+      ringToLittle:  clamp(m.ring_to_pinky_cm,   5,  14),
+    };
+  }
+  // Fallback: bucket from span/splay
+  const bp    = report.biomechanical_profile;
+  const span  = bp.absolute_span_assessment;
+  const splay = bp.inferred_flexibility_splay;
+  return {
+    thumbToIndex:  span  === 'Large' ? 15.0 : span  === 'Medium' ? 13.5 : 11.5,
+    indexToMiddle: splay === 'High'  ?  8.5 : splay === 'Medium' ?  7.5 :  6.0,
+    middleToRing:  splay === 'High'  ?  6.5 : splay === 'Medium' ?  6.0 :  4.5,
+    ringToLittle:  (span === 'Large' && splay === 'High') ? 11.0 : span === 'Large' ? 10.0 : splay === 'High' ? 8.5 : 9.5,
+  };
+}
 
-function AIHandAnalysis({ lang }) {
+function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+// ── AI Hand Analysis (Claude vision) ─────────────────────────────────────────
+
+function AIHandAnalysis({ lang, onMeasured }) {
   const [phase, setPhase]       = useState('idle'); // idle | capturing | analysing | done | error
   const [report, setReport]     = useState(null);
   const [errMsg, setErrMsg]     = useState('');
@@ -225,44 +251,75 @@ function AIHandAnalysis({ lang }) {
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error('VITE_GEMINI_API_KEY is not set. Add it to your .env.local file.');
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY is not set. Add it to your .env.local file.');
 
-      const PROMPT = `You are an expert biomechanical analysis agent specializing in guitar ergonomics. Analyze the photograph of the user's left hand and determine their physiological capacity for executing various guitar chord voicings.
+      const SYSTEM = `You are a guitar biomechanics expert. Analyze this left hand photo and estimate the player's finger gap measurements and chord reach capability.
 
-Evaluate: absolute span (index to pinky), thumb length/pivot, index finger linearity, middle/ring lateral splay, pinky reach and arch.
+Measure the visible spread distances between adjacent fingertips when the hand is splayed:
+- thumb_to_index_cm: distance in cm between thumb tip and index tip (range 8-18)
+- index_to_middle_cm: distance in cm between index and middle fingertips (range 4-12)
+- middle_to_ring_cm: distance in cm between middle and ring fingertips (range 3-10)
+- ring_to_pinky_cm: distance in cm between ring and pinky fingertips (range 5-14)
 
-Grade levels:
-Grade 1 (Fundamentals): Open chords, basic triads.
-Grade 2 (Clustered Complexity): High lateral splay, low span. Drop-2 jazz, diminished inversions.
-Grade 3 (The Standard): Moderate span, linear index. 6-string barres, minor 9ths.
-Grade 4 (Brute Force): Large span, long thumb. 5-fret power chords, Hendrix thumb chords.
-Grade 5 (Extended Range): Maximum span AND high splay. Wide add9, Holdsworth voicings.
+Also assess each finger individually:
+- thumb: length category (Short/Medium/Long), flexibility (Low/Medium/High), note about guitar technique impact
+- index: length (Short/Medium/Long), straightness (Curved/Straight), barre chord suitability
+- middle: length (Short/Medium/Long), independence from ring finger (Low/Medium/High)
+- ring: length (Short/Medium/Long), independence (Low/Medium/High)
+- pinky: length (Short/Medium/Long), reach (Weak/Moderate/Strong), note about 4th finger use
 
-Return ONLY valid JSON, no markdown fences, no extra text:
-{"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","digit_analysis":{"thumb":"...","index":"...","middle_ring_cluster":"...","pinky":"..."}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["..."],"anatomical_reasoning":"..."}],"recommended_focus":"..."}`;
+Grades: 1=Open chords, 2=Drop-2/jazz voicings, 3=Full barre/minor9ths, 4=Hendrix thumb/5-fret stretches, 5=Holdsworth wide voicings.
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [
-            { text: PROMPT },
-            { inline_data: { mime_type: 'image/jpeg', data: b64 } },
-          ]}] }),
-        }
-      );
+Return ONLY valid JSON, no markdown fences, no extra text. Keep all description strings under 60 chars:
+{"measurements":{"thumb_to_index_cm":13.5,"index_to_middle_cm":7.5,"middle_to_ring_cm":6.0,"ring_to_pinky_cm":9.5},"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","fingers":{"thumb":{"length":"Short|Medium|Long","flexibility":"Low|Medium|High","note":"<15 words>"},"index":{"length":"Short|Medium|Long","straightness":"Curved|Straight","note":"<15 words>"},"middle":{"length":"Short|Medium|Long","independence":"Low|Medium|High","note":"<15 words>"},"ring":{"length":"Short|Medium|Long","independence":"Low|Medium|High","note":"<15 words>"},"pinky":{"length":"Short|Medium|Long","reach":"Weak|Moderate|Strong","note":"<15 words>"}}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 2","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 3","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 4","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 5","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"}],"recommended_focus":"<25 words>"}`;
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 3000,
+          system: SYSTEM,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+              { type: 'text', text: 'Analyze this hand photo and return the biomechanical JSON report.' },
+            ],
+          }],
+        }),
+      });
       const data = await res.json();
       if (!res.ok) {
-        const msg = data?.error?.message || `Gemini error ${res.status}`;
-        if (res.status === 429) throw new Error('Gemini API quota exceeded. Please check your API key quota at ai.google.dev.');
+        const msg = data?.error?.message || `Claude API error ${res.status}`;
         throw new Error(msg);
       }
-      let text = data.candidates[0].content.parts[0].text.trim();
+      let text = data.content[0].text.trim();
       if (text.startsWith('```')) { text = text.replace(/^```[a-z]*\n?/, '').replace(/```\s*$/, '').trim(); }
-      setReport(JSON.parse(text));
+      // Find the outermost JSON object by tracking brace depth
+      let start = text.indexOf('{');
+      if (start === -1) throw new Error('No JSON object found in response.');
+      let depth = 0, end = -1;
+      for (let i = start; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      const jsonStr = end !== -1 ? text.slice(start, end + 1) : text.slice(start);
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        throw new Error(`Claude returned malformed JSON: ${parseErr.message}\n\nRaw response (first 300 chars):\n${text.slice(0, 300)}`);
+      }
+      setReport(parsed);
       setPhase('done');
+      if (onMeasured) onMeasured(aiReportToProfile(parsed), parsed.biomechanical_profile?.fingers || null);
     } catch (e) {
       setErrMsg(e.message || 'Analysis failed.');
       setPhase('error');
@@ -280,7 +337,7 @@ Return ONLY valid JSON, no markdown fences, no extra text:
         <div className="flex items-center gap-2">
           <span>🤖</span>
           <span className="text-sm font-semibold" style={{ color: '#f0ede8' }}>AI Hand Analysis</span>
-          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>Gemini</span>
+          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>Claude</span>
         </div>
         {phase !== 'idle' && (
           <button onClick={reset} className="text-xs px-3 py-1 rounded-lg" style={{ color: '#5a5a5a', border: '1px solid #2a2a2a' }}>
@@ -322,7 +379,7 @@ Return ONLY valid JSON, no markdown fences, no extra text:
       {phase === 'analysing' && (
         <div className="p-6 flex items-center justify-center gap-3">
           <div className="w-4 h-4 rounded-full border-2 animate-spin" style={{ borderColor: '#6366f1', borderTopColor: 'transparent' }} />
-          <span className="text-sm" style={{ color: '#5a5a5a' }}>Analysing with Gemini…</span>
+          <span className="text-sm" style={{ color: '#5a5a5a' }}>Analysing with Claude…</span>
         </div>
       )}
 
@@ -333,65 +390,123 @@ Return ONLY valid JSON, no markdown fences, no extra text:
         </div>
       )}
 
-      {phase === 'done' && report && (
-        <div className="p-4 space-y-4">
-          {/* Profile summary */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Span</p>
-              <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{report.biomechanical_profile.absolute_span_assessment}</p>
-            </div>
-            <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Splay / Flexibility</p>
-              <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{report.biomechanical_profile.inferred_flexibility_splay}</p>
-            </div>
-          </div>
+      {phase === 'done' && report && (() => {
+        const bp      = report.biomechanical_profile;
+        const fingers = bp.fingers || {};
+        const meas    = aiReportToProfile(report);
+        const FINGER_COLOR = { thumb: '#a78bfa', index: '#38bdf8', middle: '#34d399', ring: '#c9a96e', pinky: '#f87171' };
+        const FINGER_LABEL = { thumb: 'T', index: 'I', middle: 'M', ring: 'R', pinky: 'P' };
+        const GAP_LABELS = [
+          { label: 'Thumb → Index', value: meas.thumbToIndex,  color: '#a78bfa' },
+          { label: 'Index → Middle', value: meas.indexToMiddle, color: '#38bdf8' },
+          { label: 'Middle → Ring',  value: meas.middleToRing,  color: '#34d399' },
+          { label: 'Ring → Pinky',   value: meas.ringToLittle,  color: '#c9a96e' },
+        ];
+        return (
+          <div className="p-4 space-y-4">
 
-          {/* Digit analysis */}
-          <div className="rounded-lg p-3 space-y-1.5" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-            <p className="text-xs uppercase tracking-wide font-semibold mb-2" style={{ color: '#3a3a3a' }}>Digit Analysis</p>
-            {Object.entries(report.biomechanical_profile.digit_analysis).map(([k, v]) => (
-              <div key={k} className="flex gap-2 text-xs">
-                <span className="font-semibold capitalize shrink-0 w-28" style={{ color: '#c9a96e' }}>{k.replace(/_/g,' ')}</span>
-                <span style={{ color: '#7a7a7a' }}>{v}</span>
+            {/* Profile applied banner */}
+            <div className="rounded-lg px-4 py-3 flex items-center gap-2" style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)' }}>
+              <span className="text-base">✅</span>
+              <div>
+                <p className="text-xs font-semibold" style={{ color: '#4ade80' }}>Hand profile updated & saved</p>
+                <p className="text-xs" style={{ color: '#3a6a4a' }}>All difficulty scores across the app now reflect your hand.</p>
               </div>
-            ))}
-          </div>
+            </div>
 
-          {/* Grades */}
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide font-semibold" style={{ color: '#3a3a3a' }}>Chord Capability Grades</p>
-            {report.chord_capability_grades.map((g) => (
-              <div key={g.grade_level} className="rounded-lg p-3" style={{ background: '#111', border: `1px solid ${STATUS_COLOR[g.status]}22` }}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span>{STATUS_ICON[g.status]}</span>
-                  <span className="text-sm font-bold" style={{ color: STATUS_COLOR[g.status] }}>{g.grade_level}</span>
-                  <span className="text-xs" style={{ color: '#5a5a5a' }}>{g.status}</span>
-                </div>
-                <div className="flex flex-wrap gap-1 mb-1.5">
-                  {g.supported_voicings.map(v => (
-                    <span key={v} className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: `${STATUS_COLOR[g.status]}15`, color: STATUS_COLOR[g.status] }}>{v}</span>
-                  ))}
-                </div>
-                <p className="text-xs" style={{ color: '#4a4a4a' }}>{g.anatomical_reasoning}</p>
+            {/* Measured gap values */}
+            <div className="rounded-lg p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+              <p className="text-xs uppercase tracking-wide font-semibold mb-3" style={{ color: '#3a3a3a' }}>Measured Finger Gaps</p>
+              <div className="grid grid-cols-2 gap-2">
+                {GAP_LABELS.map(({ label, value, color }) => (
+                  <div key={label} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: '#0a0a0a', border: `1px solid ${color}22` }}>
+                    <span className="text-xs" style={{ color: '#5a5a5a' }}>{label}</span>
+                    <span className="text-sm font-bold tabular-nums" style={{ color }}>{value.toFixed(1)} cm</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
 
-          {/* Recommended focus */}
-          <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
-            <p className="text-xs font-semibold mb-1" style={{ color: '#818cf8' }}>Recommended Focus</p>
-            <p className="text-sm" style={{ color: '#d0cdc8' }}>{report.recommended_focus}</p>
+            {/* Per-finger cards */}
+            {Object.keys(fingers).length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold mb-2" style={{ color: '#3a3a3a' }}>Finger Analysis</p>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {['thumb','index','middle','ring','pinky'].map(name => {
+                    const f = fingers[name];
+                    if (!f) return null;
+                    const color = FINGER_COLOR[name];
+                    const lengthPct = f.length === 'Long' ? 100 : f.length === 'Medium' ? 60 : 25;
+                    return (
+                      <div key={name} className="rounded-lg p-2 flex flex-col items-center gap-1.5" style={{ background: '#111', border: `1px solid ${color}22` }}>
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-black" style={{ background: color }}>
+                          {FINGER_LABEL[name]}
+                        </div>
+                        <p className="text-[10px] font-semibold capitalize" style={{ color }}>{name}</p>
+                        <div className="w-full rounded-full h-1" style={{ background: '#222' }}>
+                          <div className="h-1 rounded-full" style={{ width: `${lengthPct}%`, background: color }} />
+                        </div>
+                        <p className="text-[9px] text-center leading-tight" style={{ color: '#5a5a5a' }}>{f.length}</p>
+                        {f.flexibility && <p className="text-[9px]" style={{ color: f.flexibility === 'High' ? '#4ade80' : f.flexibility === 'Low' ? '#f87171' : '#c9a96e' }}>{f.flexibility} flex</p>}
+                        {f.straightness && <p className="text-[9px]" style={{ color: '#5a5a5a' }}>{f.straightness}</p>}
+                        {f.independence && <p className="text-[9px]" style={{ color: f.independence === 'High' ? '#4ade80' : f.independence === 'Low' ? '#f87171' : '#c9a96e' }}>{f.independence} indep</p>}
+                        {f.reach && <p className="text-[9px]" style={{ color: f.reach === 'Strong' ? '#4ade80' : f.reach === 'Weak' ? '#f87171' : '#c9a96e' }}>{f.reach}</p>}
+                        {f.note && <p className="text-[9px] text-center leading-tight mt-0.5" style={{ color: '#3a3a3a' }}>{f.note}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Overall span / splay */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Overall Span</p>
+                <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{bp.absolute_span_assessment}</p>
+              </div>
+              <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Splay / Flexibility</p>
+                <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{bp.inferred_flexibility_splay}</p>
+              </div>
+            </div>
+
+            {/* Grades */}
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide font-semibold" style={{ color: '#3a3a3a' }}>Chord Capability Grades</p>
+              {report.chord_capability_grades.map((g) => (
+                <div key={g.grade_level} className="rounded-lg p-3" style={{ background: '#111', border: `1px solid ${STATUS_COLOR[g.status]}22` }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span>{STATUS_ICON[g.status]}</span>
+                    <span className="text-sm font-bold" style={{ color: STATUS_COLOR[g.status] }}>{g.grade_level}</span>
+                    <span className="text-xs" style={{ color: '#5a5a5a' }}>{g.status}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    {g.supported_voicings.map(v => (
+                      <span key={v} className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: `${STATUS_COLOR[g.status]}15`, color: STATUS_COLOR[g.status] }}>{v}</span>
+                    ))}
+                  </div>
+                  <p className="text-xs" style={{ color: '#4a4a4a' }}>{g.anatomical_reasoning}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Recommended focus */}
+            <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: '#818cf8' }}>Recommended Focus</p>
+              <p className="text-sm" style={{ color: '#d0cdc8' }}>{report.recommended_focus}</p>
+            </div>
+
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function HandProfileSetup({ profile, onSave, saveError, lang }) {
+export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, saveError, lang }) {
   const tr = useT(lang);
   const [local, setLocal] = useState({ ...DEFAULT_PROFILE, ...profile });
   const [saved, setSaved] = useState(false);
@@ -465,7 +580,12 @@ export default function HandProfileSetup({ profile, onSave, saveError, lang }) {
       {/* AI hand analysis panel */}
       {showAICamera && (
         <div className="mb-6">
-          <AIHandAnalysis lang={lang} />
+          <AIHandAnalysis lang={lang} onMeasured={(measurements, fingers) => {
+            setLocal(prev => ({ ...prev, ...measurements }));
+            setSaved(false);
+            onSave({ ...local, ...measurements });
+            if (fingers && onSaveAIFingers) onSaveAIFingers(fingers);
+          }} />
         </div>
       )}
 

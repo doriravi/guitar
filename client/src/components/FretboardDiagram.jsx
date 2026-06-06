@@ -44,7 +44,7 @@ export default function FretboardDiagram({ chord }) {
 
         {/* Nut (thick bar) or position indicator */}
         {isAtNut ? (
-          <rect x={sx(0)} y={fy(0)} width={5 * CELL_W} height={4} rx={1} fill="#333" />
+          <rect x={sx(0)} y={fy(0)} width={5 * CELL_W} height={4} rx={1} fill="#666" />
         ) : (
           <>
             <line x1={sx(0)} y1={fy(0)} x2={sx(5)} y2={fy(0)}
@@ -81,7 +81,7 @@ export default function FretboardDiagram({ chord }) {
           if (val === '0') {
             return (
               <circle key={s} cx={sx(s)} cy={MARGIN_Y - 12} r={5}
-                      fill="none" stroke="#555" strokeWidth="1.5" />
+                      fill="none" stroke="#888" strokeWidth="1.5" />
             );
           }
           return null;
@@ -97,7 +97,7 @@ export default function FretboardDiagram({ chord }) {
           const cy = fy(relFret) + CELL_H / 2;
           return (
             <circle key={s} cx={cx} cy={cy} r={CELL_H * 0.36}
-                    fill="#222" />
+                    fill="#888" />
           );
         })}
       </svg>
