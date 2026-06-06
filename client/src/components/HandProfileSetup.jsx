@@ -225,19 +225,43 @@ function AIHandAnalysis({ lang }) {
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8080';
-      const res = await fetch(`${apiBase}/api/analyze-hand`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageB64: b64 }),
-      });
-      const resText = await res.text();
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error('VITE_GEMINI_API_KEY is not set. Add it to your .env.local file.');
+
+      const PROMPT = `You are an expert biomechanical analysis agent specializing in guitar ergonomics. Analyze the photograph of the user's left hand and determine their physiological capacity for executing various guitar chord voicings.
+
+Evaluate: absolute span (index to pinky), thumb length/pivot, index finger linearity, middle/ring lateral splay, pinky reach and arch.
+
+Grade levels:
+Grade 1 (Fundamentals): Open chords, basic triads.
+Grade 2 (Clustered Complexity): High lateral splay, low span. Drop-2 jazz, diminished inversions.
+Grade 3 (The Standard): Moderate span, linear index. 6-string barres, minor 9ths.
+Grade 4 (Brute Force): Large span, long thumb. 5-fret power chords, Hendrix thumb chords.
+Grade 5 (Extended Range): Maximum span AND high splay. Wide add9, Holdsworth voicings.
+
+Return ONLY valid JSON, no markdown fences, no extra text:
+{"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","digit_analysis":{"thumb":"...","index":"...","middle_ring_cluster":"...","pinky":"..."}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["..."],"anatomical_reasoning":"..."}],"recommended_focus":"..."}`;
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [
+            { text: PROMPT },
+            { inline_data: { mime_type: 'image/jpeg', data: b64 } },
+          ]}] }),
+        }
+      );
+      const data = await res.json();
       if (!res.ok) {
-        let detail = resText;
-        try { detail = JSON.parse(resText).error || resText; } catch {}
-        throw new Error(`Server error ${res.status}: ${detail}`);
+        const msg = data?.error?.message || `Gemini error ${res.status}`;
+        if (res.status === 429) throw new Error('Gemini API quota exceeded. Please check your API key quota at ai.google.dev.');
+        throw new Error(msg);
       }
-      setReport(JSON.parse(resText));
+      let text = data.candidates[0].content.parts[0].text.trim();
+      if (text.startsWith('```')) { text = text.replace(/^```[a-z]*\n?/, '').replace(/```\s*$/, '').trim(); }
+      setReport(JSON.parse(text));
       setPhase('done');
     } catch (e) {
       setErrMsg(e.message || 'Analysis failed.');
