@@ -225,14 +225,19 @@ function AIHandAnalysis({ lang }) {
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
-      const res = await fetch('/api/analyze-hand', {
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      const res = await fetch(`${apiBase}/api/analyze-hand`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageB64: b64 }),
       });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const text = await res.text();
-      setReport(JSON.parse(text));
+      const resText = await res.text();
+      if (!res.ok) {
+        let detail = resText;
+        try { detail = JSON.parse(resText).error || resText; } catch {}
+        throw new Error(`Server error ${res.status}: ${detail}`);
+      }
+      setReport(JSON.parse(resText));
       setPhase('done');
     } catch (e) {
       setErrMsg(e.message || 'Analysis failed.');
