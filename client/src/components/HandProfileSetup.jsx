@@ -188,19 +188,19 @@ function AIHandAnalysis({ lang }) {
   const streamRef = useRef(null);
 
   const startCamera = async () => {
-    setPhase('capturing');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
       });
       streamRef.current = stream;
+      setPhase('capturing'); // mount video element first, then attach in effect
     } catch (e) {
-      setErrMsg('Camera access denied.');
+      setErrMsg(e.name === 'NotAllowedError' ? 'Camera access denied.' : e.message);
       setPhase('error');
     }
   };
 
-  // attach stream once video element mounts
+  // attach stream once video element is in the DOM (after phase → 'capturing')
   useEffect(() => {
     if (phase !== 'capturing') return;
     const v = videoRef.current;
