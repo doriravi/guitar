@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { DEFAULT_PROFILE, abilityLabel, reachMultiplier } from '../lib/handProfile';
 import CameraHandMeasure from './CameraHandMeasure';
 import { useT } from '../lib/i18n';
@@ -177,11 +177,222 @@ function HandDiagram({ profile }) {
   );
 }
 
+// ── AI Hand Analysis (Gemini vision) ─────────────────────────────────────────
+
+function AIHandAnalysis({ lang }) {
+  const [phase, setPhase]       = useState('idle'); // idle | capturing | analysing | done | error
+  const [report, setReport]     = useState(null);
+  const [errMsg, setErrMsg]     = useState('');
+  const videoRef  = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const startCamera = async () => {
+    setPhase('capturing');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      });
+      streamRef.current = stream;
+    } catch (e) {
+      setErrMsg('Camera access denied.');
+      setPhase('error');
+    }
+  };
+
+  // attach stream once video element mounts
+  useEffect(() => {
+    if (phase !== 'capturing') return;
+    const v = videoRef.current;
+    if (!v || !streamRef.current) return;
+    v.srcObject = streamRef.current;
+    v.play().catch(() => {});
+  }, [phase]);
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  };
+
+  const capture = async () => {
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c) return;
+    c.width  = v.videoWidth  || 640;
+    c.height = v.videoHeight || 480;
+    c.getContext('2d').drawImage(v, 0, 0);
+    stopStream();
+    setPhase('analysing');
+    const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    try {
+      const SYSTEM_PROMPT = `You are an expert biomechanical analysis agent specializing in guitar ergonomics. Analyze the photograph of the user's left hand and determine their physiological capacity for executing various guitar chord voicings.
+
+Evaluate: absolute span (index to pinky), thumb length/pivot, index finger linearity, middle/ring lateral splay, pinky reach and arch.
+
+Grade levels:
+- Grade 1 (Fundamentals): Open chords, basic triads.
+- Grade 2 (Clustered Complexity): High lateral splay, low span. Drop-2 jazz voicings, diminished inversions.
+- Grade 3 (The Standard): Moderate span, linear index. 6-string barres, minor 9ths.
+- Grade 4 (Brute Force): Large span, long thumb. 5-fret power chords, Hendrix thumb chords.
+- Grade 5 (Extended Range): Maximum span AND high splay/pinky. Wide add9, Holdsworth voicings.
+
+Return ONLY valid JSON (no markdown):
+{"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","digit_analysis":{"thumb":"...","index":"...","middle_ring_cluster":"...","pinky":"..."}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["..."],"anatomical_reasoning":"..."}],"recommended_focus":"..."}`;
+
+      const API_KEY = 'AIzaSyCtiStvl9snyRWArfKba4Gn1sNRnecc2FQ';
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: SYSTEM_PROMPT },
+              { inline_data: { mime_type: 'image/jpeg', data: b64 } },
+            ]}],
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(`Gemini error ${res.status}`);
+      const data = await res.json();
+      let raw = data.candidates[0].content.parts[0].text.trim();
+      if (raw.startsWith('```')) { raw = raw.split('\n').slice(1).join('\n').replace(/```$/, '').trim(); }
+      setReport(JSON.parse(raw));
+      setPhase('done');
+    } catch (e) {
+      setErrMsg(e.message || 'Analysis failed.');
+      setPhase('error');
+    }
+  };
+
+  const reset = () => { setPhase('idle'); setReport(null); setErrMsg(''); stopStream(); };
+
+  const STATUS_ICON = { 'Optimal': '✅', 'Challenging': '⚠️', 'Structurally Restricted': '❌' };
+  const STATUS_COLOR = { 'Optimal': '#4ade80', 'Challenging': '#c9a96e', 'Structurally Restricted': '#f87171' };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #222' }}>
+        <div className="flex items-center gap-2">
+          <span>🤖</span>
+          <span className="text-sm font-semibold" style={{ color: '#f0ede8' }}>AI Hand Analysis</span>
+          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>Gemini</span>
+        </div>
+        {phase !== 'idle' && (
+          <button onClick={reset} className="text-xs px-3 py-1 rounded-lg" style={{ color: '#5a5a5a', border: '1px solid #2a2a2a' }}>
+            Reset
+          </button>
+        )}
+      </div>
+
+      {phase === 'idle' && (
+        <div className="p-5 text-center">
+          <p className="text-sm mb-1" style={{ color: '#7a7a7a' }}>Take a photo of your left hand — AI will grade your chord reach capability across 5 levels.</p>
+          <p className="text-xs mb-4" style={{ color: '#4a4a4a' }}>Splay your fingers wide, palm facing the camera.</p>
+          <button onClick={startCamera} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: '#6366f1', color: '#fff' }}>
+            📷 Open Camera
+          </button>
+        </div>
+      )}
+
+      {phase === 'capturing' && (
+        <div>
+          <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
+            <video ref={videoRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} playsInline muted />
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+          <div className="p-4 flex items-center justify-between gap-4">
+            <p className="text-xs" style={{ color: '#5a5a5a' }}>Splay your left hand wide in frame, then capture.</p>
+            <div className="flex gap-2 shrink-0">
+              <button onClick={reset} className="px-4 py-2 rounded-xl text-sm font-semibold" style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}>
+                Cancel
+              </button>
+              <button onClick={capture} className="px-5 py-2 rounded-xl text-sm font-semibold" style={{ background: '#6366f1', color: '#fff' }}>
+                Capture & Analyse
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase === 'analysing' && (
+        <div className="p-6 flex items-center justify-center gap-3">
+          <div className="w-4 h-4 rounded-full border-2 animate-spin" style={{ borderColor: '#6366f1', borderTopColor: 'transparent' }} />
+          <span className="text-sm" style={{ color: '#5a5a5a' }}>Analysing with Gemini…</span>
+        </div>
+      )}
+
+      {phase === 'error' && (
+        <div className="p-5 text-center">
+          <p className="text-sm mb-3" style={{ color: '#f87171' }}>⚠ {errMsg}</p>
+          <button onClick={reset} className="px-5 py-2 rounded-xl text-sm font-semibold" style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}>Try Again</button>
+        </div>
+      )}
+
+      {phase === 'done' && report && (
+        <div className="p-4 space-y-4">
+          {/* Profile summary */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Span</p>
+              <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{report.biomechanical_profile.absolute_span_assessment}</p>
+            </div>
+            <div className="rounded-lg px-3 py-2" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>Splay / Flexibility</p>
+              <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{report.biomechanical_profile.inferred_flexibility_splay}</p>
+            </div>
+          </div>
+
+          {/* Digit analysis */}
+          <div className="rounded-lg p-3 space-y-1.5" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+            <p className="text-xs uppercase tracking-wide font-semibold mb-2" style={{ color: '#3a3a3a' }}>Digit Analysis</p>
+            {Object.entries(report.biomechanical_profile.digit_analysis).map(([k, v]) => (
+              <div key={k} className="flex gap-2 text-xs">
+                <span className="font-semibold capitalize shrink-0 w-28" style={{ color: '#c9a96e' }}>{k.replace(/_/g,' ')}</span>
+                <span style={{ color: '#7a7a7a' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Grades */}
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wide font-semibold" style={{ color: '#3a3a3a' }}>Chord Capability Grades</p>
+            {report.chord_capability_grades.map((g) => (
+              <div key={g.grade_level} className="rounded-lg p-3" style={{ background: '#111', border: `1px solid ${STATUS_COLOR[g.status]}22` }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span>{STATUS_ICON[g.status]}</span>
+                  <span className="text-sm font-bold" style={{ color: STATUS_COLOR[g.status] }}>{g.grade_level}</span>
+                  <span className="text-xs" style={{ color: '#5a5a5a' }}>{g.status}</span>
+                </div>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {g.supported_voicings.map(v => (
+                    <span key={v} className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: `${STATUS_COLOR[g.status]}15`, color: STATUS_COLOR[g.status] }}>{v}</span>
+                  ))}
+                </div>
+                <p className="text-xs" style={{ color: '#4a4a4a' }}>{g.anatomical_reasoning}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Recommended focus */}
+          <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+            <p className="text-xs font-semibold mb-1" style={{ color: '#818cf8' }}>Recommended Focus</p>
+            <p className="text-sm" style={{ color: '#d0cdc8' }}>{report.recommended_focus}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function HandProfileSetup({ profile, onSave, saveError, lang }) {
   const tr = useT(lang);
   const [local, setLocal] = useState({ ...DEFAULT_PROFILE, ...profile });
   const [saved, setSaved] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
+  const [showCamera, setShowCamera]   = useState(false);
+  const [showAICamera, setShowAICamera] = useState(false);
 
   // Sync when profile loads from server after login
   useEffect(() => {
@@ -216,22 +427,41 @@ export default function HandProfileSetup({ profile, onSave, saveError, lang }) {
           <h2 className="text-xl font-bold mb-1" style={{ color: '#f0ede8' }}>{tr.handProfile}</h2>
           <p className="text-sm" style={{ color: '#5a5a5a' }}>{tr.handProfileDesc}</p>
         </div>
-        <button
-          onClick={() => setShowCamera(v => !v)}
-          className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all"
-          style={showCamera
-            ? { background: 'rgba(201,169,110,0.12)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }
-            : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
-        >
-          <span>📷</span>
-          <span>{showCamera ? tr.hideCamera : tr.measureWithCamera}</span>
-        </button>
+        <div className="flex flex-col gap-2 shrink-0">
+          <button
+            onClick={() => { setShowCamera(v => !v); setShowAICamera(false); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+            style={showCamera
+              ? { background: 'rgba(201,169,110,0.12)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }
+              : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
+          >
+            <span>📷</span>
+            <span>{showCamera ? tr.hideCamera : tr.measureWithCamera}</span>
+          </button>
+          <button
+            onClick={() => { setShowAICamera(v => !v); setShowCamera(false); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+            style={showAICamera
+              ? { background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }
+              : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
+          >
+            <span>🤖</span>
+            <span>{showAICamera ? 'Hide AI Analysis' : 'AI Hand Analysis'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Camera measurement panel */}
       {showCamera && (
         <div className="mb-6">
           <CameraHandMeasure onMeasured={handleCameraMeasured} lang={lang} />
+        </div>
+      )}
+
+      {/* AI hand analysis panel */}
+      {showAICamera && (
+        <div className="mb-6">
+          <AIHandAnalysis lang={lang} />
         </div>
       )}
 
