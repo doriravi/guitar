@@ -855,6 +855,116 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
   );
 }
 
+const SONGS_KEY = 'guitar_songs';
+
+function loadSongs() {
+  try { return JSON.parse(localStorage.getItem(SONGS_KEY)) || []; } catch { return []; }
+}
+
+function saveSongs(songs) {
+  try { localStorage.setItem(SONGS_KEY, JSON.stringify(songs)); } catch {}
+}
+
+function SongManager({ beats, bpm, loop, onLoad, onClose }) {
+  const [songs, setSongs] = useState(loadSongs);
+  const [nameInput, setNameInput] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const handleSave = () => {
+    const name = nameInput.trim();
+    if (!name) return;
+    const song = { name, bpm, loop, beats: beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null })), savedAt: Date.now() };
+    const updated = [...songs.filter(s => s.name !== name), song];
+    saveSongs(updated);
+    setSongs(updated);
+    setNameInput('');
+  };
+
+  const handleLoad = (song) => {
+    onLoad(song);
+    onClose();
+  };
+
+  const handleDelete = (name) => {
+    const updated = songs.filter(s => s.name !== name);
+    saveSongs(updated);
+    setSongs(updated);
+    setConfirmDelete(null);
+  };
+
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#c9a96e' }}>Songs</span>
+        <button onClick={onClose} className="text-xs" style={{ color: '#5a5a5a' }}>✕ Close</button>
+      </div>
+
+      {/* Save current as */}
+      <div className="flex gap-2 mb-3">
+        <input
+          value={nameInput}
+          onChange={e => setNameInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSave()}
+          placeholder="Song name…"
+          className="flex-1 px-3 py-1.5 rounded-lg text-xs outline-none"
+          style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+        />
+        <button
+          onClick={handleSave}
+          disabled={!nameInput.trim()}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          style={nameInput.trim()
+            ? { background: '#c9a96e', color: '#0f0f0f' }
+            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+          Save
+        </button>
+      </div>
+
+      {/* Saved songs list */}
+      {songs.length === 0 ? (
+        <p className="text-xs text-center py-3" style={{ color: '#3a3a3a' }}>No saved songs yet</p>
+      ) : (
+        <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+          {[...songs].reverse().map(s => (
+            <div key={s.name}
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+              style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold truncate" style={{ color: '#f0ede8' }}>{s.name}</p>
+                <p className="text-[10px]" style={{ color: '#3a3a3a' }}>
+                  {s.beats.length} beat{s.beats.length !== 1 ? 's' : ''} · {s.bpm} BPM
+                  {s.loop ? ' · loop' : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => handleLoad(s)}
+                className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
+                style={{ background: 'rgba(201,169,110,0.12)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.2)' }}>
+                Load
+              </button>
+              {confirmDelete === s.name ? (
+                <button
+                  onClick={() => handleDelete(s.name)}
+                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
+                  style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}>
+                  Confirm
+                </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(s.name)}
+                  className="shrink-0 px-2 py-1 rounded-md text-xs"
+                  style={{ color: '#4a4a4a' }}>
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MusicEditorMode({ diffMax, tr }) {
   const [beats, setBeats] = useState([{ frets: EMPTY_BEAT(), id: 0 }]);
   const [editIdx, setEditIdx] = useState(0);
@@ -862,6 +972,7 @@ function MusicEditorMode({ diffMax, tr }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [bpm, setBpm] = useState(80);
   const [loop, setLoop] = useState(false);
+  const [showSongs, setShowSongs] = useState(false);
   const nextId = useRef(1);
   const playTimer = useRef(null);
   const bpmRef = useRef(bpm);
@@ -965,6 +1076,17 @@ function MusicEditorMode({ diffMax, tr }) {
     setBeats(prev => prev.map((b, i) => i === editIdx ? { ...b, frets: EMPTY_BEAT(), chordLabel: null } : b));
   };
 
+  const loadSong = useCallback((song) => {
+    const loaded = song.beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null, id: nextId.current++ }));
+    setBeats(loaded);
+    setBpm(song.bpm);
+    setLoop(song.loop ?? false);
+    setEditIdx(0);
+    setPlayIdx(null);
+    setIsPlaying(false);
+    clearTimeout(playTimer.current);
+  }, []);
+
   const applyChord = useCallback((voicing) => {
     const frets = tabToFrets(voicing.tab);
     strum(frets);
@@ -996,6 +1118,15 @@ function MusicEditorMode({ diffMax, tr }) {
             ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }
             : { background: '#141414', color: '#5a5a5a', border: '1px solid #222' }}>
           ↻ Loop
+        </button>
+
+        <button
+          onClick={() => setShowSongs(s => !s)}
+          className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+          style={showSongs
+            ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }
+            : { background: '#141414', color: '#5a5a5a', border: '1px solid #222' }}>
+          💾 Songs
         </button>
 
         {/* BPM slider */}
@@ -1040,6 +1171,17 @@ function MusicEditorMode({ diffMax, tr }) {
           <span className="text-[9px]">beat</span>
         </button>
       </div>
+
+      {/* Song manager */}
+      {showSongs && (
+        <SongManager
+          beats={beats}
+          bpm={bpm}
+          loop={loop}
+          onLoad={loadSong}
+          onClose={() => setShowSongs(false)}
+        />
+      )}
 
       {/* Chord picker */}
       <ChordPicker onApply={applyChord} diffMax={diffMax} tr={tr} />

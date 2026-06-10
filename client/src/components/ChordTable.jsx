@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { CHORDS } from '../lib/chords';
-import { calcDifficulty } from '../lib/fretboard';
+import { calcDifficulty, fingerGapUsage, GAP_REF_MAX } from '../lib/fretboard';
 import { personalDifficulty } from '../lib/handProfile';
 import { useHandProfile } from '../App';
 import DifficultyBadge from './DifficultyBadge';
@@ -8,6 +8,55 @@ import FretboardDiagram from './FretboardDiagram';
 import { useT } from '../lib/i18n';
 
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
+
+const FINGER_PAIRS = [
+  { label: 'T→I', key: 'thumbToIndex',  color: '#a78bfa' },
+  { label: 'I→M', key: 'indexToMiddle', color: '#60a5fa' },
+  { label: 'M→R', key: 'middleToRing',  color: '#34d399' },
+  { label: 'R→P', key: 'ringToLittle',  color: '#f97316' },
+];
+
+
+function GapBar({ label, color, rawFraction, userFraction, requiredCm, userCm, refMax }) {
+  const userPct = Math.min(1, userFraction);
+  const overUser = userFraction > 1;
+  const barColor = overUser ? '#ef4444' : userFraction > 0.9 ? '#f97316' : userFraction > 0.7 ? '#eab308' : '#22c55e';
+  const tooltip = `${label}: needs ~${requiredCm.toFixed(1)} cm — your span ${userCm.toFixed(1)} cm (${Math.round(userFraction * 100)}% of capacity)`;
+
+  return (
+    <div className="flex items-center gap-1.5" title={tooltip}>
+      <span className="text-[9px] w-6 shrink-0" style={{ color }}>{label}</span>
+      <div className="relative h-1.5 rounded-full overflow-hidden" style={{ width: 44, background: '#2a2a2a' }}>
+        <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${userPct * 100}%`, background: barColor }} />
+      </div>
+      <span className="text-[9px] tabular-nums" style={{ color: overUser ? '#ef4444' : '#666' }}>
+        {requiredCm.toFixed(1)}<span style={{ color: '#3a3a3a' }}>/{userCm.toFixed(1)}</span>cm
+      </span>
+    </div>
+  );
+}
+
+function FingerGapDisplay({ notes, profile }) {
+  const usage = useMemo(() => fingerGapUsage(notes), [notes]);
+  if (!usage) return null;
+
+  const pairs = FINGER_PAIRS.map(p => {
+    const rawFraction = usage[p.key];
+    const refMax = GAP_REF_MAX[p.key];
+    const requiredCm = rawFraction * refMax;
+    const userCm = profile[p.key];
+    const userFraction = userCm > 0 ? requiredCm / userCm : requiredCm > 0 ? 2 : 0;
+    return { ...p, rawFraction, userFraction, requiredCm, userCm, refMax };
+  }).filter(p => p.rawFraction > 0.05);
+
+  if (pairs.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-0.5 mt-1">
+      {pairs.map(p => <GapBar key={p.key} {...p} />)}
+    </div>
+  );
+}
 
 export default function ChordTable({ lang }) {
   const tr = useT(lang);
@@ -97,10 +146,13 @@ export default function ChordTable({ lang }) {
                 <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.fingeringStr}</td>
                 <td className="px-4 py-2">
                   {isPersonal ? (
-                    <span className="flex items-center gap-2">
-                      <DifficultyBadge score={r.personalScore} />
-                      <span className="text-xs tabular-nums" style={{ color: '#333' }}>{r.score.toFixed(1)}</span>
-                    </span>
+                    <div>
+                      <span className="flex items-center gap-2">
+                        <DifficultyBadge score={r.personalScore} />
+                        <span className="text-xs tabular-nums" style={{ color: '#333' }}>{r.score.toFixed(1)}</span>
+                      </span>
+                      <FingerGapDisplay notes={r.notes} profile={handProfile} />
+                    </div>
                   ) : (
                     <DifficultyBadge score={r.score} />
                   )}
