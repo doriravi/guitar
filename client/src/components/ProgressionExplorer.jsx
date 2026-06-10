@@ -2,8 +2,8 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
 import { CHORDS } from '../lib/chords';
-import { calcDifficulty } from '../lib/fretboard';
-import { personalDifficulty, reachMultiplier, DEFAULT_PROFILE } from '../lib/handProfile';
+import { calcDifficulty, fingerGapUsage, GAP_REF_MAX } from '../lib/fretboard';
+import { DEFAULT_PROFILE } from '../lib/handProfile';
 import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION } from '../lib/songs';
 import DifficultyBadge from './DifficultyBadge';
@@ -63,6 +63,53 @@ function cardKey(prog) {
   return `${prog.root}|${prog.scaleType}|${prog.name}`;
 }
 
+// ─── Finger gap bars ─────────────────────────────────────────────────────────
+
+const PAIR_META = [
+  { key: 'thumbToIndex',  label: 'T→I', color: '#a78bfa' },
+  { key: 'indexToMiddle', label: 'I→M', color: '#60a5fa' },
+  { key: 'middleToRing',  label: 'M→R', color: '#34d399' },
+  { key: 'ringToLittle',  label: 'R→P', color: '#f97316' },
+];
+
+function FingerGapBars({ notes, profile }) {
+  const usage = fingerGapUsage(notes);
+  if (!usage) return null;
+
+  const pairs = PAIR_META.map(p => {
+    const rawFraction = usage[p.key];
+    const refMax = GAP_REF_MAX[p.key];
+    const requiredCm = rawFraction * refMax;
+    const userCm = profile[p.key];
+    const userFraction = userCm > 0 ? requiredCm / userCm : requiredCm > 0 ? 2 : 0;
+    return { ...p, rawFraction, userFraction, requiredCm, userCm };
+  }).filter(p => p.rawFraction > 0.05);
+
+  if (pairs.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-0.5 mt-1.5">
+      {pairs.map(p => {
+        const over = p.userFraction > 1;
+        const barColor = over ? '#ef4444' : p.userFraction > 0.9 ? '#f97316' : p.userFraction > 0.7 ? '#eab308' : '#22c55e';
+        const tip = `${p.label}: needs ~${p.requiredCm.toFixed(1)} cm — your span ${p.userCm.toFixed(1)} cm (${Math.round(p.userFraction * 100)}%)`;
+        return (
+          <div key={p.key} className="flex items-center gap-1" title={tip}>
+            <span className="text-[8px] w-5 shrink-0" style={{ color: p.color }}>{p.label}</span>
+            <div className="relative h-1 rounded-full overflow-hidden" style={{ width: 36, background: '#2a2a2a' }}>
+              <div className="absolute left-0 top-0 h-full rounded-full"
+                style={{ width: `${Math.min(1, p.userFraction) * 100}%`, background: barColor }} />
+            </div>
+            <span className="text-[8px] tabular-nums" style={{ color: over ? '#ef4444' : '#555' }}>
+              {p.requiredCm.toFixed(1)}<span style={{ color: '#333' }}>/{p.userCm.toFixed(1)}</span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
 function LyricsSection({ title, artist, progChordsWithVoicings }) {
@@ -81,33 +128,25 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
       .catch(() => setStatus('error'));
   }, [title, artist]);
 
-  // Build per-word chord annotations distributed evenly across the song
+  // Split lyrics into non-blank lines, then assign one chord per line cycling through the full progression
   const annotatedLines = useMemo(() => {
-    if (status !== 'done' || !lyrics) return [];
-    const rawLines = lyrics.split('\n');
+    if (status !== 'done' || !lyrics || !progChordsWithVoicings.length) return [];
     const n = progChordsWithVoicings.length;
-
-    // Count total words to compute spacing
-    let totalWords = 0;
-    rawLines.forEach(l => { if (l.trim()) totalWords += l.trim().split(/\s+/).length; });
-
-    // Estimate how many times the progression repeats through the song
-    const nonBlankLines = rawLines.filter(l => l.trim()).length;
-    const repetitions = Math.max(1, Math.round(nonBlankLines / 8));
-    const wordsPerChord = Math.max(2, Math.floor(totalWords / (n * repetitions)));
-
-    let globalWordIdx = 0;
-    return rawLines.map(line => {
-      if (!line.trim()) return { blank: true };
-      const words = line.trim().split(/\s+/);
-      const annotated = words.map(word => {
-        const isChange = globalWordIdx % wordsPerChord === 0;
-        const chord = isChange ? progChordsWithVoicings[Math.floor(globalWordIdx / wordsPerChord) % n] : null;
-        globalWordIdx++;
-        return { word, chord };
-      });
-      return { blank: false, annotated };
-    });
+    const result = [];
+    let chordIdx = 0;
+    for (const raw of lyrics.split('\n')) {
+      if (!raw.trim()) {
+        result.push({ blank: true });
+        continue;
+      }
+      // Each lyric line gets the next chord; split the line into n segments if the progression
+      // has multiple chords so every chord appears at least once per "verse block".
+      // Simplest correct approach: one chord per line, cycling.
+      const chord = progChordsWithVoicings[chordIdx % n];
+      chordIdx++;
+      result.push({ blank: false, text: raw.trim(), chord });
+    }
+    return result;
   }, [lyrics, status, progChordsWithVoicings]);
 
   if (status === 'loading') return (
@@ -118,35 +157,32 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
   );
 
   return (
-    <div className="px-3 sm:px-4 py-3 max-h-72 overflow-y-auto font-mono"
+    <div className="px-3 sm:px-4 py-3 max-h-72 overflow-y-auto font-mono text-xs"
       style={{ borderTop: '1px solid #1a1a1a', background: '#0f0f0f' }}>
       {annotatedLines.map((line, i) => {
-        if (line.blank) return <div key={i} className="mt-3" />;
+        if (line.blank) return <div key={i} className="mt-2" />;
+        const { chord, text } = line;
+        const v = chord?.voicings?.[0];
+        const inProg = chord?.inProgression !== false;
         return (
-          <div key={i} className="mb-2 flex flex-wrap gap-x-2 gap-y-0 leading-none">
-            {line.annotated.map(({ word, chord }, j) => (
-              <span key={j} className="inline-flex flex-col items-start">
-                <span
-                  className="text-xs font-bold h-4 leading-none cursor-default"
-                  style={{ color: chord ? '#818cf8' : 'transparent', userSelect: chord ? 'auto' : 'none' }}
-                  onMouseEnter={chord ? e => {
-                    const v = chord.voicings[0];
-                    if (!v) return;
-                    const r = e.currentTarget.getBoundingClientRect();
-                    const tipW = 148;
-                    setTooltip({
-                      voicing: v,
-                      x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
-                      y: r.top - 10,
-                    });
-                  } : undefined}
-                  onMouseLeave={chord ? () => setTooltip(null) : undefined}
-                >
-                  {chord ? chord.chordName : '·'}
-                </span>
-                <span className="text-xs" style={{ color: '#7a7a7a' }}>{word}</span>
-              </span>
-            ))}
+          <div key={i} className="mb-0.5 flex items-baseline gap-2 leading-snug">
+            <span
+              className="font-bold shrink-0 w-10 text-right cursor-default select-none"
+              style={{ color: inProg ? '#818cf8' : '#f87171' }}
+              onMouseEnter={v ? e => {
+                const r = e.currentTarget.getBoundingClientRect();
+                const tipW = 148;
+                setTooltip({
+                  voicing: v,
+                  x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
+                  y: r.top - 10,
+                });
+              } : undefined}
+              onMouseLeave={v ? () => setTooltip(null) : undefined}
+            >
+              {chord?.chordName}
+            </span>
+            <span style={{ color: '#6a6a6a' }}>{text}</span>
           </div>
         );
       })}
@@ -165,22 +201,29 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
 
 // ─── Song row ─────────────────────────────────────────────────────────────────
 
-function SongRow({ song, cardChordNames, tr }) {
+function SongRow({ song, progDegreeSet, tr }) {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Unique chords the song actually uses, in order of first appearance
+  // Full chord sequence from the song's own key, with inProgression flag
   const songChordsWithVoicings = useMemo(() => {
     const diatonic = getDiatonicChords(song.key, song.scaleType);
+    return song.degrees.map(d => {
+      const { chordName } = diatonic[d];
+      const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
+      return { chordName, voicings, inProgression: progDegreeSet.has(d) };
+    });
+  }, [song.key, song.scaleType, song.degrees, progDegreeSet]);
+
+  // Deduplicated unique chords for strip display
+  const stripChords = useMemo(() => {
     const seen = new Set();
-    return song.degrees
-      .filter(d => { if (seen.has(d)) return false; seen.add(d); return true; })
-      .map(d => {
-        const { chordName } = diatonic[d];
-        const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
-        return { chordName, voicings };
-      });
-  }, [song.key, song.scaleType, song.degrees]);
+    return songChordsWithVoicings.filter(c => {
+      if (seen.has(c.chordName)) return false;
+      seen.add(c.chordName);
+      return true;
+    });
+  }, [songChordsWithVoicings]);
 
   return (
     <div style={{ borderBottom: '1px solid #1a1a1a' }}>
@@ -227,16 +270,16 @@ function SongRow({ song, cardChordNames, tr }) {
           </button>
         </div>
       </div>
-      <div className="flex overflow-x-auto pb-2" style={{ borderTop: '1px solid #1a1a1a' }}>
-        {cardChordNames.map((chord, j) => (
-          <div key={j} className="flex-1 px-2 sm:px-3 py-1" style={{ minWidth: 64 }}>
+      <div className="flex flex-wrap gap-x-0 overflow-x-auto pb-1" style={{ borderTop: '1px solid #1a1a1a' }}>
+        {stripChords.map((c, j) => (
+          <div key={j} className="px-2 sm:px-3 py-1" style={{ minWidth: 48 }}>
             <a
-              href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord)}`}
+              href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(c.chordName)}`}
               target="_blank" rel="noopener noreferrer"
               className="text-xs font-mono font-semibold hover:underline"
-              style={{ color: '#7a7a7a' }}
+              style={{ color: c.inProgression ? '#7a7a7a' : '#f87171' }}
             >
-              {chord}
+              {c.chordName}
             </a>
           </div>
         ))}
@@ -257,17 +300,8 @@ function containsProgression(songDegrees, progDegrees) {
 }
 
 function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, tr }) {
-  // Chord names + voicings for the card's current key — same for every matching song
-  const progChordsWithVoicings = useMemo(() => {
-    const diatonic = getDiatonicChords(targetRoot, progScaleType);
-    return progDegrees.map(d => {
-      const { chordName } = diatonic[d];
-      const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
-      return { chordName, voicings };
-    });
-  }, [targetRoot, progScaleType, progDegrees]);
-
-  const cardChordNames = progChordsWithVoicings.map(c => c.chordName);
+  // Set of degree indices that belong to this progression — used to flag "outside" chords in red
+  const progDegreeSet = useMemo(() => new Set(progDegrees), [progDegrees]);
 
   const songs = (SONGS_BY_PROGRESSION[progressionName] || [])
     .filter(song => {
@@ -291,7 +325,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, t
       </div>
       <div style={{ borderTop: '1px solid #1a1a1a' }}>
         {songs.map((song, i) => (
-          <SongRow key={i} song={song} cardChordNames={cardChordNames} tr={tr} />
+          <SongRow key={i} song={song} progDegreeSet={progDegreeSet} tr={tr} />
         ))}
       </div>
     </div>
@@ -309,24 +343,14 @@ const REACH_ORDER   = { Weak: 0, Moderate: 1, Strong: 2 };
 const STRAIGHT_ORDER = { Curved: 0, Straight: 1 };
 const INDEP_ORDER   = { Low: 0, Medium: 1, High: 2 };
 
-// Returns true if a progression's max personal difficulty is within the threshold
-function progressionFitsHand(prog, profile) {
-  const m = reachMultiplier(profile);
-  const personalMax = prog.chords.reduce((acc, chord) => {
-    const best = chord.voicings.length ? chord.voicings[0].score : 10;
-    return Math.max(acc, personalDifficulty(best, profile));
-  }, 0);
-  return personalMax;
-}
-
 // ─── Hand Filters Panel ───────────────────────────────────────────────────────
 
 function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onSaveProfile, onGapsChange }) {
   const GAPS = [
-    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [8, 18],  step: 0.5, color: '#a78bfa' },
-    { key: 'indexToMiddle', label: 'Index → Middle', range: [4, 12],  step: 0.5, color: '#38bdf8' },
-    { key: 'middleToRing',  label: 'Middle → Ring',  range: [3, 10],  step: 0.5, color: '#34d399' },
-    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [5, 14],  step: 0.5, color: '#c9a96e' },
+    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [0, 18],  step: 0.5, color: '#a78bfa' },
+    { key: 'indexToMiddle', label: 'Index → Middle', range: [0, 12],  step: 0.5, color: '#38bdf8' },
+    { key: 'middleToRing',  label: 'Middle → Ring',  range: [0, 10],  step: 0.5, color: '#34d399' },
+    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [0, 14],  step: 0.5, color: '#c9a96e' },
   ];
 
   const [localGaps, setLocalGaps] = useState({
@@ -381,7 +405,7 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
         className="text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all"
         style={active
           ? { background: `${color}25`, color, border: `1px solid ${color}50` }
-          : { background: '#1a1a1a', color: '#3a3a3a', border: '1px solid #222' }}
+          : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #2a2a2a' }}
       >{label}</button>
     );
   }
@@ -432,7 +456,7 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
       {/* Per-finger filters — only shown if AI data available */}
       {Object.keys(fingers).length > 0 ? (
         <div>
-          <p className="text-xs font-semibold mb-2" style={{ color: '#3a3a3a' }}>Finger Attributes (from AI Analysis)</p>
+          <p className="text-xs font-semibold mb-2" style={{ color: '#7a7a7a' }}>Finger Attributes (from AI Analysis)</p>
           <div className="space-y-2">
             {['thumb', 'index', 'middle', 'ring', 'pinky'].map(name => {
               const f = fingers[name];
@@ -446,38 +470,34 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold capitalize mb-1.5" style={{ color }}>{name}</p>
                     <div className="flex flex-wrap gap-1">
-                      {/* Length */}
-                      {f.length && ['Short','Medium','Long'].map(v => (
-                        <FilterChip key={v} label={v} color={color}
-                          active={handFilters[`${name}_length_min`] !== undefined && LENGTH_ORDER[v] >= LENGTH_ORDER[handFilters[`${name}_length_min`]]}
-                          onClick={() => toggleFilter(`${name}_length_min`, v)} />
-                      ))}
-                      {/* Flexibility (thumb) */}
-                      {f.flexibility && ['Low','Medium','High'].map(v => (
+                      {/* Flexibility (thumb) — caps raw difficulty */}
+                      {name === 'thumb' && f.flexibility && ['Low','Medium','High'].map(v => (
                         <FilterChip key={v} label={`${v} flex`} color={color}
-                          active={handFilters[`${name}_flex_min`] !== undefined && FLEX_ORDER[v] >= FLEX_ORDER[handFilters[`${name}_flex_min`]]}
-                          onClick={() => toggleFilter(`${name}_flex_min`, v)} />
+                          active={handFilters.thumb_flex === v}
+                          onClick={() => toggleFilter('thumb_flex', v)} />
                       ))}
                       {/* Straightness (index) */}
-                      {f.straightness && ['Curved','Straight'].map(v => (
+                      {name === 'index' && f.straightness && ['Curved','Straight'].map(v => (
                         <FilterChip key={v} label={v} color={color}
-                          active={handFilters[`${name}_straight_min`] === v}
-                          onClick={() => toggleFilter(`${name}_straight_min`, v)} />
+                          active={handFilters.index_straight === v}
+                          onClick={() => toggleFilter('index_straight', v)} />
                       ))}
                       {/* Independence (middle, ring) */}
-                      {f.independence && ['Low','Medium','High'].map(v => (
+                      {(name === 'middle' || name === 'ring') && f.independence && ['Low','Medium','High'].map(v => (
                         <FilterChip key={v} label={`${v} indep`} color={color}
-                          active={handFilters[`${name}_indep_min`] !== undefined && INDEP_ORDER[v] >= INDEP_ORDER[handFilters[`${name}_indep_min`]]}
-                          onClick={() => toggleFilter(`${name}_indep_min`, v)} />
+                          active={handFilters[`${name}_indep`] === v}
+                          onClick={() => toggleFilter(`${name}_indep`, v)} />
                       ))}
                       {/* Reach (pinky) */}
-                      {f.reach && ['Weak','Moderate','Strong'].map(v => (
+                      {name === 'pinky' && f.reach && ['Weak','Moderate','Strong'].map(v => (
                         <FilterChip key={v} label={v} color={color}
-                          active={handFilters[`pinky_reach_min`] !== undefined && REACH_ORDER[v] >= REACH_ORDER[handFilters[`pinky_reach_min`]]}
-                          onClick={() => toggleFilter(`pinky_reach_min`, v)} />
+                          active={handFilters.pinky_reach === v}
+                          onClick={() => toggleFilter('pinky_reach', v)} />
                       ))}
+                      {/* Show AI-assessed value as info */}
+                      {f.length && <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ background: '#1e1e1e', color: '#8a8a8a', border: '1px solid #2a2a2a' }}>{f.length}</span>}
                     </div>
-                    {f.note && <p className="text-[10px] mt-1.5" style={{ color: '#3a3a3a' }}>{f.note}</p>}
+                    {f.note && <p className="text-[10px] mt-1.5" style={{ color: '#7a7a7a' }}>{f.note}</p>}
                   </div>
                 </div>
               );
@@ -485,7 +505,7 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
           </div>
         </div>
       ) : (
-        <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#0a0a0a', border: '1px solid #1e1e1e', color: '#3a3a3a' }}>
+        <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#0a0a0a', border: '1px solid #1e1e1e', color: '#7a7a7a' }}>
           Per-finger data not yet available. Use <strong style={{ color: '#818cf8' }}>AI Hand Analysis</strong> on the My Hand tab to unlock finger-level filters.
         </div>
       )}
@@ -504,31 +524,40 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
   );
 }
 
-// Filter progressions by active hand filters
-function filterByHandData(progs, profile, aiFingers, handFilters, maxPersonalDiff) {
+// Each gap drives a difficulty cap for the chord types that rely on it.
+// At 0 cm the cap is 1; at reference max the cap is 10. Linear between.
+function gapDiffCap(val, refMax) {
+  if (refMax <= 0) return 1;
+  return Math.max(1, Math.min(10, Math.round((val / refMax) * 10)));
+}
+
+// Filter progressions by gap measurements + finger chip constraints
+function filterByHandData(progs, profile, aiFingers, handFilters) {
   const fingers = aiFingers || {};
 
-  function fingerPasses(name) {
-    const f = fingers[name];
-    if (!f) return true;
-    const lk = `${name}_length_min`;
-    if (handFilters[lk] && LENGTH_ORDER[f.length] < LENGTH_ORDER[handFilters[lk]]) return false;
-    const fk = `${name}_flex_min`;
-    if (handFilters[fk] && FLEX_ORDER[f.flexibility] < FLEX_ORDER[handFilters[fk]]) return false;
-    const sk = `${name}_straight_min`;
-    if (handFilters[sk] && STRAIGHT_ORDER[f.straightness] < STRAIGHT_ORDER[handFilters[sk]]) return false;
-    const ik = `${name}_indep_min`;
-    if (handFilters[ik] && INDEP_ORDER[f.independence] < INDEP_ORDER[handFilters[ik]]) return false;
-    if (handFilters['pinky_reach_min'] && name === 'pinky' && REACH_ORDER[f.reach] < REACH_ORDER[handFilters['pinky_reach_min']]) return false;
-    return true;
-  }
+  // Cap from each gap measurement
+  const thumbCap  = gapDiffCap(profile.thumbToIndex  ?? GAP_REF_MAX.thumbToIndex,  GAP_REF_MAX.thumbToIndex);
+  const indexCap  = gapDiffCap(profile.indexToMiddle ?? GAP_REF_MAX.indexToMiddle, GAP_REF_MAX.indexToMiddle);
+  const middleCap = gapDiffCap(profile.middleToRing  ?? GAP_REF_MAX.middleToRing,  GAP_REF_MAX.middleToRing);
+  const pinkyCap  = gapDiffCap(profile.ringToLittle  ?? GAP_REF_MAX.ringToLittle,  GAP_REF_MAX.ringToLittle);
 
-  const fingerOk = ['thumb','index','middle','ring','pinky'].every(fingerPasses);
-  if (!fingerOk) return [];
+  // Overall cap = most restrictive gap
+  let rawDiffCap = Math.min(thumbCap, indexCap, middleCap, pinkyCap);
+
+  // Finger chip overrides (further restrict)
+  if (handFilters.thumb_flex === 'Low')         rawDiffCap = Math.min(rawDiffCap, 4);
+  if (handFilters.thumb_flex === 'Medium')      rawDiffCap = Math.min(rawDiffCap, 7);
+  if (handFilters.index_straight === 'Curved')  rawDiffCap = Math.min(rawDiffCap, 6);
+  if (handFilters.middle_indep === 'Low')       rawDiffCap = Math.min(rawDiffCap, 5);
+  if (handFilters.middle_indep === 'Medium')    rawDiffCap = Math.min(rawDiffCap, 7);
+  if (handFilters.ring_indep === 'Low')         rawDiffCap = Math.min(rawDiffCap, 5);
+  if (handFilters.ring_indep === 'Medium')      rawDiffCap = Math.min(rawDiffCap, 7);
+  if (handFilters.pinky_reach === 'Weak')       rawDiffCap = Math.min(rawDiffCap, 5);
+  if (handFilters.pinky_reach === 'Moderate')   rawDiffCap = Math.min(rawDiffCap, 7);
 
   return progs.filter(prog => {
-    const personalMax = progressionFitsHand(prog, profile);
-    return personalMax <= maxPersonalDiff;
+    const rawMax = Math.max(...prog.chords.map(c => c.voicings[0]?.score ?? 0));
+    return rawMax <= rawDiffCap;
   });
 }
 
@@ -540,8 +569,6 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const aiFingers   = useAIFingers();
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
-  const [maxDiff,     setMaxDiff]     = useState(10);
-  const [maxPersonal, setMaxPersonal] = useState(10);
   const [showHandFilters, setShowHandFilters] = useState(false);
   const [handFilters, setHandFilters] = useState({});
   const [liveGaps, setLiveGaps] = useState(null); // overrides handProfile gaps for live preview
@@ -565,9 +592,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
     const all = [];
     for (const r of roots)
       for (const st of scales)
-        all.push(...resolveForKey(r, st, maxDiff));
+        all.push(...resolveForKey(r, st, 10));
     return all.sort((a, b) => a.maxScore - b.maxScore);
-  }, [root, scaleType, maxDiff, allRoots, bothScales]);
+  }, [root, scaleType, allRoots, bothScales]);
 
   const activeProfile = useMemo(
     () => liveGaps ? { ...handProfile, ...liveGaps } : handProfile,
@@ -576,8 +603,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
   const filtered = useMemo(() => {
     if (!showHandFilters) return resolved;
-    return filterByHandData(resolved, activeProfile, aiFingers, handFilters, maxPersonal);
-  }, [resolved, activeProfile, aiFingers, handFilters, maxPersonal, showHandFilters]);
+    return filterByHandData(resolved, activeProfile, aiFingers, handFilters);
+  }, [resolved, activeProfile, aiFingers, handFilters, showHandFilters]);
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -654,18 +681,6 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           </select>
         </div>
 
-        <div className="flex flex-col gap-1 col-span-2 sm:min-w-[180px]">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
-            {tr.maxDifficulty}: <span style={{ color: '#c9a96e', fontWeight: 700 }}>{maxDiff}</span>
-          </label>
-          <input
-            type="range" min={1} max={10} step={0.5} value={maxDiff}
-            onChange={e => setMaxDiff(Number(e.target.value))}
-            className="w-full"
-            style={{ background: `linear-gradient(to right, #c9a96e ${((maxDiff-1)/9)*100}%, #2a2a2a ${((maxDiff-1)/9)*100}%)` }}
-          />
-        </div>
-
         {/* My Hand filter toggle */}
         <div className="col-span-2 sm:col-span-1 flex items-end">
           <button
@@ -696,19 +711,6 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
             onSaveProfile={onSaveProfile}
             onGapsChange={setLiveGaps}
           />
-          {/* Personal difficulty slider */}
-          <div className="flex flex-col gap-1 mb-4">
-            <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
-              Max Personal Difficulty: <span style={{ color: '#818cf8', fontWeight: 700 }}>{maxPersonal}</span>
-            </label>
-            <input
-              type="range" min={1} max={10} step={0.5} value={maxPersonal}
-              onChange={e => setMaxPersonal(Number(e.target.value))}
-              className="w-full"
-              style={{ background: `linear-gradient(to right, #818cf8 ${((maxPersonal-1)/9)*100}%, #2a2a2a ${((maxPersonal-1)/9)*100}%)` }}
-            />
-            <p className="text-xs" style={{ color: '#3a3a3a' }}>Filters progressions by difficulty adjusted for your hand measurements</p>
-          </div>
         </>
       )}
 
@@ -728,7 +730,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {/* ── Result count ── */}
       <p className="text-xs mb-3" style={{ color: '#3a3a3a' }}>
         {filtered.length} progression{filtered.length !== 1 ? 's' : ''}
-        {showHandFilters ? ` matching your hand` : ` within difficulty ${maxDiff}`}
+        {showHandFilters ? ' matching your hand' : ''}
         {filtered.length < resolved.length && <span style={{ color: '#5a5a5a' }}> (filtered from {resolved.length})</span>}
       </p>
 
@@ -825,6 +827,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                         </span>
                       ))}
                     </div>
+                    {chord.voicings[0] && (
+                      <FingerGapBars notes={chord.voicings[0].notes} profile={activeProfile} />
+                    )}
                   </div>
                 ))}
               </div>

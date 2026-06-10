@@ -9,6 +9,7 @@ client/.vercel
 server/target
 server/data/*.db
 server/.env
+server/src/main/resources/application-dev.properties
 
 # Misc
 .vscode/

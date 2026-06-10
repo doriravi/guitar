@@ -51,6 +51,50 @@ export function calcDifficulty(notes) {
   return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
 }
 
+// Reference comfortable gap maxima (cm), 95th percentile
+export const GAP_REF_MAX = { thumbToIndex: 15, indexToMiddle: 9, middleToRing: 7, ringToLittle: 11 };
+
+// Fret spacing in cm (same model as mm version above, converted)
+function fretSpacingCm(fret) {
+  return Math.max(1.8, 3.5 - fret * 0.077);
+}
+
+function fretDistanceCm(f1, f2) {
+  const lo = Math.min(f1, f2);
+  const hi = Math.max(f1, f2);
+  let d = 0;
+  for (let f = lo; f < hi; f++) d += fretSpacingCm(f);
+  return d;
+}
+
+/**
+ * For a chord's notes, compute how many cm each adjacent finger pair must span,
+ * and express that as a fraction of the reference maximum for that pair.
+ * Returns { thumbToIndex, indexToMiddle, middleToRing, ringToLittle } — each 0..1+
+ * Returns null when the chord has fewer than 1 fretted note.
+ *
+ * Finger assignment: sorted distinct fretted frets → index, middle, ring, pinky.
+ * T→I uses the position of the index finger (thumb anchors ~2 frets below).
+ */
+export function fingerGapUsage(notes) {
+  if (!notes || notes.length === 0) return null;
+  const frettedFrets = [...new Set(notes.map(n => n.fret).filter(f => f > 0))].sort((a, b) => a - b);
+  if (frettedFrets.length === 0) return null;
+
+  const ff = frettedFrets.slice(0, 4);
+  const ti = fretDistanceCm(Math.max(0, ff[0] - 2), ff[0]);
+  const im = ff.length >= 2 ? fretDistanceCm(ff[0], ff[1]) : 0;
+  const mr = ff.length >= 3 ? fretDistanceCm(ff[1], ff[2]) : 0;
+  const rp = ff.length >= 4 ? fretDistanceCm(ff[2], ff[3]) : 0;
+
+  return {
+    thumbToIndex:  ti / GAP_REF_MAX.thumbToIndex,
+    indexToMiddle: im / GAP_REF_MAX.indexToMiddle,
+    middleToRing:  mr / GAP_REF_MAX.middleToRing,
+    ringToLittle:  rp / GAP_REF_MAX.ringToLittle,
+  };
+}
+
 /**
  * Build a full difficulty table for all pairs of frets (0-maxFret) across strings.
  * Returns array of { fret1, fret2, fretSpan, stringSpan, score }
