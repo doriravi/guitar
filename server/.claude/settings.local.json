@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\\\tools\\\\apache-maven-3.9.9\\\\bin\\\\mvn\" spring-boot:run)"
+    ]
+  }
+}
