@@ -96,6 +96,160 @@ export function fingerGapUsage(notes) {
 }
 
 /**
+ * Suggest an optimal left-hand fingering for a chord shape.
+ *
+ * Given the fretted notes of a voicing, assign a finger (1=index, 2=middle,
+ * 3=ring, 4=pinky) to each, optionally collapsing same-fret notes onto a single
+ * barring finger. We follow real fretting constraints:
+ *
+ *   - Frets map to fingers monotonically: a note on a lower fret never gets a
+ *     higher-numbered finger than a note on a higher fret.
+ *   - When two or more notes sit on the lowest fret across non-adjacent or
+ *     multiple strings, the index finger barres them (one finger, many strings).
+ *   - Open (fret 0) and muted strings need no finger.
+ *
+ * @param {Array<{string:number, fret:number}>} notes - the chord's notes
+ * @returns {{
+ *   assignment: Array<{string:number, fret:number, finger:number, barre:boolean}>,
+ *   barreFret: number|null,
+ *   fingersUsed: number,
+ *   difficulty: number
+ * } | null}  null when there are no fretted notes (all open/muted)
+ */
+export function optimalFingering(notes) {
+  const fretted = (notes || []).filter(n => n.fret > 0);
+  if (fretted.length === 0) return null;
+
+  const minFret = Math.min(...fretted.map(n => n.fret));
+
+  // Detect a barre. The index finger barres the lowest fret only when it must
+  // cover multiple strings AND there are higher-fret notes that need the other
+  // fingers free — e.g. an F or Bm7 barre. Two adjacent notes on the lowest
+  // fret with nothing above them (like Em) are played with separate fingers,
+  // not a barre, so we don't force one there.
+  const onMinFret = fretted.filter(n => n.fret === minFret);
+  const minFretStrings = onMinFret.map(n => n.string);
+  const barreSpan = onMinFret.length >= 2
+    ? Math.max(...minFretStrings) - Math.min(...minFretStrings)
+    : 0;
+  // Barre when the index must cover a wide span on the lowest fret (3+ strings),
+  // which is the unambiguous case. Narrower same-fret pairs (like Em or open-D
+  // shapes) are played with separate fingers, so we leave them un-barred.
+  const useBarre = onMinFret.length >= 3 || (onMinFret.length >= 2 && barreSpan >= 3);
+
+  const assignment = [];
+  let barreFret = null;
+
+  if (useBarre) {
+    barreFret = minFret;
+    for (const n of onMinFret) {
+      assignment.push({ string: n.string, fret: n.fret, finger: 1, barre: true });
+    }
+  }
+
+  // Remaining notes (above the barre, or all notes if no barre) get fingers
+  // assigned in fret order. With a barre, the index is used, so we start at
+  // the middle finger (2); without, we start at the index (1).
+  const remaining = fretted
+    .filter(n => !(useBarre && n.fret === minFret))
+    .sort((a, b) => a.fret - b.fret || a.string - b.string);
+
+  let nextFinger = useBarre ? 2 : 1;
+  for (const n of remaining) {
+    const finger = Math.min(4, nextFinger);
+    assignment.push({ string: n.string, fret: n.fret, finger, barre: false });
+    nextFinger++;
+  }
+
+  // Distinct fingers actually used (a barre counts once).
+  const fingersUsed = new Set(assignment.map(a => a.finger)).size;
+
+  return {
+    assignment: assignment.sort((a, b) => a.string - b.string),
+    barreFret,
+    fingersUsed,
+    difficulty: calcDifficulty(fretted),
+  };
+}
+
+/**
+ * Score the difficulty of CHANGING from one chord shape to another (1-10).
+ *
+ * Switching chords smoothly is the #1 struggle for most players, and it depends
+ * on physical movement, not just how hard each shape is to hold. We model:
+ *
+ *   - Hand-shift: how far the fretting hand slides along the neck, measured in mm
+ *     between the two shapes' lowest fretted fret (the index-finger anchor).
+ *   - Finger travel: average mm each fretted note moves to its nearest position
+ *     in the other shape (captures reshaping the hand, not just sliding it).
+ *   - Common-tone bonus: notes held on the exact same string+fret act as anchors
+ *     and make the change easier, so each one reduces the score.
+ *
+ * Open-string and muted notes carry no fretting-hand cost. Two chords that are
+ * identical, or differ only by open strings, score 1 (trivial).
+ *
+ * @param {Array<{string:number, fret:number}>} notesA - first chord's fretted notes
+ * @param {Array<{string:number, fret:number}>} notesB - second chord's fretted notes
+ * @returns {number} score 1-10
+ */
+export function transitionDifficulty(notesA, notesB) {
+  const a = (notesA || []).filter(n => n.fret > 0);
+  const b = (notesB || []).filter(n => n.fret > 0);
+
+  // No fretting on one side (e.g. all-open chord) → just place/lift the hand.
+  if (a.length === 0 || b.length === 0) return 1;
+
+  // Hand-shift: distance the index-finger anchor (lowest fret) slides, in mm.
+  const anchorA = Math.min(...a.map(n => n.fret));
+  const anchorB = Math.min(...b.map(n => n.fret));
+  const shiftMm = fretDistanceMm(anchorA, anchorB);
+
+  // Finger travel: for each note in A, the physical distance to its nearest
+  // note in B (and vice versa), averaged. A note that stays put costs ~0.
+  // String distance is weighted lightly: the fretting hand spans all strings at
+  // a given position, so moving a finger to a different string is far cheaper
+  // than sliding it up/down the neck. Fret movement dominates the cost.
+  const STRING_WEIGHT = 0.35;
+  const travel = (from, to) => {
+    let sum = 0;
+    for (const n of from) {
+      let best = Infinity;
+      for (const m of to) {
+        const fr = fretDistanceMm(n.fret, m.fret);
+        const sr = Math.abs(n.string - m.string) * STRING_SPACING_MM * STRING_WEIGHT;
+        best = Math.min(best, Math.sqrt(fr ** 2 + sr ** 2));
+      }
+      sum += best;
+    }
+    return sum / from.length;
+  };
+  const avgTravelMm = (travel(a, b) + travel(b, a)) / 2;
+
+  // Common-tone anchors: notes on the identical string+fret in both shapes.
+  const keyOf = n => `${n.string}:${n.fret}`;
+  const setB = new Set(b.map(keyOf));
+  const commonTones = a.filter(n => setB.has(keyOf(n))).length;
+
+  // Combine: shift and reshaping both drive difficulty; anchors relieve it.
+  // ~50mm of combined movement ≈ a hard change before the anchor discount.
+  const movementMm = shiftMm * 0.6 + avgTravelMm;
+  let score = 1 + (movementMm / 50) * 9;
+  score -= commonTones * 1.2;
+
+  // Fingering-aware bonus: if both shapes barre the same fret, the index finger
+  // never lifts — a physical anchor that eases the change. Only the non-barre
+  // fingers reshape, so we discount but keep a floor: two different barre
+  // chords are still a real move, not trivial.
+  const fa = optimalFingering(a);
+  const fb = optimalFingering(b);
+  if (fa?.barreFret != null && fa.barreFret === fb?.barreFret) {
+    score = Math.max(2.5, score - 1);
+  }
+
+  return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
+}
+
+/**
  * Build a full difficulty table for all pairs of frets (0-maxFret) across strings.
  * Returns array of { fret1, fret2, fretSpan, stringSpan, score }
  */

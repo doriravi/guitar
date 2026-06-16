@@ -276,3 +276,103 @@ export const CHORDS = [
   { name: 'Amadd9', type: 'Add9',            tab: 'x02413', notes: [{ string:2,fret:2 },{ string:3,fret:4 },{ string:4,fret:1 },{ string:5,fret:3 }] },
   { name: 'Dmadd9', type: 'Add9',            tab: 'xx0231', notes: [{ string:3,fret:2 },{ string:4,fret:3 },{ string:5,fret:1 }] },
 ];
+
+// ─── Easier-version substitutions ───────────────────────────────
+// When a chord is too hard for the user's hand, suggest a lower-difficulty
+// voicing that preserves the same harmony (same root + same chord quality).
+
+// Enharmonic root spellings map to one canonical pitch class so e.g. Bb and A#
+// are treated as the same root.
+const ENHARMONIC = {
+  'A#': 'Bb', 'Db': 'C#', 'D#': 'Eb', 'Gb': 'F#', 'G#': 'Ab',
+};
+
+/**
+ * Split a chord name into its root pitch class and quality suffix.
+ * e.g. 'F#m7' → { root: 'F#', suffix: 'm7' }, 'A/C#' → { root: 'A', suffix: '/C#' }
+ * Returns null if the name doesn't start with a note letter.
+ */
+export function parseChordName(name) {
+  const m = /^([A-G][#b]?)(.*)$/.exec(name);
+  if (!m) return null;
+  const root = ENHARMONIC[m[1]] || m[1];
+  return { root, suffix: m[2] };
+}
+
+// How close a candidate quality is to the target quality as a musical
+// substitute (0 = identical, higher = looser). Same root is always required;
+// this orders the "cheat" alternatives so the closest-sounding one ranks first.
+//
+// Families collapse a quality to its harmonic core: a plain triad substitutes
+// well for its extended/added forms (e.g. play 'F' instead of barre 'Fmaj7'),
+// and a 7th substitutes for richer dominant/extended colours.
+function qualityFamily(suffix) {
+  if (suffix.startsWith('/')) return 'slash';
+  if (/^m(?!aj)/.test(suffix)) {
+    // minor family — check half-diminished first so 'm7b5' isn't read as 'm7'
+    if (/^m7b5|^mb5/.test(suffix)) return 'dim';
+    if (suffix === 'm') return 'min';
+    return 'min-ext';
+  }
+  if (suffix.startsWith('dim')) return 'dim';
+  if (suffix.startsWith('aug')) return 'aug';
+  if (suffix.startsWith('sus')) return 'sus';
+  if (suffix === '') return 'maj';
+  if (/^(maj7|maj9|6|add9|9|7|13|11|5)/.test(suffix)) return 'maj-ext';
+  return 'maj-ext';
+}
+
+// Preferred fallback family for each family — what a too-hard chord can be
+// simplified TO while staying musically acceptable.
+const FAMILY_RANK = {
+  'maj':     ['maj', 'maj-ext'],
+  'maj-ext': ['maj-ext', 'maj'],
+  'min':     ['min', 'min-ext'],
+  'min-ext': ['min-ext', 'min'],
+  'dim':     ['dim', 'min'],
+  'aug':     ['aug', 'maj'],
+  'sus':     ['sus', 'maj'],
+  'slash':   ['slash', 'maj', 'maj-ext'],
+};
+
+/**
+ * Find easier substitutions for a chord that's too hard to play.
+ *
+ * Suggestions share the same root and stay within a musically acceptable
+ * quality family (an exact-quality voicing is always preferred, then a close
+ * harmonic substitute like a plain triad for an extended chord). Results are
+ * ranked easiest-first, breaking ties toward the closest-sounding quality.
+ *
+ * @param {object}   chord     - the source chord ({ name, notes, ... })
+ * @param {function} scoreFn   - (notes) => personal difficulty (1-10)
+ * @param {object}   [opts]
+ * @param {number}   [opts.minGain=1] - only suggest if at least this much easier
+ * @param {number}   [opts.limit=3]   - max suggestions to return
+ * @returns {Array<{ chord, score, exact }>} ranked easier alternatives (may be empty)
+ */
+export function findEasierVoicings(chord, scoreFn, opts = {}) {
+  const { minGain = 1, limit = 3 } = opts;
+  const parsed = parseChordName(chord.name);
+  if (!parsed) return [];
+
+  const currentScore = scoreFn(chord.notes);
+  const targetFamily = qualityFamily(parsed.suffix);
+  const acceptable = FAMILY_RANK[targetFamily] || [targetFamily];
+
+  return CHORDS
+    .filter(c => c.name !== chord.name)
+    .map(c => ({ c, p: parseChordName(c.name) }))
+    .filter(({ p }) => p && p.root === parsed.root)
+    .map(({ c, p }) => {
+      const exact = p.suffix === parsed.suffix;
+      const famIdx = acceptable.indexOf(qualityFamily(p.suffix));
+      return { chord: c, score: scoreFn(c.notes), exact, famIdx };
+    })
+    .filter(({ score, famIdx }) => famIdx >= 0 && score <= currentScore - minGain)
+    .sort((a, b) =>
+      a.score - b.score ||            // easiest first
+      Number(b.exact) - Number(a.exact) || // exact quality wins ties
+      a.famIdx - b.famIdx)            // then closest family
+    .slice(0, limit)
+    .map(({ chord, score, exact }) => ({ chord, score, exact }));
+}

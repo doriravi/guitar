@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { CHORDS } from '../lib/chords';
+import { CHORDS, findEasierVoicings } from '../lib/chords';
 import { calcDifficulty, fingerGapUsage, GAP_REF_MAX } from '../lib/fretboard';
 import { personalDifficulty } from '../lib/handProfile';
 import { useHandProfile } from '../App';
@@ -58,24 +58,55 @@ function FingerGapDisplay({ notes, profile }) {
   );
 }
 
+// Threshold above which a chord is considered "hard" and worth suggesting
+// an easier substitution for.
+const HARD_THRESHOLD = 7;
+
+function EasierVersion({ suggestions, tr, onHover, onLeave }) {
+  if (!suggestions || suggestions.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+      <span className="text-[10px]" style={{ color: '#5a5a5a' }}>↳ {tr.easierVersion || 'Easier for your hand:'}</span>
+      {suggestions.map(s => (
+        <span
+          key={s.chord.name}
+          className="text-[10px] font-semibold cursor-default px-1.5 py-0.5 rounded"
+          style={{ color: '#22c55e', background: 'rgba(34,197,94,0.08)' }}
+          title={`${s.chord.tab} · ${s.score.toFixed(1)} · ${s.exact ? (tr.easierExact || 'easier voicing') : (tr.easierSub || 'simpler substitute')}`}
+          onMouseEnter={e => onHover(e, s.chord)}
+          onMouseLeave={onLeave}
+        >
+          {s.chord.name} <span className="tabular-nums" style={{ color: '#15803d' }}>{s.score.toFixed(1)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function ChordTable({ lang }) {
   const tr = useT(lang);
   const handProfile = useHandProfile();
   const [tooltip, setTooltip] = useState(null);
   const [mode, setMode] = useState('personal');
 
-  const rows = useMemo(() => CHORDS.map(chord => {
-    const raw = calcDifficulty(chord.notes);
-    const personal = personalDifficulty(raw, handProfile);
-    return {
-      ...chord,
-      score: raw,
-      personalScore: personal,
-      fingeringStr: chord.notes.map(n => `${STRING_NAMES[n.string]}${n.fret}`).join(' '),
-    };
-  }).sort((a, b) =>
-    mode === 'personal' ? a.personalScore - b.personalScore : a.score - b.score
-  ), [handProfile, mode]);
+  const rows = useMemo(() => {
+    const scoreFn = notes => personalDifficulty(calcDifficulty(notes), handProfile);
+    return CHORDS.map(chord => {
+      const raw = calcDifficulty(chord.notes);
+      const personal = personalDifficulty(raw, handProfile);
+      // Only look for easier substitutes when the chord is hard for this hand.
+      const easier = personal >= HARD_THRESHOLD ? findEasierVoicings(chord, scoreFn) : [];
+      return {
+        ...chord,
+        score: raw,
+        personalScore: personal,
+        easier,
+        fingeringStr: chord.notes.map(n => `${STRING_NAMES[n.string]}${n.fret}`).join(' '),
+      };
+    }).sort((a, b) =>
+      mode === 'personal' ? a.personalScore - b.personalScore : a.score - b.score
+    );
+  }, [handProfile, mode]);
 
   const showTooltip = useCallback((e, chord) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -152,6 +183,7 @@ export default function ChordTable({ lang }) {
                         <span className="text-xs tabular-nums" style={{ color: '#333' }}>{r.score.toFixed(1)}</span>
                       </span>
                       <FingerGapDisplay notes={r.notes} profile={handProfile} />
+                      <EasierVersion suggestions={r.easier} tr={tr} onHover={showTooltip} onLeave={hideTooltip} />
                     </div>
                   ) : (
                     <DifficultyBadge score={r.score} />

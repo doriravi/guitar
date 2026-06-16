@@ -1,5 +1,9 @@
 // SVG chord diagram. tab is a 6-char string like "x32010" (EADGBe order).
 // 'x' = muted, '0' = open, digit = fret number.
+// When `showFingers` is set and the chord has note data, each fretted dot is
+// labelled with the suggested finger (1=index … 4=pinky) from optimalFingering.
+
+import { optimalFingering } from '../lib/fretboard';
 
 const CELL_W = 18;   // px between strings
 const CELL_H = 17;   // px between frets
@@ -9,8 +13,16 @@ const NUM_FRETS = 4;
 
 const STRING_LABELS = ['E', 'A', 'D', 'G', 'B', 'e'];
 
-export default function FretboardDiagram({ chord }) {
+export default function FretboardDiagram({ chord, showFingers = false }) {
   const tabArr = chord.tab.split(''); // always 6 chars
+
+  // Suggested finger per string (1-4), keyed by string index, when requested
+  // and note data is available. Barre notes share finger 1.
+  const fingerByString = {};
+  if (showFingers && Array.isArray(chord.notes)) {
+    const fing = optimalFingering(chord.notes);
+    if (fing) for (const a of fing.assignment) fingerByString[a.string] = a.finger;
+  }
 
   // Determine fret range to display
   const frettedValues = tabArr
@@ -95,9 +107,15 @@ export default function FretboardDiagram({ chord }) {
           if (relFret < 0 || relFret >= NUM_FRETS) return null;
           const cx = sx(s);
           const cy = fy(relFret) + CELL_H / 2;
+          const finger = fingerByString[s];
           return (
-            <circle key={s} cx={cx} cy={cy} r={CELL_H * 0.36}
-                    fill="#888" />
+            <g key={s}>
+              <circle cx={cx} cy={cy} r={CELL_H * 0.36} fill="#888" />
+              {finger != null && (
+                <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+                      fontSize="9" fontWeight="bold" fill="#fff">{finger}</text>
+              )}
+            </g>
           );
         })}
       </svg>
