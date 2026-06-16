@@ -1,4 +1,5 @@
 import { useState, createContext, useContext, useEffect } from 'react';
+import StartHere from './components/StartHere';
 import ChordTable from './components/ChordTable';
 import TripletTable from './components/TripletTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
@@ -54,6 +55,7 @@ function getTokenFromUrl(param) {
 
 function getTabs(tr) {
   return [
+    { id: 'start',        label: tr.tabStart || 'Start',  icon: '🚀' },
     { id: 'hand',         label: tr.tabHand,         icon: '✋' },
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
     { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️' },
@@ -65,7 +67,7 @@ function getTabs(tr) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('hand');
+  const [activeTab, setActiveTab] = useState('start');
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [currentUser, setCurrentUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
@@ -322,6 +324,7 @@ export default function App() {
 
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
+            {activeTab === 'start'        && <StartHere lang={lang} onGoToHand={() => setActiveTab('hand')} />}
             {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} onSaveAIFingers={handleSaveAIFingers} saveError={saveError} lang={lang} />}
             {activeTab === 'strings'      && <GuitarStrings lang={lang} />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}

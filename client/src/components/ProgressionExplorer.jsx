@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
 import { CHORDS } from '../lib/chords';
-import { calcDifficulty, fingerGapUsage, GAP_REF_MAX } from '../lib/fretboard';
+import { calcDifficulty, fingerGapUsage, GAP_REF_MAX, transitionDifficulty } from '../lib/fretboard';
 import { DEFAULT_PROFILE } from '../lib/handProfile';
 import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION } from '../lib/songs';
@@ -106,6 +106,30 @@ function FingerGapBars({ notes, profile }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Transition badge (difficulty of switching between two chords) ─────────────
+
+function transitionColor(score) {
+  if (score <= 3) return '#22c55e';
+  if (score <= 6) return '#eab308';
+  if (score <= 8) return '#f97316';
+  return '#ef4444';
+}
+
+function TransitionBadge({ fromName, toName, score, tr }) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center shrink-0 px-1 self-stretch select-none"
+      title={`${tr.changeLabel || 'Change'} ${fromName} → ${toName}: ${score.toFixed(1)}/10`}
+    >
+      <span className="text-[10px] leading-none" style={{ color: '#3a3a3a' }}>→</span>
+      <span className="text-[10px] font-bold tabular-nums leading-tight mt-0.5"
+        style={{ color: transitionColor(score) }}>
+        {score.toFixed(1)}
+      </span>
     </div>
   );
 }
@@ -795,43 +819,61 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                 </div>
               </div>
 
-              {/* Chord cells */}
-              <div className="flex overflow-x-auto" style={{ background: '#141414' }}>
-                {prog.chords.map((chord, j) => (
-                  <div
-                    key={j}
-                    className="flex-1 px-2 sm:px-3 py-2.5 transition-colors duration-100"
-                    style={{
-                      minWidth: 72,
-                      borderRight: j < prog.chords.length - 1 ? '1px solid #1e1e1e' : 'none',
-                      background: activeChord === j ? 'rgba(201,169,110,0.07)' : 'transparent',
-                    }}
-                  >
-                    <div className="text-xs mb-0.5" style={{ color: '#3a3a3a' }}>{chord.roman}</div>
-                    <div className="font-bold text-sm mb-1.5 transition-colors"
-                      style={{ color: activeChord === j ? '#c9a96e' : '#d0cdc8' }}>
-                      <a
-                        href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
-                        target="_blank" rel="noopener noreferrer"
-                        className="hover:underline"
+              {/* Chord cells, with change-difficulty badges between them */}
+              <div className="flex overflow-x-auto items-stretch" style={{ background: '#141414' }}>
+                {prog.chords.map((chord, j) => {
+                  const next = prog.chords[j + 1];
+                  const here = chord.voicings[0];
+                  const there = next?.voicings[0];
+                  const transScore = here && there
+                    ? transitionDifficulty(here.notes, there.notes)
+                    : null;
+                  return (
+                    <div key={j} className="flex items-stretch">
+                      <div
+                        className="flex-1 px-2 sm:px-3 py-2.5 transition-colors duration-100"
+                        style={{
+                          minWidth: 72,
+                          background: activeChord === j ? 'rgba(201,169,110,0.07)' : 'transparent',
+                        }}
                       >
-                        {chord.chordName}
-                      </a>
+                        <div className="text-xs mb-0.5" style={{ color: '#3a3a3a' }}>{chord.roman}</div>
+                        <div className="font-bold text-sm mb-1.5 transition-colors"
+                          style={{ color: activeChord === j ? '#c9a96e' : '#d0cdc8' }}>
+                          <a
+                            href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
+                            target="_blank" rel="noopener noreferrer"
+                            className="hover:underline"
+                          >
+                            {chord.chordName}
+                          </a>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {chord.voicings.map((v, k) => (
+                            <span key={k} className="cursor-default"
+                              onMouseEnter={e => showTooltip(e, v)}
+                              onMouseLeave={hideTooltip}>
+                              <DifficultyBadge score={v.score} />
+                            </span>
+                          ))}
+                        </div>
+                        {here && (
+                          <FingerGapBars notes={here.notes} profile={activeProfile} />
+                        )}
+                      </div>
+                      {transScore !== null && (
+                        <div style={{ borderLeft: '1px solid #1e1e1e', borderRight: '1px solid #1e1e1e' }}>
+                          <TransitionBadge
+                            fromName={chord.chordName}
+                            toName={next.chordName}
+                            score={transScore}
+                            tr={tr}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {chord.voicings.map((v, k) => (
-                        <span key={k} className="cursor-default"
-                          onMouseEnter={e => showTooltip(e, v)}
-                          onMouseLeave={hideTooltip}>
-                          <DifficultyBadge score={v.score} />
-                        </span>
-                      ))}
-                    </div>
-                    {chord.voicings[0] && (
-                      <FingerGapBars notes={chord.voicings[0].notes} profile={activeProfile} />
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Songs panel (collapsible) */}
