@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="GuitarReachApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="guitar-reach-api" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.guitarreach.api.GuitarReachApplication" />
+    <option name="ACTIVE_PROFILES" value="dev" />
+    <option name="VM_PARAMETERS" value="--enable-native-access=ALL-UNNAMED" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
