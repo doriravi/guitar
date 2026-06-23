@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -20,6 +21,9 @@ public class EmailService {
     @Value("${spring.mail.username:noreply@guitarreach.app}")
     private String fromAddress;
 
+    // Sent off the request thread: a slow/unreachable SMTP host must never
+    // block (or fail) registration or password-reset responses.
+    @Async
     public void sendVerificationEmail(String toEmail, String token) {
         String link = frontendUrl + "/verify-email?token=" + token;
         send(toEmail, "Verify your Guitar Reach email",
@@ -27,6 +31,7 @@ public class EmailService {
                 + link + "\n\nThis link expires in 24 hours.\n\nGuitar Reach");
     }
 
+    @Async
     public void sendPasswordResetEmail(String toEmail, String token) {
         String link = frontendUrl + "/reset-password?token=" + token;
         send(toEmail, "Reset your Guitar Reach password",
