@@ -101,6 +101,15 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
+        <!-- Loads server/.env into Spring's Environment at startup, so secrets
+             (MAIL_*, FACEBOOK_*, etc.) resolve the same whether launched from
+             IntelliJ, mvn spring-boot:run, or the packaged jar. -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+
         <!-- Actuator (healthcheck) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
