@@ -201,6 +201,17 @@ export default function App() {
     window.location.reload();
   }
 
+  // After the account is deleted server-side, sign the user out (clear cookies +
+  // local data) and return to the login screen.
+  async function handleDeleted() {
+    await auth.logout().catch(() => {});
+    try {
+      localStorage.removeItem('guitar_hand_profile');
+      localStorage.removeItem('guitar_ai_fingers');
+    } catch {}
+    window.location.reload();
+  }
+
   function handleSaveAIFingers(fingers) {
     setAIFingers(fingers);
     try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
@@ -359,7 +370,7 @@ export default function App() {
                   <AccountSettings
                     currentUser={currentUser}
                     onUpdated={updated => setCurrentUser(updated)}
-                    onDeleted={() => { localStorage.removeItem('guitar_hand_profile'); window.location.reload(); }}
+                    onDeleted={handleDeleted}
                     lang={lang}
                   />
                 </div>
@@ -436,7 +447,7 @@ export default function App() {
                 <AccountSettings
                   currentUser={currentUser}
                   onUpdated={updated => setCurrentUser(updated)}
-                  onDeleted={() => { localStorage.removeItem('guitar_hand_profile'); window.location.reload(); }}
+                  onDeleted={handleDeleted}
                   lang={lang}
                 />
               </div>
