@@ -13,6 +13,7 @@ import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
+import { unlockAudio } from './lib/audio';
 import { useT } from './lib/i18n';
 
 function isDefaultProfile(p) {
@@ -117,6 +118,22 @@ export default function App() {
       })
       .catch(() => {})
       .finally(() => setAuthChecking(false));
+  }, []);
+
+  // iOS Safari keeps audio muted until a sound is played during a real user
+  // gesture. Prime the AudioContext on the very first interaction so every
+  // later play button works without the user having to "warm up" audio.
+  useEffect(() => {
+    const prime = () => { unlockAudio(); cleanup(); };
+    const cleanup = () => {
+      window.removeEventListener('touchend', prime);
+      window.removeEventListener('pointerdown', prime);
+      window.removeEventListener('click', prime);
+    };
+    window.addEventListener('touchend', prime, { once: false, passive: true });
+    window.addEventListener('pointerdown', prime, { once: false });
+    window.addEventListener('click', prime, { once: false });
+    return cleanup;
   }, []);
 
   // Returns true if, after syncing, the user has a real (non-default) saved
