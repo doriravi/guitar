@@ -17,6 +17,7 @@ export const t = {
     // Email-first sign-in flow
     enterEmailPrompt: 'Please enter your email to sign in or create a new account.',
     yourEmail: 'Your Email', emailPlaceholder: 'email@address.com', continueBtn: 'Continue',
+    newHere: 'New here?',
     forgotEmailOrPassword: 'Forgot your', orWord: 'or', emailWord: 'email', passwordWord: 'password?',
     orUse: 'OR USE', continueWithGoogle: 'Google', continueWithFacebook: 'Facebook',
     groupSubscriptionPrompt: 'Accessing a group subscription?',
