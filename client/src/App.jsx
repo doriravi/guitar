@@ -143,7 +143,16 @@ export default function App() {
 
   // Returns true if, after syncing, the user has a real (non-default) saved
   // hand profile — used to decide whether to send them to measure their hand.
-  async function syncProfileOnLogin() {
+  // For a brand-new registration (isNew), we never adopt a leftover guest
+  // profile from localStorage — a new account must measure fresh.
+  async function syncProfileOnLogin(isNew = false) {
+    if (isNew) {
+      // New account: clear any leftover guest profile so the difficulty scores
+      // start from defaults and the onboarding gate fires.
+      try { localStorage.removeItem('guitar_hand_profile'); } catch {}
+      setHandProfile(DEFAULT_PROFILE);
+      return false;
+    }
     const remote = await handProfileApi.get().catch(() => null);
     if (remote && !isDefaultProfile(remote)) {
       // Server has a real profile — always use it as source of truth
@@ -152,7 +161,8 @@ export default function App() {
       try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
       return true;
     } else {
-      // Server has defaults — push local if the user customised it as a guest
+      // Returning login with only defaults server-side — push a customised
+      // guest profile if one exists locally.
       const local = loadLocalProfile();
       if (!isDefaultProfile(local)) {
         await handProfileApi.save(local).catch(() => {});
@@ -174,13 +184,13 @@ export default function App() {
     }
   }
 
-  function handleAuthSuccess(user) {
+  function handleAuthSuccess(user, opts = {}) {
     setCurrentUser(user);
     setShowAuth(false);
     // After a successful login/registration, force users who have never saved a
     // real hand profile through the mandatory measurement step before the rest
-    // of the app becomes available.
-    syncProfileOnLogin()
+    // of the app becomes available. A new registration always onboards.
+    syncProfileOnLogin(opts.isNew)
       .then(hasProfile => { setNeedsOnboarding(!hasProfile); })
       .catch(() => {});
   }
