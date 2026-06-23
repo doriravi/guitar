@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback } from 'react';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import { personalDifficulty, abilityLabel, DEFAULT_PROFILE } from '../lib/handProfile';
-import { playProgression, stopAudio } from '../lib/audio';
+import { playProgression, stopAudio, audioDebug } from '../lib/audio';
 import { useHandProfile } from '../App';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
@@ -37,6 +37,7 @@ export default function StartHere({ lang, onGoToHand }) {
   const tr = useT(lang);
   const handProfile = useHandProfile();
   const [playing, setPlaying] = useState(null); // chord name currently sounding
+  const [audioDbg, setAudioDbg] = useState(null); // temp: on-screen audio diagnostics
 
   const usingDefault = isDefaultProfile(handProfile);
   const ability = abilityLabel(handProfile);
@@ -63,6 +64,8 @@ export default function StartHere({ lang, onGoToHand }) {
     setPlaying(chord.name);
     // Single chord = a one-item progression; clears the highlight when done.
     playProgression([chord], 60, () => {}, () => setPlaying(null));
+    // temp diagnostics: read the audio state right after kicking off playback
+    setTimeout(() => setAudioDbg(audioDebug()), 50);
   }, [playing]);
 
   return (
@@ -77,6 +80,14 @@ export default function StartHere({ lang, onGoToHand }) {
             "These are the easiest chords for your hand — perfect first ones to learn. Tap ▶ to hear how each sounds, and follow the picture to place your fingers."}
         </p>
       </div>
+
+      {/* TEMP audio diagnostics — remove once iOS sound is confirmed working */}
+      {audioDbg && (
+        <div className="mb-4 rounded-lg px-3 py-2 font-mono text-xs"
+          style={{ background: '#1e1e1e', border: '1px solid #c9a96e', color: '#c9a96e' }}>
+          audio: state={audioDbg.state} · last={audioDbg.last} · rate={audioDbg.sampleRate} · t={audioDbg.currentTime}
+        </div>
+      )}
 
       {/* Hand summary / CTA */}
       <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-5"
