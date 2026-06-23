@@ -8,6 +8,8 @@ import com.guitarreach.api.entity.VerificationToken.TokenType;
 import com.guitarreach.api.exception.DuplicateEmailException;
 import com.guitarreach.api.exception.ResourceNotFoundException;
 import com.guitarreach.api.exception.UnauthorizedException;
+import com.guitarreach.api.repository.PaymentRepository;
+import com.guitarreach.api.repository.SubscriptionRepository;
 import com.guitarreach.api.repository.UserRepository;
 import com.guitarreach.api.repository.VerificationTokenRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,8 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final VerificationTokenRepository tokenRepository;
+    private final PaymentRepository paymentRepository;
+    private final SubscriptionRepository subscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
 
@@ -65,10 +69,26 @@ public class UserService {
         return toResponse(userRepository.save(user));
     }
 
+    /**
+     * Permanently delete a user and ALL data related to them across every
+     * table. handProfile and subscription are also cascaded by the User entity
+     * (OneToOne, cascade=ALL), but payments are ManyToOne with a NOT NULL FK and
+     * are NOT cascaded from User — so they must be removed explicitly or the
+     * delete would hit a foreign-key constraint. We delete every child row up
+     * front to be unambiguous and FK-safe.
+     */
     @Transactional
     public void deleteAccount(String email) {
         User user = getEntityByEmail(email);
-        tokenRepository.deleteByUserId(user.getId());
+        Long userId = user.getId();
+
+        // Children that reference the user, deleted first.
+        paymentRepository.deleteByUserId(userId);
+        tokenRepository.deleteByUserId(userId);
+        subscriptionRepository.findByUserId(userId).ifPresent(subscriptionRepository::delete);
+
+        // handProfile + subscription also cascade via the User entity; deleting
+        // the user now removes the user row and any remaining cascaded rows.
         userRepository.delete(user);
     }
 
