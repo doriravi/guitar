@@ -52,14 +52,27 @@ function semitoneAt(stringIdx, fret) {
 // ── Audio ─────────────────────────────────────────────────────────────────────
 
 let _ctx = null;
+let _unlocked = false;
 function getCtx() {
   if (!_ctx || _ctx.state === 'closed') {
-    _ctx = new AudioContext();
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    _ctx = new Ctor();
     const comp = _ctx.createDynamicsCompressor();
     comp.threshold.value = -18; comp.ratio.value = 5;
     comp.attack.value = 0.002;  comp.release.value = 0.25;
     comp.connect(_ctx.destination);
     _ctx._out = comp;
+    _unlocked = false;
+  }
+  // iOS: prime once with a silent buffer inside the user gesture so audio
+  // actually unlocks, then resume.
+  if (!_unlocked) {
+    try {
+      const b = _ctx.createBuffer(1, 1, 22050);
+      const s = _ctx.createBufferSource();
+      s.buffer = b; s.connect(_ctx.destination); s.start(0);
+      _unlocked = true;
+    } catch { /* ignore */ }
   }
   if (_ctx.state === 'suspended') _ctx.resume();
   return _ctx;

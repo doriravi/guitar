@@ -4,20 +4,50 @@ const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 let _ctx = null;
 let _timeouts = [];
 
+// Build (once) a single shared AudioContext. iOS Safari starts it suspended and
+// will only let it resume from inside a user gesture, so we never close/recreate
+// it — closing it would drop the gesture "unlock" and silence later playback.
+function buildCtx() {
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctor();
+  // Master compressor prevents clipping when all strings ring at once
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20;
+  comp.ratio.value = 6;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.2;
+  comp.connect(ctx.destination);
+  ctx._out = comp;
+  return ctx;
+}
+
 function getCtx() {
-  if (!_ctx || _ctx.state === 'closed') {
-    _ctx = new AudioContext();
-    // Master compressor prevents clipping when all strings ring at once
-    const comp = _ctx.createDynamicsCompressor();
-    comp.threshold.value = -20;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.2;
-    comp.connect(_ctx.destination);
-    _ctx._out = comp;
-  }
-  if (_ctx.state === 'suspended') _ctx.resume();
+  if (!_ctx || _ctx.state === 'closed') _ctx = buildCtx();
   return _ctx;
+}
+
+/**
+ * Unlock/resume audio from inside a user-gesture handler. MUST be called
+ * synchronously from a real tap/click (not after an await) on iOS, or the
+ * AudioContext stays suspended and everything is silent.
+ *
+ * Plays a 1-sample silent buffer to satisfy iOS's "sound during gesture"
+ * requirement, then resumes. Returns a promise that resolves once running.
+ */
+export async function unlockAudio() {
+  const ctx = getCtx();
+  // Prime with a silent buffer — required to unlock audio on iOS.
+  try {
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch { /* ignore */ }
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch { /* ignore */ }
+  }
+  return ctx;
 }
 
 function fretHz(string, fret) {
@@ -65,13 +95,18 @@ function pluck(ctx, hz, startTime, decay) {
  * @param {(chordIdx: number) => void} onChord  - called when each chord starts
  * @param {() => void} onDone                   - called when playback finishes
  */
-export function playProgression(voicings, bpm = 72, onChord, onDone) {
-  // Stop any prior playback
+export async function playProgression(voicings, bpm = 72, onChord, onDone) {
+  // Stop any prior playback (without tearing down the shared context).
   _timeouts.forEach(clearTimeout);
   _timeouts = [];
-  if (_ctx) { _ctx.close(); _ctx = null; }
 
   const ctx = getCtx();
+  // iOS: the context may still be suspended; resume before scheduling or the
+  // notes are scheduled into a paused timeline and never sound.
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch { /* ignore */ }
+  }
+
   const chordDur = (60 / bpm) * 4;   // 4 beats per chord
   const noteDur  = chordDur * 0.88;  // notes ring slightly shorter than the beat
 
@@ -98,5 +133,19 @@ export function playProgression(voicings, bpm = 72, onChord, onDone) {
 export function stopAudio() {
   _timeouts.forEach(clearTimeout);
   _timeouts = [];
-  if (_ctx) { _ctx.close(); _ctx = null; }
+  // Silence any currently-ringing notes by disconnecting the master output,
+  // then reconnect a fresh compressor — but keep the SAME AudioContext so the
+  // iOS gesture unlock is preserved for the next play.
+  if (_ctx && _ctx.state !== 'closed') {
+    try {
+      _ctx._out.disconnect();
+      const comp = _ctx.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.ratio.value = 6;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.2;
+      comp.connect(_ctx.destination);
+      _ctx._out = comp;
+    } catch { /* ignore */ }
+  }
 }
