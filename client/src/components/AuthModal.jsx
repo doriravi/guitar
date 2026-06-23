@@ -101,10 +101,11 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
     setError('');
     setLoading(true);
     try {
-      const user = mode === 'login'
-        ? await auth.login(form.email, form.password)
-        : await auth.register(form.email, form.password, form.name);
-      onSuccess(user);
+      const isNew = mode === 'register';
+      const user = isNew
+        ? await auth.register(form.email, form.password, form.name)
+        : await auth.login(form.email, form.password);
+      onSuccess(user, { isNew });
     } catch (err) {
       // The email-first flow can't know up front whether an account exists, so
       // recover from the two "wrong mode" cases instead of showing a raw error:
@@ -133,7 +134,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
       const user = provider === 'google'
         ? await auth.oauthGoogle(token)
         : await auth.oauthFacebook(token);
-      onSuccess(user);
+      onSuccess(user, { isNew: false });
     } catch (err) {
       if (err.status === 503) {
         setError(tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.'));
