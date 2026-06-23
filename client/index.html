@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Guitar Reach Difficulty</title>
+
+    <!-- Google Identity Services SDK (for "Sign in with Google").
+         Safe to load unconditionally; the button only renders when
+         VITE_GOOGLE_CLIENT_ID is set (see AuthModal.jsx). -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <!-- Facebook Login SDK. The SDK is initialized from React
+         (AuthModal.jsx) where VITE_FACEBOOK_APP_ID is available; the
+         script tag just makes window.FB available. -->
+    <script async defer crossorigin="anonymous"
+            src="https://connect.facebook.net/en_US/sdk.js"></script>
   </head>
   <body>
     <div id="root"></div>

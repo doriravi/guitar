@@ -40,6 +40,23 @@ export const auth = {
   logout: () => apiFetch('/api/auth/logout', { method: 'POST' }),
 
   me: () => apiFetch('/api/users/me'),
+
+  // Which social providers the server has credentials for: { google, facebook }
+  oauthConfig: () => apiFetch('/api/auth/oauth/config'),
+
+  // token = Google ID token from Google Identity Services
+  oauthGoogle: (token) =>
+    apiFetch('/api/auth/oauth/google', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
+  // token = Facebook access token from the Facebook Login SDK
+  oauthFacebook: (token) =>
+    apiFetch('/api/auth/oauth/facebook', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
 };
 
 export const handProfile = {

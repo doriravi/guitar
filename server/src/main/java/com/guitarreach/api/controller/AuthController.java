@@ -1,9 +1,13 @@
 package com.guitarreach.api.controller;
 
 import com.guitarreach.api.dto.request.LoginRequest;
+import com.guitarreach.api.dto.request.OAuthLoginRequest;
 import com.guitarreach.api.dto.request.RegisterRequest;
 import com.guitarreach.api.dto.response.AuthResponse;
 import com.guitarreach.api.service.AuthService;
+import com.guitarreach.api.service.OAuthService;
+
+import java.util.Map;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -21,6 +25,31 @@ import java.util.Arrays;
 public class AuthController {
 
     private final AuthService authService;
+    private final OAuthService oauthService;
+
+    /**
+     * Tells the frontend which social sign-in buttons to enable. Lets the UI
+     * render the design while disabling providers that have no server creds.
+     */
+    @GetMapping("/oauth/config")
+    public ResponseEntity<Map<String, Boolean>> oauthConfig() {
+        return ResponseEntity.ok(Map.of(
+                "google", oauthService.googleEnabled(),
+                "facebook", oauthService.facebookEnabled()
+        ));
+    }
+
+    @PostMapping("/oauth/google")
+    public ResponseEntity<AuthResponse> googleLogin(@Valid @RequestBody OAuthLoginRequest req,
+                                                    HttpServletResponse response) {
+        return ResponseEntity.ok(oauthService.loginWithGoogle(req.getToken(), response));
+    }
+
+    @PostMapping("/oauth/facebook")
+    public ResponseEntity<AuthResponse> facebookLogin(@Valid @RequestBody OAuthLoginRequest req,
+                                                      HttpServletResponse response) {
+        return ResponseEntity.ok(oauthService.loginWithFacebook(req.getToken(), response));
+    }
 
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest req,

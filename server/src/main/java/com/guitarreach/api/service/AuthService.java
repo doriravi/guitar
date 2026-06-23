@@ -87,6 +87,15 @@ public class AuthService {
         clearCookie(response, "jwt_refresh");
     }
 
+    /**
+     * Issue JWT cookies for an already-resolved user (e.g. after OAuth sign-in)
+     * and build the standard auth response. Reuses the same cookie plumbing as
+     * local login/registration.
+     */
+    public AuthResponse issueTokensForUser(User user, HttpServletResponse response) {
+        return issueTokensAndBuildResponse(user, response);
+    }
+
     private AuthResponse issueTokensAndBuildResponse(User user, HttpServletResponse response) {
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
         String accessToken = tokenProvider.generateAccessToken(userDetails);

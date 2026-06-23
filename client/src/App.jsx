@@ -70,6 +70,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('start');
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [currentUser, setCurrentUser] = useState(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -114,9 +115,12 @@ export default function App() {
         setCurrentUser(user);
         return syncProfileOnLogin();
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setAuthChecking(false));
   }, []);
 
+  // Returns true if, after syncing, the user has a real (non-default) saved
+  // hand profile — used to decide whether to send them to measure their hand.
   async function syncProfileOnLogin() {
     const remote = await handProfileApi.get().catch(() => null);
     if (remote && !isDefaultProfile(remote)) {
@@ -124,12 +128,15 @@ export default function App() {
       const merged = { ...DEFAULT_PROFILE, ...remote };
       setHandProfile(merged);
       try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
+      return true;
     } else {
       // Server has defaults — push local if the user customised it as a guest
       const local = loadLocalProfile();
       if (!isDefaultProfile(local)) {
         await handProfileApi.save(local).catch(() => {});
+        return true;
       }
+      return false;
     }
   }
 
@@ -146,7 +153,11 @@ export default function App() {
   function handleAuthSuccess(user) {
     setCurrentUser(user);
     setShowAuth(false);
-    syncProfileOnLogin().catch(() => {});
+    // After a successful login, send users who have never measured/saved a
+    // hand profile straight to the hand-measurement step.
+    syncProfileOnLogin()
+      .then(hasProfile => { if (!hasProfile) setActiveTab('hand'); })
+      .catch(() => {});
   }
 
   async function handleLogout() {
@@ -158,6 +169,60 @@ export default function App() {
   function handleSaveAIFingers(fingers) {
     setAIFingers(fingers);
     try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
+  }
+
+  // --- Auth gate: the app requires login. Until the user is authenticated,
+  // the login screen IS the landing page (no app shell behind it). ---
+  if (authChecking) {
+    return (
+      <LangContext.Provider value={lang}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: '#0f0f0f', color: '#888' }}>
+          <span className="text-sm">{tr.pleaseWait}</span>
+        </div>
+      </LangContext.Provider>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <LangContext.Provider value={lang}>
+        <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+          {showResetModal ? (
+            <ResetPassword
+              token={resetToken}
+              onDone={() => {
+                setShowResetModal(false);
+                window.history.replaceState({}, '', window.location.pathname);
+              }}
+              lang={lang}
+            />
+          ) : showForgot ? (
+            <ForgotPassword
+              onClose={() => setShowForgot(false)}
+              onSwitchToLogin={() => setShowForgot(false)}
+              lang={lang}
+            />
+          ) : (
+            <AuthModal
+              fullPage
+              onSuccess={handleAuthSuccess}
+              onForgotPassword={() => setShowForgot(true)}
+              lang={lang}
+            />
+          )}
+          {verifyMsg && (
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-xs font-medium z-50"
+              style={{
+                background: verifyMsg.type === 'success' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
+                border: `1px solid ${verifyMsg.type === 'success' ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`,
+                color: verifyMsg.type === 'success' ? '#4ade80' : '#f87171',
+              }}>
+              {verifyMsg.type === 'success' ? tr.emailVerified : tr.emailVerifyFailed}
+            </div>
+          )}
+        </div>
+      </LangContext.Provider>
+    );
   }
 
   return (

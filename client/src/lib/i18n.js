@@ -14,6 +14,21 @@ export const t = {
     pleaseWait: 'Please wait…', forgotPassword: 'Forgot password?',
     noAccount: "Don't have an account?", signUp: 'Sign up',
     haveAccount: 'Already have an account?',
+    // Email-first sign-in flow
+    enterEmailPrompt: 'Please enter your email to sign in or create a new account.',
+    yourEmail: 'Your Email', emailPlaceholder: 'email@address.com', continueBtn: 'Continue',
+    forgotEmailOrPassword: 'Forgot your', orWord: 'or', emailWord: 'email', passwordWord: 'password?',
+    orUse: 'OR USE', continueWithGoogle: 'Google', continueWithFacebook: 'Facebook',
+    groupSubscriptionPrompt: 'Accessing a group subscription?',
+    signInThroughInstitution: 'Sign in', throughYourInstitution: 'through your institution',
+    institutionComingSoon: 'Institutional sign-in is coming soon. Please contact your group administrator for access.',
+    providerNotConfigured: 'This sign-in option is not available yet.',
+    welcomeBack: 'Welcome back', createYourAccount: 'Create your account',
+    enterPasswordFor: 'Enter your password for', choosePasswordFor: 'Choose a password for',
+    back: 'Back',
+    accountExistsSignIn: 'An account with this email already exists. Please enter your password to sign in.',
+    wrongPassword: 'Incorrect password. Try again, or use "Forgot your password".',
+    somethingWrong: 'Something went wrong',
 
     // Forgot / Reset password
     resetPassword: 'Reset password', sendResetLink: 'Send reset link',
