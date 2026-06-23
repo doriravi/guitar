@@ -3,6 +3,18 @@ const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 
 let _ctx = null;
 let _timeouts = [];
+let _lastState = 'none';
+
+// Diagnostic: current AudioContext state + sampleRate, for on-screen debugging
+// of audio problems on devices we can't open a console on (iOS).
+export function audioDebug() {
+  return {
+    state: _ctx ? _ctx.state : 'no-context',
+    last: _lastState,
+    sampleRate: _ctx ? _ctx.sampleRate : 0,
+    currentTime: _ctx ? Number(_ctx.currentTime.toFixed(2)) : 0,
+  };
+}
 
 // Build (once) a single shared AudioContext. iOS Safari starts it suspended and
 // will only let it resume from inside a user gesture, so we never close/recreate
@@ -95,23 +107,34 @@ function pluck(ctx, hz, startTime, decay) {
  * @param {(chordIdx: number) => void} onChord  - called when each chord starts
  * @param {() => void} onDone                   - called when playback finishes
  */
-export async function playProgression(voicings, bpm = 72, onChord, onDone) {
+export function playProgression(voicings, bpm = 72, onChord, onDone) {
   // Stop any prior playback (without tearing down the shared context).
   _timeouts.forEach(clearTimeout);
   _timeouts = [];
 
   const ctx = getCtx();
-  // iOS: the context may still be suspended; resume before scheduling or the
-  // notes are scheduled into a paused timeline and never sound.
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch { /* ignore */ }
-  }
+
+  // iOS unlock MUST happen synchronously inside the tap handler (no await
+  // before it). Prime with a silent buffer, then resume. We do NOT await the
+  // resume — instead we schedule everything a safe lead-time in the future so
+  // notes land after the clock starts running.
+  try {
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b; s.connect(ctx.destination); s.start(0);
+  } catch { /* ignore */ }
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+  _lastState = ctx.state;
 
   const chordDur = (60 / bpm) * 4;   // 4 beats per chord
   const noteDur  = chordDur * 0.88;  // notes ring slightly shorter than the beat
 
+  // Larger lead so the first strum isn't scheduled before the (just-resumed)
+  // clock has actually advanced on iOS.
+  const lead = 0.15;
+
   voicings.forEach((voicing, i) => {
-    const tChord = ctx.currentTime + 0.08 + i * chordDur;
+    const tChord = ctx.currentTime + lead + i * chordDur;
 
     // Strum: 16 ms between each string (low → high)
     tabToNotes(voicing.tab).forEach((note, ni) => {
