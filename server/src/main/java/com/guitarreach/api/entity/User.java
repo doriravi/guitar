@@ -22,10 +22,23 @@ public class User {
     @Column(unique = true, nullable = false)
     private String email;
 
-    @Column(nullable = false)
+    // Nullable: OAuth-only accounts (Google/Facebook) have no local password.
+    @Column(nullable = true)
     private String passwordHash;
 
     private String name;
+
+    // OAuth provider info. provider is "local" for email/password accounts,
+    // or "google" / "facebook" for social accounts. providerId is the stable
+    // subject id returned by the provider.
+    // columnDefinition gives a DB-level default so Hibernate's ddl-auto=update
+    // can add this NOT NULL column to an already-populated table (SQLite refuses
+    // a NOT NULL add without a default), and existing rows get backfilled.
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'local'")
+    @Builder.Default
+    private String provider = "local";
+
+    private String providerId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

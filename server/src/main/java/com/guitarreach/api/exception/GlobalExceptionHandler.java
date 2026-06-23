@@ -34,6 +34,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
+    @ExceptionHandler(ProviderNotConfiguredException.class)
+    public ResponseEntity<ErrorResponse> handleProviderNotConfigured(ProviderNotConfiguredException ex) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ErrorResponse> handleAuthenticationException(AuthenticationException ex) {
         return build(HttpStatus.UNAUTHORIZED, "Invalid email or password");
