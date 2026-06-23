@@ -72,6 +72,7 @@ export default function App() {
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -115,6 +116,10 @@ export default function App() {
       .then(user => {
         setCurrentUser(user);
         return syncProfileOnLogin();
+      })
+      .then(hasProfile => {
+        // hasProfile is undefined if auth.me() rejected (caught below).
+        if (hasProfile === false) setNeedsOnboarding(true);
       })
       .catch(() => {})
       .finally(() => setAuthChecking(false));
@@ -161,6 +166,8 @@ export default function App() {
     setHandProfile(profile);
     setSaveError(false);
     try { localStorage.setItem('guitar_hand_profile', JSON.stringify(profile)); } catch {}
+    // Saving a real (non-default) measurement clears the onboarding gate.
+    if (!isDefaultProfile(profile)) setNeedsOnboarding(false);
     if (currentUser) {
       try { await handProfileApi.save(profile); }
       catch { setSaveError(true); }
@@ -170,10 +177,11 @@ export default function App() {
   function handleAuthSuccess(user) {
     setCurrentUser(user);
     setShowAuth(false);
-    // After a successful login, send users who have never measured/saved a
-    // hand profile straight to the hand-measurement step.
+    // After a successful login/registration, force users who have never saved a
+    // real hand profile through the mandatory measurement step before the rest
+    // of the app becomes available.
     syncProfileOnLogin()
-      .then(hasProfile => { if (!hasProfile) setActiveTab('hand'); })
+      .then(hasProfile => { setNeedsOnboarding(!hasProfile); })
       .catch(() => {});
   }
 
@@ -186,6 +194,88 @@ export default function App() {
   function handleSaveAIFingers(fingers) {
     setAIFingers(fingers);
     try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
+  }
+
+  // Shared app header (logo + language selector + account/sign-out). Used by
+  // both the onboarding gate and the main app shell so there's one source of
+  // truth for the header.
+  function renderHeader() {
+    return (
+      <header style={{ borderBottom: '1px solid #1e1e1e' }}>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
+          <span className="text-xl sm:text-2xl">🎸</span>
+          <div className="flex-1">
+            <h1 className="text-sm sm:text-base font-bold tracking-tight leading-none" style={{ color: '#f0ede8' }}>
+              Guitar Reach
+            </h1>
+            <p className="text-xs mt-0.5 hidden sm:block" style={{ color: '#5a5a5a' }}>
+              {tr.appSubtitle}
+            </p>
+          </div>
+          {/* Language selector */}
+          <div className="relative">
+            <button
+              onClick={() => setShowLangMenu(v => !v)}
+              className="text-xs px-2 py-1 rounded flex items-center gap-1"
+              style={{ color: '#888', border: '1px solid #2a2a2a' }}
+            >
+              🌐 {LANGUAGES.find(l => l.code === lang)?.label}
+            </button>
+            {showLangMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
+                <div
+                  className="absolute right-0 mt-1 rounded-xl overflow-hidden z-50"
+                  style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '130px' }}
+                >
+                {LANGUAGES.map(l => (
+                  <button
+                    key={l.code}
+                    onClick={() => handleLangSelect(l.code)}
+                    className="w-full text-left text-xs px-3 py-2 transition-colors"
+                    style={{
+                      color: l.code === lang ? '#c9a96e' : '#aaa',
+                      background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
+                    onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+              </>
+            )}
+          </div>
+
+          {currentUser ? (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowSettings(true)}
+                className="text-xs hidden sm:block" style={{ color: '#888' }}>
+                {currentUser.email}
+                {!currentUser.emailVerified && <span style={{ color: '#fb923c' }}> ⚠</span>}
+              </button>
+              <button onClick={() => setShowSettings(true)}
+                className="text-xs px-2 py-1 rounded"
+                style={{ color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+                {tr.settings}
+              </button>
+              <button onClick={handleLogout}
+                className="text-xs px-2 py-1 rounded"
+                style={{ color: '#888', border: '1px solid #2a2a2a' }}>
+                {tr.signOut}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAuth(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+              style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+              {tr.signIn}
+            </button>
+          )}
+        </div>
+      </header>
+    );
   }
 
   // --- Auth gate: the app requires login. Until the user is authenticated,
@@ -238,6 +328,56 @@ export default function App() {
             </div>
           )}
         </div>
+      </LangContext.Provider>
+    );
+  }
+
+  // --- Onboarding gate: a logged-in user with no real measured hand profile
+  // must complete and save a measurement before the rest of the app is shown.
+  if (needsOnboarding) {
+    return (
+      <LangContext.Provider value={lang}>
+      <AIFingerContext.Provider value={aiFingers}>
+      <HandProfileContext.Provider value={handProfile}>
+        <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+          {showSettings && currentUser && (
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
+              <div className="min-h-screen flex items-start justify-center py-10 px-4">
+                <div className="w-full max-w-lg rounded-2xl relative" style={{ background: '#0f0f0f', border: '1px solid #2a2a2a' }}>
+                  <button onClick={() => setShowSettings(false)}
+                    className="absolute top-4 right-4 text-xl leading-none" style={{ color: '#888' }}>×</button>
+                  <AccountSettings
+                    currentUser={currentUser}
+                    onUpdated={updated => setCurrentUser(updated)}
+                    onDeleted={() => { localStorage.removeItem('guitar_hand_profile'); window.location.reload(); }}
+                    lang={lang}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {renderHeader()}
+
+          <main className="max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
+            <div className="mb-4 px-4 py-3 rounded-xl text-sm leading-relaxed"
+              style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.15)', color: '#c9a96e' }}>
+              {tr.measureFirstPrompt ||
+                'First, measure your hand so we can personalize difficulty scores. This takes about a minute.'}
+            </div>
+            <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
+              <HandProfileSetup
+                profile={handProfile}
+                onSave={handleSaveProfile}
+                onSaveAIFingers={handleSaveAIFingers}
+                saveError={saveError}
+                lang={lang}
+              />
+            </div>
+          </main>
+        </div>
+      </HandProfileContext.Provider>
+      </AIFingerContext.Provider>
       </LangContext.Provider>
     );
   }
@@ -295,80 +435,7 @@ export default function App() {
         )}
 
         {/* Header */}
-        <header style={{ borderBottom: '1px solid #1e1e1e' }}>
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
-            <span className="text-xl sm:text-2xl">🎸</span>
-            <div className="flex-1">
-              <h1 className="text-sm sm:text-base font-bold tracking-tight leading-none" style={{ color: '#f0ede8' }}>
-                Guitar Reach
-              </h1>
-              <p className="text-xs mt-0.5 hidden sm:block" style={{ color: '#5a5a5a' }}>
-                {tr.appSubtitle}
-              </p>
-            </div>
-            {/* Language selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowLangMenu(v => !v)}
-                className="text-xs px-2 py-1 rounded flex items-center gap-1"
-                style={{ color: '#888', border: '1px solid #2a2a2a' }}
-              >
-                🌐 {LANGUAGES.find(l => l.code === lang)?.label}
-              </button>
-              {showLangMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
-                  <div
-                    className="absolute right-0 mt-1 rounded-xl overflow-hidden z-50"
-                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '130px' }}
-                  >
-                  {LANGUAGES.map(l => (
-                    <button
-                      key={l.code}
-                      onClick={() => handleLangSelect(l.code)}
-                      className="w-full text-left text-xs px-3 py-2 transition-colors"
-                      style={{
-                        color: l.code === lang ? '#c9a96e' : '#aaa',
-                        background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
-                      }}
-                      onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
-                      onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      {l.label}
-                    </button>
-                  ))}
-                </div>
-                </>
-              )}
-            </div>
-
-            {currentUser ? (
-              <div className="flex items-center gap-2">
-                <button onClick={() => setShowSettings(true)}
-                  className="text-xs hidden sm:block" style={{ color: '#888' }}>
-                  {currentUser.email}
-                  {!currentUser.emailVerified && <span style={{ color: '#fb923c' }}> ⚠</span>}
-                </button>
-                <button onClick={() => setShowSettings(true)}
-                  className="text-xs px-2 py-1 rounded"
-                  style={{ color: '#c9a96e', border: '1px solid #2a2a2a' }}>
-                  {tr.settings}
-                </button>
-                <button onClick={handleLogout}
-                  className="text-xs px-2 py-1 rounded"
-                  style={{ color: '#888', border: '1px solid #2a2a2a' }}>
-                  {tr.signOut}
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setShowAuth(true)}
-                className="text-xs px-3 py-1.5 rounded-lg font-semibold"
-                style={{ background: '#c9a96e', color: '#0f0f0f' }}>
-                {tr.signIn}
-              </button>
-            )}
-          </div>
-        </header>
+        {renderHeader()}
 
         <main className="max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
 

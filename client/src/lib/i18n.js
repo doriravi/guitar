@@ -29,6 +29,7 @@ export const t = {
     accountExistsSignIn: 'An account with this email already exists. Please enter your password to sign in.',
     wrongPassword: 'Incorrect password. Try again, or use "Forgot your password".',
     somethingWrong: 'Something went wrong',
+    measureFirstPrompt: 'First, measure your hand so we can personalize difficulty scores. This takes about a minute — adjust the sliders (or use the camera) and tap Save to continue.',
 
     // Forgot / Reset password
     resetPassword: 'Reset password', sendResetLink: 'Send reset link',
