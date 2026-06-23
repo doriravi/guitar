@@ -85,6 +85,17 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
     setStep('auth');
   }
 
+  // Explicit "Create account" path from the first screen for new users.
+  function goToRegisterStep() {
+    setError('');
+    if (!emailValid(form.email)) {
+      setError(tk(tr, 'invalidEmail', 'Please enter a valid email address.'));
+      return;
+    }
+    setMode('register');
+    setStep('auth');
+  }
+
   async function handleAuthSubmit(e) {
     e.preventDefault();
     setError('');
@@ -229,6 +240,13 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
             </form>
 
             <p className="mt-3 text-center text-xs" style={{ color: '#888' }}>
+              {tk(tr, 'newHere', 'New here?')}{' '}
+              <button type="button" onClick={goToRegisterStep} className="underline font-semibold" style={{ color: '#c9a96e' }}>
+                {tk(tr, 'createAccount', 'Create account')}
+              </button>
+            </p>
+
+            <p className="mt-1 text-center text-xs" style={{ color: '#888' }}>
               {tk(tr, 'forgotEmailOrPassword', 'Forgot your')}{' '}
               <button onClick={onForgotPassword} className="underline" style={{ color: '#c9a96e' }}>
                 {tk(tr, 'passwordWord', 'password?')}
