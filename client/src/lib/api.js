@@ -1,13 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 async function apiFetch(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+  // For multipart/FormData uploads, callers pass { 'Content-Type': undefined }
+  // so the browser can set the multipart boundary itself.
+  if (headers['Content-Type'] === undefined) delete headers['Content-Type'];
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   if (res.status === 204) return null;
@@ -87,6 +92,21 @@ export const user = {
 
   resetPassword: (token, newPassword) =>
     apiFetch('/api/users/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
+};
+
+export const tab = {
+  // Upload a guitar audio clip; returns { ascii, bpm, events:[{string,fret,...}], chords }.
+  transcribe: (audioFile, { durationSeconds, startSeconds } = {}) => {
+    const form = new FormData();
+    form.append('audio', audioFile);
+    if (durationSeconds != null) form.append('duration_seconds', durationSeconds);
+    if (startSeconds != null) form.append('start_seconds', startSeconds);
+    return apiFetch('/api/tab/transcribe', {
+      method: 'POST',
+      body: form,
+      headers: { 'Content-Type': undefined }, // let the browser set the multipart boundary
+    });
+  },
 };
 
 export const subscriptions = {

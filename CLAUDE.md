@@ -74,6 +74,7 @@ Standard Spring Boot layering under `com.guitarreach.api`: `controller → servi
 - **Billing:** Stripe (`StripeService`, `SubscriptionController`); plans FREE/MONTHLY/YEARLY.
 - **Email:** verification + password reset via `EmailService` (Spring Mail).
 - **Hand analysis:** [HandAnalysisController](server/src/main/java/com/guitarreach/api/controller/HandAnalysisController.java) proxies a hand photo (base64) to Google Gemini with a fixed biomechanics prompt and returns a strict-JSON capability profile. Returns 503 if `GEMINI_API_KEY` is unset.
+- **Audio → Tab:** [TabTranscriptionController](server/src/main/java/com/guitarreach/api/controller/TabTranscriptionController.java) proxies an uploaded guitar clip (multipart) to the **`tab-service/`** Python sidecar — a FastAPI wrapper around [fingerstyle-tab-mcp](https://github.com/blooper20/fingerstyle-tab-mcp) (Basic Pitch + Demucs + music21). The sidecar returns ASCII tab **plus structured `{string,fret}` events** (string convention 0=low E … 5=high e, matching the app), which the frontend (`TabTranscriber.jsx`) scores with the existing reach engine. Same graceful-degradation contract as Gemini: 503 when `tab.service.url` / `TAB_SERVICE_URL` is unset. Run locally with `cd tab-service && uvicorn app:app --port 8000`; production hosting is deferred — see [tab-service/README.md](tab-service/README.md).
 
 ### Deployment
 - Frontend → **Vercel** ([vercel.json](vercel.json): Vite build, SPA rewrite). `VITE_API_URL` points it at the backend.

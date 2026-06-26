@@ -1,0 +1,103 @@
+# Fingerstyle Tab MCP Server Configuration
+
+# Audio Processing Settings
+audio:
+  # Supported formats: mp3, wav, flac, ogg, m4a, aac
+  supported_formats:
+    - .mp3
+    - .wav
+    - .flac
+    - .ogg
+    - .m4a
+    - .aac
+
+  # Default BPM when auto-detection fails
+  default_bpm: 120.0
+
+  # BPM range limits
+  min_bpm: 40
+  max_bpm: 200
+
+  # Source Separation (Demucs)
+  # Removes vocals/drums to improve guitar transcription accuracy
+  # Warning: Increases processing time significantly
+  source_separation: false
+  separation_model: "htdemucs"  # Options: htdemucs, htdemucs_ft, mdx_extra_q
+
+# Post-processing for Clean Tabs
+post_processing:
+  min_note_duration: 0.1     # Drop notes shorter than 0.1s
+  min_velocity: 0.3          # Drop weak notes (0.0-1.0)
+  quantize: true             # Snap notes to 16th grid
+  snap_harmony_to_key: true  # Force accompaniment notes to match detected chords
+
+# Tablature Generation Settings
+tablature:
+  # Standard guitar tuning (can be customized)
+  # Format: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4']
+  standard_tuning:
+    - E2
+    - A2
+    - D3
+    - G3
+    - B3
+    - E4
+
+  # MIDI pitch threshold for bass notes
+  bass_threshold: 50
+
+  # Number of time slots per measure
+  slots_per_measure: 16
+
+  # Number of measures to display per line
+  measures_per_line: 4
+
+  # Fret range preference (0-5 for open chords)
+  preferred_fret_range:
+    min: 0
+    max: 5
+
+  # Maximum fret position
+  max_fret: 15
+
+# Chord Detection Settings
+chord_detection:
+  # Minimum score threshold for chord detection
+  min_score: 5
+
+  # Enable/disable specific chord types
+  enabled_chord_types:
+    major: true
+    minor: true
+    seventh: true
+    major_seventh: true
+    minor_seventh: true
+    suspended: true
+    add9: true
+
+# Logging Settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: INFO
+
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # Log to file (optional)
+  # file: "fingerstyle_tab.log"
+
+# Internationalization Settings
+i18n:
+  # Default language: en, ko, etc.
+  default_language: en
+
+  # Fallback to English if translation not found
+  fallback: true
+
+# MCP Server Settings
+mcp:
+  # Server name
+  server_name: "Fingerstyle Tab Generator"
+
+  # Enable detailed error messages
+  detailed_errors: true

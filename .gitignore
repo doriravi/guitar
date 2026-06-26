@@ -15,6 +15,14 @@ server/data/*.db
 server/.env
 server/src/main/resources/application-dev.properties
 
+# Tab transcription sidecar (Python). Vendored source IS committed; venv,
+# downloaded ML model weights, separated-audio cache, and local config are not.
+tab-service/venv/
+tab-service/**/__pycache__/
+tab-service/vendor/config.yaml
+tab-service/vendor/temp/
+tab-service/.cache/
+
 # Misc
 .vscode/
 projects_summary.csv
