@@ -4,6 +4,10 @@ client/dist
 client/.env
 client/.env.local
 client/.vercel
+client/test-results
+client/playwright-report
+client/.playwright
+client/blob-report
 
 # Server
 server/target
@@ -14,3 +18,7 @@ server/src/main/resources/application-dev.properties
 # Misc
 .vscode/
 projects_summary.csv
+
+# IntelliJ per-developer DB connections / stray sqlite
+server/.idea/dataSources.xml
+server/identifier.sqlite
