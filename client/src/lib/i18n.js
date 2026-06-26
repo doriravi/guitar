@@ -3,7 +3,12 @@ export const t = {
     // App / Nav
     appSubtitle: 'Difficulty scores for your hand',
     tabHand: 'My Hand', tabStrings: 'Strings', tabTuner: 'Tuner',
-    tabListen: 'Listen', tabChords: 'Chords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
+    tabListen: 'Listen', tabAudioTab: 'Audio → Tab', tabChords: 'Chords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
+    tabAudioIntro: 'Upload a short guitar clip. We transcribe it to tab and score each detected shape for your hand.',
+    tabAudioGo: 'Transcribe', tabAudioWorking: 'Transcribing…',
+    tabAudioSlow: 'This can take 30–60s — the model separates and analyzes the audio.',
+    tabAudioUnavailable: 'Transcription service is not running. Start tab-service locally (see tab-service/README.md).',
+    tabAudioChords: 'Detected shapes', tabAudioRaw: 'Tablature', tabAudioNotes: 'notes',
     signIn: 'Sign in', signOut: 'Sign out', settings: 'Settings',
     emailVerified: 'Email verified! You can now sign in.',
     emailVerifyFailed: 'Verification link is invalid or expired.',
@@ -157,7 +162,7 @@ export const t = {
   es: {
     appSubtitle: 'Puntuaciones de dificultad para tu mano',
     tabHand: 'Mi Mano', tabStrings: 'Cuerdas', tabTuner: 'Afinador',
-    tabListen: 'Escuchar', tabChords: 'Acordes', tabTriplets: 'Tripletes', tabProgressions: 'Progresiones',
+    tabListen: 'Escuchar', tabAudioTab: 'Audio → Tab', tabChords: 'Acordes', tabTriplets: 'Tripletes', tabProgressions: 'Progresiones',
     signIn: 'Iniciar sesión', signOut: 'Cerrar sesión', settings: 'Ajustes',
     emailVerified: '¡Email verificado! Ya puedes iniciar sesión.',
     emailVerifyFailed: 'El enlace de verificación no es válido o ha expirado.',
@@ -242,7 +247,7 @@ export const t = {
   zh: {
     appSubtitle: '根据您的手型评估难度',
     tabHand: '我的手', tabStrings: '弦', tabTuner: '调音器',
-    tabListen: '听音', tabChords: '和弦', tabTriplets: '三音组', tabProgressions: '和弦进行',
+    tabListen: '听音', tabAudioTab: '音频转谱', tabChords: '和弦', tabTriplets: '三音组', tabProgressions: '和弦进行',
     signIn: '登录', signOut: '退出', settings: '设置',
     emailVerified: '邮箱已验证！您现在可以登录。', emailVerifyFailed: '验证链接无效或已过期。',
     createAccount: '创建账户', yourName: '您的姓名', email: '邮箱',
@@ -324,7 +329,7 @@ export const t = {
   hi: {
     appSubtitle: 'आपके हाथ के लिए कठिनाई स्कोर',
     tabHand: 'मेरा हाथ', tabStrings: 'तार', tabTuner: 'ट्यूनर',
-    tabListen: 'सुनें', tabChords: 'कॉर्ड', tabTriplets: 'त्रिक', tabProgressions: 'प्रोग्रेशन',
+    tabListen: 'सुनें', tabAudioTab: 'ऑडियो → टैब', tabChords: 'कॉर्ड', tabTriplets: 'त्रिक', tabProgressions: 'प्रोग्रेशन',
     signIn: 'साइन इन', signOut: 'साइन आउट', settings: 'सेटिंग्स',
     emailVerified: 'ईमेल सत्यापित! अब साइन इन करें।', emailVerifyFailed: 'सत्यापन लिंक अमान्य या समाप्त हो गया।',
     createAccount: 'खाता बनाएं', yourName: 'आपका नाम', email: 'ईमेल',
@@ -407,7 +412,7 @@ export const t = {
   ar: {
     appSubtitle: 'درجات الصعوبة لحجم يدك',
     tabHand: 'يدي', tabStrings: 'الأوتار', tabTuner: 'الضابط',
-    tabListen: 'استمع', tabChords: 'الأوتار الموسيقية', tabTriplets: 'الثلاثيات', tabProgressions: 'التقدمات',
+    tabListen: 'استمع', tabAudioTab: 'صوت ← تابلاتشر', tabChords: 'الأوتار الموسيقية', tabTriplets: 'الثلاثيات', tabProgressions: 'التقدمات',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', settings: 'الإعدادات',
     emailVerified: 'تم التحقق من البريد! يمكنك الآن تسجيل الدخول.', emailVerifyFailed: 'رابط التحقق غير صالح أو منتهي الصلاحية.',
     createAccount: 'إنشاء حساب', yourName: 'اسمك', email: 'البريد الإلكتروني',
@@ -490,7 +495,7 @@ export const t = {
   pt: {
     appSubtitle: 'Pontuações de dificuldade para sua mão',
     tabHand: 'Minha Mão', tabStrings: 'Cordas', tabTuner: 'Afinador',
-    tabListen: 'Ouvir', tabChords: 'Acordes', tabTriplets: 'Tríades', tabProgressions: 'Progressões',
+    tabListen: 'Ouvir', tabAudioTab: 'Áudio → Tab', tabChords: 'Acordes', tabTriplets: 'Tríades', tabProgressions: 'Progressões',
     signIn: 'Entrar', signOut: 'Sair', settings: 'Configurações',
     emailVerified: 'Email verificado! Você pode entrar agora.', emailVerifyFailed: 'Link de verificação inválido ou expirado.',
     createAccount: 'Criar conta', yourName: 'Seu nome', email: 'Email',
@@ -573,7 +578,7 @@ export const t = {
   fr: {
     appSubtitle: 'Scores de difficulté pour votre main',
     tabHand: 'Ma Main', tabStrings: 'Cordes', tabTuner: 'Accordeur',
-    tabListen: 'Écouter', tabChords: 'Accords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
+    tabListen: 'Écouter', tabAudioTab: 'Audio → Tab', tabChords: 'Accords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
     signIn: 'Se connecter', signOut: 'Se déconnecter', settings: 'Paramètres',
     emailVerified: 'Email vérifié ! Vous pouvez vous connecter.', emailVerifyFailed: 'Lien de vérification invalide ou expiré.',
     createAccount: 'Créer un compte', yourName: 'Votre nom', email: 'Email',
@@ -656,7 +661,7 @@ export const t = {
   de: {
     appSubtitle: 'Schwierigkeitsbewertungen für Ihre Hand',
     tabHand: 'Meine Hand', tabStrings: 'Saiten', tabTuner: 'Stimmgerät',
-    tabListen: 'Hören', tabChords: 'Akkorde', tabTriplets: 'Triolen', tabProgressions: 'Progressionen',
+    tabListen: 'Hören', tabAudioTab: 'Audio → Tab', tabChords: 'Akkorde', tabTriplets: 'Triolen', tabProgressions: 'Progressionen',
     signIn: 'Anmelden', signOut: 'Abmelden', settings: 'Einstellungen',
     emailVerified: 'E-Mail verifiziert! Sie können sich jetzt anmelden.', emailVerifyFailed: 'Verifizierungslink ungültig oder abgelaufen.',
     createAccount: 'Konto erstellen', yourName: 'Ihr Name', email: 'E-Mail',
@@ -739,7 +744,7 @@ export const t = {
   ja: {
     appSubtitle: 'あなたの手に合わせた難易度スコア',
     tabHand: 'マイハンド', tabStrings: '弦', tabTuner: 'チューナー',
-    tabListen: '聴音', tabChords: 'コード', tabTriplets: 'トリプレット', tabProgressions: 'コード進行',
+    tabListen: '聴音', tabAudioTab: '音声 → タブ', tabChords: 'コード', tabTriplets: 'トリプレット', tabProgressions: 'コード進行',
     signIn: 'ログイン', signOut: 'ログアウト', settings: '設定',
     emailVerified: 'メール確認完了！ログインできます。', emailVerifyFailed: '確認リンクが無効または期限切れです。',
     createAccount: 'アカウント作成', yourName: 'お名前', email: 'メールアドレス',
@@ -822,7 +827,7 @@ export const t = {
   ko: {
     appSubtitle: '당신의 손에 맞는 난이도 점수',
     tabHand: '내 손', tabStrings: '현', tabTuner: '튜너',
-    tabListen: '청음', tabChords: '코드', tabTriplets: '트리플렛', tabProgressions: '코드 진행',
+    tabListen: '청음', tabAudioTab: '오디오 → 탭', tabChords: '코드', tabTriplets: '트리플렛', tabProgressions: '코드 진행',
     signIn: '로그인', signOut: '로그아웃', settings: '설정',
     emailVerified: '이메일이 인증되었습니다! 이제 로그인할 수 있습니다.', emailVerifyFailed: '인증 링크가 유효하지 않거나 만료되었습니다.',
     createAccount: '계정 만들기', yourName: '이름', email: '이메일',

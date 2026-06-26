@@ -5,6 +5,7 @@ import TripletTable from './components/TripletTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
+import TabTranscriber from './components/TabTranscriber';
 import GuitarStrings from './components/GuitarStrings';
 import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
@@ -61,6 +62,7 @@ function getTabs(tr) {
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
     { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️' },
     { id: 'listen',       label: tr.tabListen,       icon: '🎙️' },
+    { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼' },
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
     { id: 'triplets',     label: tr.tabTriplets,     icon: '🎵' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
@@ -499,6 +501,7 @@ export default function App() {
             {activeTab === 'strings'      && <GuitarStrings lang={lang} />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} />}
+            {activeTab === 'audiotab'     && <TabTranscriber />}
             {activeTab === 'chords'       && <ChordTable lang={lang} />}
             {activeTab === 'triplets'     && <TripletTable lang={lang} />}
             {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
