@@ -8,6 +8,7 @@ client/test-results
 client/playwright-report
 client/.playwright
 client/blob-report
+test-results
 
 # Server
 server/target
