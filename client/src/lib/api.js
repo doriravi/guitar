@@ -129,6 +129,15 @@ export const tab = {
   },
 };
 
+// AI-generated explanation for the guide avatar. Returns the explanation string,
+// or null when the server can't help (no key / error) so the caller can fall back.
+export const explain = {
+  get: (ctx) =>
+    apiFetch('/api/explain', { method: 'POST', body: JSON.stringify(ctx) })
+      .then(r => (r && r.explanation) ? r.explanation : null)
+      .catch(() => null),
+};
+
 export const subscriptions = {
   getStatus: () => apiFetch('/api/subscriptions/me'),
 

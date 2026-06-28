@@ -48,6 +48,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/version").permitAll()
                         .requestMatchers("/api/analyze-hand").permitAll()
                         .requestMatchers("/api/tab/**").permitAll()
+                        .requestMatchers("/api/explain").permitAll()
                         // Protected REST endpoints (everything else under /api).
                         .requestMatchers("/api/**").authenticated()
                         // Everything NOT under /api is the bundled single-page app
