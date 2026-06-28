@@ -16,4 +16,9 @@ public class UpdateProfileRequest {
 
     @Size(min = 8, max = 100)
     private String newPassword;
+
+    // UI language preference (ISO code). Validated against the supported set in
+    // the service layer; ignored when blank.
+    @Size(min = 2, max = 8)
+    private String language;
 }

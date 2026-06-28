@@ -15,7 +15,7 @@ import ResetPassword from './components/ResetPassword';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
 import { unlockAudio } from './lib/audio';
-import { useT } from './lib/i18n';
+import { useT, LANGUAGES } from './lib/i18n';
 
 function isDefaultProfile(p) {
   return Object.keys(DEFAULT_PROFILE).every(k => p[k] === DEFAULT_PROFILE[k]);
@@ -29,19 +29,6 @@ export function useAIFingers() { return useContext(AIFingerContext); }
 
 export const LangContext = createContext('en');
 export function useLang() { return useContext(LangContext); }
-
-const LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'es', label: 'Español' },
-  { code: 'zh', label: '中文' },
-  { code: 'hi', label: 'हिन्दी' },
-  { code: 'ar', label: 'العربية' },
-  { code: 'pt', label: 'Português' },
-  { code: 'fr', label: 'Français' },
-  { code: 'de', label: 'Deutsch' },
-  { code: 'ja', label: '日本語' },
-  { code: 'ko', label: '한국어' },
-];
 
 function loadLocalProfile() {
   try {
@@ -83,13 +70,29 @@ export default function App() {
   const [aiFingers, setAIFingers] = useState(() => {
     try { const r = localStorage.getItem('guitar_ai_fingers'); return r ? JSON.parse(r) : null; } catch { return null; }
   });
-  const [showLangMenu, setShowLangMenu] = useState(false);
   const tr = useT(lang);
 
+  // Apply a language choice: update UI immediately, remember it locally, and —
+  // when signed in — persist it to the account so it follows the user across
+  // devices. Used by the lobby picker and Account Settings (language lives on
+  // the lobby / settings, not in the app header).
   function handleLangSelect(code) {
     setLang(code);
-    localStorage.setItem('guitar_lang', code);
-    setShowLangMenu(false);
+    try { localStorage.setItem('guitar_lang', code); } catch {}
+    if (currentUser) {
+      userApi.update({ language: code }).catch(() => {});
+    }
+  }
+
+  // When a session is restored or a user signs in, switch the UI to the language
+  // saved on their account (set on the lobby at registration). Falls back to the
+  // current selection when the account has none.
+  function adoptUserLanguage(user) {
+    const code = user?.language;
+    if (code && LANGUAGES.some(l => l.code === code)) {
+      setLang(code);
+      try { localStorage.setItem('guitar_lang', code); } catch {}
+    }
   }
 
   // Handle deep-link tokens from email links
@@ -117,6 +120,7 @@ export default function App() {
     auth.me()
       .then(user => {
         setCurrentUser(user);
+        adoptUserLanguage(user);
         return syncProfileOnLogin();
       })
       .then(hasProfile => {
@@ -188,6 +192,7 @@ export default function App() {
 
   function handleAuthSuccess(user, opts = {}) {
     setCurrentUser(user);
+    adoptUserLanguage(user);
     setShowAuth(false);
     // After a successful login/registration, force users who have never saved a
     // real hand profile through the mandatory measurement step before the rest
@@ -235,42 +240,6 @@ export default function App() {
               {tr.appSubtitle}
             </p>
           </div>
-          {/* Language selector */}
-          <div className="relative">
-            <button
-              onClick={() => setShowLangMenu(v => !v)}
-              className="text-xs px-2 py-1 rounded flex items-center gap-1"
-              style={{ color: '#888', border: '1px solid #2a2a2a' }}
-            >
-              🌐 {LANGUAGES.find(l => l.code === lang)?.label}
-            </button>
-            {showLangMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
-                <div
-                  className="absolute right-0 mt-1 rounded-xl overflow-hidden z-50"
-                  style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '130px' }}
-                >
-                {LANGUAGES.map(l => (
-                  <button
-                    key={l.code}
-                    onClick={() => handleLangSelect(l.code)}
-                    className="w-full text-left text-xs px-3 py-2 transition-colors"
-                    style={{
-                      color: l.code === lang ? '#c9a96e' : '#aaa',
-                      background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
-                    }}
-                    onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
-                    onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-              </>
-            )}
-          </div>
-
           {currentUser ? (
             <div className="flex items-center gap-2">
               <button onClick={() => setShowSettings(true)}
@@ -338,6 +307,7 @@ export default function App() {
               onSuccess={handleAuthSuccess}
               onForgotPassword={() => setShowForgot(true)}
               lang={lang}
+              onLangSelect={handleLangSelect}
             />
           )}
           {verifyMsg && (
@@ -374,6 +344,7 @@ export default function App() {
                     onUpdated={updated => setCurrentUser(updated)}
                     onDeleted={handleDeleted}
                     lang={lang}
+                    onLangSelect={handleLangSelect}
                   />
                 </div>
               </div>
@@ -451,6 +422,7 @@ export default function App() {
                   onUpdated={updated => setCurrentUser(updated)}
                   onDeleted={handleDeleted}
                   lang={lang}
+                  onLangSelect={handleLangSelect}
                 />
               </div>
             </div>

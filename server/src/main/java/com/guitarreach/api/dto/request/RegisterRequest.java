@@ -15,4 +15,9 @@ public class RegisterRequest {
 
     @NotBlank
     private String name;
+
+    // Optional UI language chosen on the lobby/landing page (ISO code). Validated
+    // against the supported set in the service; defaults to English when absent.
+    @Size(min = 2, max = 8)
+    private String language;
 }

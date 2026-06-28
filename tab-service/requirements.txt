@@ -7,6 +7,10 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 
+# YouTube audio source (downloads the audio track for the /transcribe endpoint).
+# Requires ffmpeg on PATH for audio extraction.
+yt-dlp>=2024.1.0
+
 # Pin numpy to 1.x — TensorFlow 2.13/2.14 and numba/librosa need numpy<2.
 numpy<2
 

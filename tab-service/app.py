@@ -40,9 +40,77 @@ from fastapi.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger("tab-service")
 
+
+def _ensure_ffmpeg_on_path():
+    """yt-dlp's audio extraction needs ffmpeg on PATH. On Windows it's often
+    installed via winget but not exported to PATH, so add common locations if a
+    plain `ffmpeg` isn't already resolvable. No-op when ffmpeg is already found."""
+    import shutil
+    import glob
+    if shutil.which("ffmpeg"):
+        return
+    candidates = glob.glob(os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\**\bin"
+    ), recursive=True)
+    for d in candidates:
+        if os.path.isfile(os.path.join(d, "ffmpeg.exe")):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            logger.info("Added ffmpeg to PATH: %s", d)
+            return
+    logger.warning("ffmpeg not found on PATH — YouTube audio extraction may fail.")
+
+
+_ensure_ffmpeg_on_path()
+
 app = FastAPI(title="Guitar Reach — Tab Transcription Service")
 
 SUPPORTED_EXT = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
+
+# Cap how much of a (potentially long) YouTube video we download/transcribe by
+# default, so a full song doesn't blow up Basic Pitch + Demucs runtime.
+YOUTUBE_MAX_DURATION_DEFAULT = 60.0
+
+
+def _download_youtube_audio(url: str, dest_dir: str) -> str:
+    """Download the audio track of a YouTube URL to a wav file in dest_dir.
+
+    Uses yt-dlp (audio-only) + ffmpeg to extract a wav the transcription pipeline
+    can read. Returns the path to the downloaded file. Raises HTTPException with a
+    clean message on any failure so the proxy/UI can surface it.
+    """
+    try:
+        import yt_dlp  # imported lazily so file-upload mode works without it
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="YouTube support is not installed on the server (pip install yt-dlp).",
+        )
+
+    out_template = os.path.join(dest_dir, "yt_audio.%(ext)s")
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"},
+        ],
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:  # noqa: BLE001 — surface a readable error
+        raise HTTPException(status_code=400, detail=f"Could not download audio from URL: {e}")
+
+    wav_path = os.path.join(dest_dir, "yt_audio.wav")
+    if not os.path.exists(wav_path):
+        # Fall back to whatever file yt-dlp produced (codec mismatch edge case).
+        produced = [f for f in os.listdir(dest_dir) if f.startswith("yt_audio.")]
+        if not produced:
+            raise HTTPException(status_code=400, detail="Audio download produced no file.")
+        wav_path = os.path.join(dest_dir, produced[0])
+    return wav_path
 
 
 @app.get("/health")
@@ -111,12 +179,58 @@ def _structured_events(notes, bpm):
     return events, chords
 
 
+def _run_pipeline(path: str, duration_seconds, start_seconds: float):
+    """Run the full transcription pipeline on a local audio file path."""
+    from src.transcriber import transcribe_audio  # vendored
+    from src.tab_generator import create_tab
+
+    notes, bpm = transcribe_audio(
+        path, duration=duration_seconds, start_offset=start_seconds
+    )
+    ascii_tab = create_tab(notes, bpm=bpm)
+    events, chords = _structured_events(notes, bpm)
+
+    return {
+        "ascii": ascii_tab,
+        "bpm": round(float(bpm), 1),
+        "events": events,
+        "chords": chords,
+        "note_count": len(events),
+    }
+
+
 @app.post("/transcribe")
 async def transcribe(
-    audio: UploadFile = File(...),
+    audio: UploadFile | None = File(None),
+    youtube_url: str | None = Form(None),
     duration_seconds: float | None = Form(None),
     start_seconds: float = Form(0.0),
 ):
+    has_url = bool(youtube_url and youtube_url.strip())
+    has_file = audio is not None and audio.filename
+
+    if not has_url and not has_file:
+        raise HTTPException(status_code=400, detail="Provide an audio file or a youtube_url.")
+
+    # ── YouTube URL source ────────────────────────────────────────────────────
+    if has_url:
+        # Default to a short clip so a full-length video doesn't run for minutes.
+        if duration_seconds is None:
+            duration_seconds = YOUTUBE_MAX_DURATION_DEFAULT
+        work_dir = tempfile.mkdtemp(prefix="yt_tab_")
+        try:
+            path = _download_youtube_audio(youtube_url.strip(), work_dir)
+            return JSONResponse(_run_pipeline(path, duration_seconds, start_seconds))
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.exception("youtube transcription failed")
+            raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+        finally:
+            import shutil
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    # ── Uploaded file source ──────────────────────────────────────────────────
     ext = os.path.splitext(audio.filename or "")[1].lower()
     if ext not in SUPPORTED_EXT:
         raise HTTPException(
@@ -130,23 +244,7 @@ async def transcribe(
     try:
         with open(tmp, "wb") as f:
             f.write(await audio.read())
-
-        from src.transcriber import transcribe_audio  # vendored
-        from src.tab_generator import create_tab
-
-        notes, bpm = transcribe_audio(
-            tmp, duration=duration_seconds, start_offset=start_seconds
-        )
-        ascii_tab = create_tab(notes, bpm=bpm)
-        events, chords = _structured_events(notes, bpm)
-
-        return JSONResponse({
-            "ascii": ascii_tab,
-            "bpm": round(float(bpm), 1),
-            "events": events,
-            "chords": chords,
-            "note_count": len(events),
-        })
+        return JSONResponse(_run_pipeline(tmp, duration_seconds, start_seconds))
     except Exception as e:  # noqa: BLE001 — surface a clean error to the proxy
         logger.exception("transcription failed")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")

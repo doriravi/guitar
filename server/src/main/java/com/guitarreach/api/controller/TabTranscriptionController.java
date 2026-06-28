@@ -35,6 +35,7 @@ public class TabTranscriptionController {
     @PostMapping("/transcribe")
     public ResponseEntity<String> transcribe(
             @RequestParam(value = "audio", required = false) MultipartFile audio,
+            @RequestParam(value = "youtube_url", required = false) String youtubeUrl,
             @RequestParam(value = "duration_seconds", required = false) Double durationSeconds,
             @RequestParam(value = "start_seconds", required = false) Double startSeconds) {
 
@@ -44,10 +45,13 @@ public class TabTranscriptionController {
                     .body("{\"error\":\"Tab transcription service not configured on server\"}");
         }
 
-        if (audio == null || audio.isEmpty()) {
+        boolean hasUrl = youtubeUrl != null && !youtubeUrl.isBlank();
+        boolean hasFile = audio != null && !audio.isEmpty();
+
+        if (!hasUrl && !hasFile) {
             return ResponseEntity.badRequest()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"error\":\"audio file is required\"}");
+                    .body("{\"error\":\"an audio file or a youtube_url is required\"}");
         }
 
         try {
@@ -55,15 +59,18 @@ public class TabTranscriptionController {
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-            // Preserve the original filename so the sidecar can validate the extension.
-            String filename = audio.getOriginalFilename() != null ? audio.getOriginalFilename() : "audio.wav";
-            ByteArrayResource filePart = new ByteArrayResource(audio.getBytes()) {
-                @Override
-                public String getFilename() {
-                    return filename;
-                }
-            };
-            body.add("audio", filePart);
+            if (hasFile) {
+                // Preserve the original filename so the sidecar can validate the extension.
+                String filename = audio.getOriginalFilename() != null ? audio.getOriginalFilename() : "audio.wav";
+                ByteArrayResource filePart = new ByteArrayResource(audio.getBytes()) {
+                    @Override
+                    public String getFilename() {
+                        return filename;
+                    }
+                };
+                body.add("audio", filePart);
+            }
+            if (hasUrl) body.add("youtube_url", youtubeUrl.trim());
             if (durationSeconds != null) body.add("duration_seconds", durationSeconds);
             if (startSeconds != null) body.add("start_seconds", startSeconds);
 

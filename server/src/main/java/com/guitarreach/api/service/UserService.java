@@ -19,11 +19,17 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
+
+    // Languages the frontend ships translations for. An unknown code is ignored
+    // (falls back to the user's existing/default language) rather than rejected.
+    private static final Set<String> SUPPORTED_LANGUAGES =
+            Set.of("en", "es", "zh", "hi", "ar", "pt", "fr", "de", "ja", "ko");
 
     private final UserRepository userRepository;
     private final VerificationTokenRepository tokenRepository;
@@ -47,6 +53,11 @@ public class UserService {
 
         if (StringUtils.hasText(req.getName())) {
             user.setName(req.getName());
+        }
+
+        if (StringUtils.hasText(req.getLanguage())
+                && SUPPORTED_LANGUAGES.contains(req.getLanguage())) {
+            user.setLanguage(req.getLanguage());
         }
 
         if (StringUtils.hasText(req.getNewPassword())) {
@@ -165,6 +176,7 @@ public class UserService {
                 .name(user.getName())
                 .role(user.getRole().name())
                 .emailVerified(user.isEmailVerified())
+                .language(user.getLanguage())
                 .createdAt(user.getCreatedAt())
                 .build();
     }

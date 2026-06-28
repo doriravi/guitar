@@ -40,6 +40,14 @@ public class User {
 
     private String providerId;
 
+    // UI language preference (ISO code: en, es, zh, …). Defaults to English.
+    // columnDefinition gives a DB-level default so Hibernate's ddl-auto=update can
+    // add this NOT NULL column to an already-populated SQLite table (which refuses
+    // a NOT NULL add without a default) and backfill existing rows.
+    @Column(nullable = false, columnDefinition = "varchar(8) default 'en'")
+    @Builder.Default
+    private String language = "en";
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default

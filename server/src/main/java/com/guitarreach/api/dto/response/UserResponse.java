@@ -17,5 +17,6 @@ public class UserResponse {
     private String name;
     private String role;
     private boolean emailVerified;
+    private String language;
     private LocalDateTime createdAt;
 }

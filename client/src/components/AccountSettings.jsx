@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { user as userApi } from '../lib/api';
-import { useT } from '../lib/i18n';
+import { useT, LANGUAGES } from '../lib/i18n';
 
 function Section({ title, children }) {
   return (
@@ -25,7 +25,7 @@ const inputStyle = {
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
 
-export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang }) {
+export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect }) {
   const tr = useT(lang);
   const [name, setName] = useState(currentUser.name || '');
   const [email, setEmail] = useState(currentUser.email || '');
@@ -136,6 +136,22 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
           </div>
         </form>
       </Section>
+
+      {onLangSelect && (
+        <Section title={tr.language || 'Language'}>
+          <Field label={tr.language || 'Language'}>
+            <select
+              style={inputStyle}
+              value={lang}
+              onChange={e => onLangSelect(e.target.value)}
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </Field>
+        </Section>
+      )}
 
       <Section title={tr.dangerZone}>
         <p className="text-xs mb-3" style={{ color: '#666' }}>{tr.deleteAccountWarning}</p>
