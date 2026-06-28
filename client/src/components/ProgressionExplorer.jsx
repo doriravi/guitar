@@ -1063,6 +1063,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   <button
                     onClick={() => toggleEasier(key)}
                     title="Suggest easier chords that fit your hand"
+                    data-explain="The easier button suggests simpler chord shapes that fit your hand, with the same sound — so you can play this progression even with short fingers."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={easierOpen
                       ? { background: 'rgba(74,222,128,0.14)', color: '#4ade80' }
@@ -1074,6 +1075,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   <button
                     onClick={() => toggleUpper(key)}
                     title="Play this progression higher up the neck (movable barre shapes)"
+                    data-explain="The up the neck button shows movable barre shapes for the same chords played higher on the fretboard."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={upperOpen
                       ? { background: 'rgba(192,132,252,0.14)', color: '#c084fc' }
@@ -1085,6 +1087,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   <button
                     onClick={() => toggleTriad(key)}
                     title="Up the neck without barre chords — 3-note triad grips using the same notes"
+                    data-explain="The triads button gives small three-note shapes higher up the neck, using the same notes but with no barre — easier grips for small hands."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={triadOpen
                       ? { background: 'rgba(251,191,36,0.14)', color: '#fbbf24' }

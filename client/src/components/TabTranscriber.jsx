@@ -119,13 +119,17 @@ export default function TabTranscriber() {
       </p>
 
       {/* Source toggle: upload a file or paste a YouTube link */}
-      <div className="flex gap-1 mb-3 p-1 rounded-lg w-max" style={{ background: '#161616' }}>
+      <div className="flex gap-1 mb-3 p-1 rounded-lg w-max" style={{ background: '#161616' }}
+        data-explain="This switch chooses where the audio comes from: a file from your device, or a YouTube link. Pick one, then add your audio below.">
         {[
           { id: 'file',    label: tr.tabAudioSourceFile || 'Upload file' },
           { id: 'youtube', label: tr.tabAudioSourceYoutube || 'YouTube link' },
         ].map(opt => (
           <button
             key={opt.id}
+            data-explain={opt.id === 'file'
+              ? 'Choose Upload file to transcribe an audio file from your device.'
+              : 'Choose YouTube link to transcribe the audio from a YouTube video.'}
             onClick={() => { setSource(opt.id); setError(null); }}
             className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
             style={source === opt.id
@@ -142,6 +146,7 @@ export default function TabTranscriber() {
           <input
             type="file"
             accept="audio/*"
+            data-explain="This picks an audio file from your device to transcribe into tab."
             onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); setError(null); }}
             className="text-sm"
           />
@@ -150,6 +155,7 @@ export default function TabTranscriber() {
             type="url"
             inputMode="url"
             value={youtubeUrl}
+            data-explain="Paste a YouTube link here. We download its audio and transcribe roughly the first minute into tab."
             onChange={(e) => { setYoutubeUrl(e.target.value); setResult(null); setError(null); }}
             placeholder={tr.tabAudioYoutubePlaceholder || 'https://www.youtube.com/watch?v=…'}
             className="text-sm rounded-md px-3 py-2 flex-1 min-w-[260px] outline-none"
@@ -159,6 +165,7 @@ export default function TabTranscriber() {
         <button
           onClick={handleTranscribe}
           disabled={!canSubmit || loading}
+          data-explain="The Transcribe button analyzes your audio and writes out the guitar tab, then scores each chord shape for your hand. It can take up to a minute."
           className="px-4 py-2 rounded-md text-sm font-semibold bg-gray-800 text-white disabled:opacity-40"
         >
           {loading ? (tr.tabAudioWorking || 'Transcribing…') : (tr.tabAudioGo || 'Transcribe')}

@@ -1,0 +1,99 @@
+/* Draggable guide avatar — scoped to .ga-* */
+
+.ga-root {
+  position: fixed; z-index: 60; width: 72px;
+  touch-action: none; user-select: none;
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,0.45));
+}
+.ga-figure { width: 72px; height: 86px; cursor: grab; }
+.ga-root.is-dragging .ga-figure { cursor: grabbing; }
+.ga-char { width: 100%; height: 100%; display: block; animation: ga-bob 3s ease-in-out infinite; }
+.ga-root.is-dragging .ga-char { animation: none; }
+
+@keyframes ga-bob { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-6px) rotate(2deg); } }
+
+/* livelier reactions per expression */
+.ga-char.ga-exp-happy   { animation: ga-bounce .5s ease, ga-bob 3s ease-in-out infinite .5s; }
+.ga-char.ga-exp-surprised { animation: ga-jump .45s ease, ga-bob 3s ease-in-out infinite .45s; }
+.ga-char.ga-exp-wink    { animation: ga-tilt .6s ease, ga-bob 3s ease-in-out infinite .6s; }
+@keyframes ga-bounce { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-9px) scale(1.04); } 60% { transform: translateY(-2px); } }
+@keyframes ga-jump   { 0% { transform: translateY(0); } 40% { transform: translateY(-12px); } 100% { transform: translateY(0); } }
+@keyframes ga-tilt   { 0%,100% { transform: rotate(0); } 50% { transform: rotate(8deg); } }
+
+/* thinking dots pulse */
+.ga-think circle { animation: ga-think-pulse 1.1s ease-in-out infinite; transform-origin: center; }
+.ga-think circle:nth-child(2) { animation-delay: .15s; }
+.ga-think circle:nth-child(3) { animation-delay: .3s; }
+@keyframes ga-think-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* first-appearance wave-in */
+.ga-root { animation: ga-arrive .6s cubic-bezier(.2,.9,.2,1); }
+@keyframes ga-arrive { from { opacity: 0; transform: translateY(20px) scale(.7); } to { opacity: 1; transform: none; } }
+
+/* blink */
+.ga-eyes { animation: ga-blink 4.2s infinite; transform-origin: center; }
+@keyframes ga-blink { 0%,94%,100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+
+/* talking mouth */
+.ga-mouth { transition: ry .08s; }
+.ga-mouth.is-talking { animation: ga-talk .22s ease-in-out infinite; }
+@keyframes ga-talk { 0%,100% { ry: 1.6px; } 50% { ry: 4.5px; } }
+
+/* glow when armed for click-to-explain */
+.ga-root.is-pointing .ga-char { animation: ga-bob 3s ease-in-out infinite, ga-glow 1.1s ease-in-out infinite; }
+@keyframes ga-glow { 0%,100% { filter: drop-shadow(0 0 0 rgba(201,169,110,0)); } 50% { filter: drop-shadow(0 0 10px rgba(201,169,110,0.8)); } }
+
+/* gender swap button */
+.ga-swap {
+  position: absolute; right: -6px; bottom: 4px; width: 22px; height: 22px; border-radius: 50%;
+  background: #1a1a1a; color: #c9a96e; border: 1px solid #333; font-size: 12px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.ga-swap:hover { border-color: #c9a96e; }
+
+/* hint nudge */
+.ga-hint {
+  position: absolute; bottom: 92px; right: 0; width: 168px;
+  background: #1a1a1a; color: #cfc8bd; border: 1px solid #2e2e2e; border-radius: 10px;
+  font-size: 11.5px; line-height: 1.4; padding: 8px 10px; text-align: center;
+  animation: ga-fade .4s ease;
+}
+.ga-hint-point { color: #c9a96e; border-color: rgba(201,169,110,0.4); }
+@keyframes ga-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+
+/* speech bubble */
+.ga-bubble {
+  position: fixed; z-index: 61; width: 248px; transform: translate(-50%, -100%);
+  background: linear-gradient(160deg, #1c1c22, #141418);
+  border: 1px solid #2e2e34; border-radius: 14px; padding: 14px 14px 12px;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.55);
+  animation: ga-pop .22s cubic-bezier(.2,.8,.2,1);
+}
+.ga-bubble::after {
+  content: ''; position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%);
+  border: 8px solid transparent; border-top-color: #141418; border-bottom: 0;
+}
+@keyframes ga-pop { from { opacity: 0; transform: translate(-50%, -94%) scale(.94); } to { opacity: 1; transform: translate(-50%, -100%) scale(1); } }
+.ga-bubble p { margin: 0 0 8px; color: #ece6da; font-size: 13px; line-height: 1.5; }
+.ga-bubble-x {
+  position: absolute; top: 6px; right: 8px; background: none; border: none;
+  color: #6a6a72; font-size: 16px; line-height: 1; cursor: pointer;
+}
+.ga-bubble-x:hover { color: #ece6da; }
+.ga-replay {
+  background: rgba(201,169,110,0.12); color: #c9a96e; border: 1px solid rgba(201,169,110,0.3);
+  border-radius: 8px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.ga-replay:hover { background: rgba(201,169,110,0.2); }
+
+/* highlight the component currently under the avatar */
+.ga-target {
+  outline: 2px solid #c9a96e !important; outline-offset: 2px;
+  border-radius: 6px; box-shadow: 0 0 0 4px rgba(201,169,110,0.15) !important;
+  transition: outline-color .1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ga-char, .ga-eyes, .ga-mouth.is-talking, .ga-root.is-pointing .ga-char { animation: none; }
+  .ga-bubble, .ga-hint { animation: none; }
+}

@@ -10,6 +10,7 @@ import GuitarStrings from './components/GuitarStrings';
 import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
 import LandingPage from './components/LandingPage';
+import GuideAvatar from './components/GuideAvatar';
 import AccountSettings from './components/AccountSettings';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
@@ -56,6 +57,19 @@ function getTabs(tr) {
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
   ];
 }
+
+// Spoken explanations for each tab, in plain language (used by the guide avatar).
+const TAB_HELP = {
+  start:        'The Start tab is your home base. It welcomes you and points you to measure your hand first.',
+  hand:         'The My Hand tab is where you measure your finger reach. Everything in the app uses these measurements to score how hard each chord is for you.',
+  strings:      'The Strings tab shows the six guitar strings so you can hear and learn each open note.',
+  tuner:        'The Tuner listens through your microphone and tells you whether each string is in tune.',
+  listen:       'The Listen tab detects the chord you play and tells you what it is in real time.',
+  audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
+  chords:       'The Chords tab is a table of chord shapes, each rated from one to ten for how hard it is for your hand.',
+  triplets:     'The Triplets tab rates small three-note shapes by difficulty for your hand.',
+  progressions: 'The Progressions tab shows common chord sequences and famous songs, with easier voicings and capo tips tailored to your reach.',
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('start');
@@ -252,11 +266,13 @@ export default function App() {
                 {!currentUser.emailVerified && <span style={{ color: '#fb923c' }}> ⚠</span>}
               </button>
               <button onClick={() => setShowSettings(true)}
+                data-explain="The Settings button opens your account — change your name, email, password, language, or delete your account."
                 className="text-xs px-2 py-1 rounded"
                 style={{ color: '#c9a96e', border: '1px solid #2a2a2a' }}>
                 {tr.settings}
               </button>
               <button onClick={handleLogout}
+                data-explain="The Sign out button logs you out of your account and returns you to the welcome screen."
                 className="text-xs px-2 py-1 rounded"
                 style={{ color: '#888', border: '1px solid #2a2a2a' }}>
                 {tr.signOut}
@@ -476,10 +492,12 @@ export default function App() {
           )}
 
           {/* Tab bar */}
-          <div className="flex gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}>
+          <div className="flex gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}
+            data-explain="This is the tab bar. Each tab opens a different tool — your hand profile, the tuner, chord tables, song progressions, and more. Tap one to switch tools.">
             {getTabs(tr).map(tab => (
               <button
                 key={tab.id}
+                data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
                 onClick={() => setActiveTab(tab.id)}
                 className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-0 sm:gap-2 px-1 sm:px-3 py-2 sm:py-2.5 rounded-lg text-xs font-semibold transition-all"
                 style={activeTab === tab.id ? {
@@ -507,6 +525,10 @@ export default function App() {
             {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
           </div>
         </main>
+
+        {/* Draggable guide: drag onto (or click then click) any component to
+            hear what it does. Voice via the browser's speech synthesis. */}
+        <GuideAvatar userName={currentUser?.name} />
       </div>
     </HandProfileContext.Provider>
     </AIFingerContext.Provider>
