@@ -9,7 +9,6 @@ import com.guitarreach.api.exception.DuplicateEmailException;
 import com.guitarreach.api.repository.HandProfileRepository;
 import com.guitarreach.api.repository.UserRepository;
 import com.guitarreach.api.security.JwtTokenProvider;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -123,29 +122,44 @@ public class AuthService {
                 .build();
     }
 
+    // SameSite policy for the auth cookies. When the frontend and backend are on
+    // DIFFERENT sites (e.g. frontend on guitar-production.up.railway.app, backend
+    // on perfect-compassion.up.railway.app), the browser only sends cookies on
+    // cross-site requests when SameSite=None — and SameSite=None REQUIRES Secure.
+    // Set COOKIE_SAME_SITE=None (and COOKIE_SECURE=true) in that cross-site prod.
+    // Defaults to Lax for same-site / local dev.
+    @Value("${app.cookie.same-site:Lax}")
+    private String cookieSameSite;
+
     private void setAccessTokenCookie(HttpServletResponse response, String token) {
-        Cookie cookie = new Cookie("jwt_access", token);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/");
-        cookie.setMaxAge(900); // 15 minutes
-        response.addCookie(cookie);
+        addCookie(response, "jwt_access", token, "/", 900); // 15 minutes
     }
 
     private void setRefreshTokenCookie(HttpServletResponse response, String token) {
-        Cookie cookie = new Cookie("jwt_refresh", token);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/api/auth/refresh");
-        cookie.setMaxAge((int) (refreshTokenExpiryMs / 1000));
-        response.addCookie(cookie);
+        addCookie(response, "jwt_refresh", token, "/api/auth/refresh",
+                (int) (refreshTokenExpiryMs / 1000));
     }
 
     private void clearCookie(HttpServletResponse response, String name) {
-        Cookie cookie = new Cookie(name, "");
-        cookie.setHttpOnly(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
+        addCookie(response, name, "", "/", 0);
+    }
+
+    /**
+     * Write an auth cookie with SameSite support via ResponseCookie (the legacy
+     * jakarta Cookie API can't set SameSite). SameSite=None is force-paired with
+     * Secure, which browsers require, regardless of the cookieSecure flag.
+     */
+    private void addCookie(HttpServletResponse response, String name, String value,
+                           String path, int maxAgeSeconds) {
+        boolean none = "None".equalsIgnoreCase(cookieSameSite);
+        org.springframework.http.ResponseCookie cookie =
+                org.springframework.http.ResponseCookie.from(name, value)
+                        .httpOnly(true)
+                        .secure(cookieSecure || none)   // None mandates Secure
+                        .path(path)
+                        .maxAge(maxAgeSeconds)
+                        .sameSite(none ? "None" : cookieSameSite)
+                        .build();
+        response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
     }
 }
