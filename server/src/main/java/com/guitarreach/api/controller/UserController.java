@@ -5,10 +5,12 @@ import com.guitarreach.api.dto.request.PasswordResetRequest;
 import com.guitarreach.api.dto.request.UpdateProfileRequest;
 import com.guitarreach.api.dto.response.UserResponse;
 import com.guitarreach.api.service.UserService;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -65,11 +67,23 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    // Must mirror the SameSite/Secure attributes used when the cookie was SET
+    // (AuthService), or the browser won't recognize and expire it cross-site.
+    @Value("${app.cookie.secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${app.cookie.same-site:Lax}")
+    private String cookieSameSite;
+
     private void clearCookie(HttpServletResponse response, String name) {
-        Cookie cookie = new Cookie(name, "");
-        cookie.setHttpOnly(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
+        boolean none = "None".equalsIgnoreCase(cookieSameSite);
+        ResponseCookie cookie = ResponseCookie.from(name, "")
+                .httpOnly(true)
+                .secure(cookieSecure || none)
+                .path("/")
+                .maxAge(0)
+                .sameSite(none ? "None" : cookieSameSite)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 }
