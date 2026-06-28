@@ -1,5 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import './LandingPage.css';
+
+// 3D neck hero is heavy (Three.js) — load it only when we actually render it.
+const Neck3D = lazy(() => import('./Neck3D'));
+
+// Cheap capability check: WebGL available + user hasn't asked for reduced motion.
+function can3D() {
+  if (typeof window === 'undefined') return false;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false;
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch { return false; }
+}
 
 // ─── Fretboard primitives ─────────────────────────────────────────────────────
 // A compact SVG fretboard used by the hero and the F-chord demo. Strings run
@@ -72,39 +85,83 @@ function Diff({ score, label }) {
 // The thesis. A single slider ("your reach") re-scores a chord and nudges the
 // shape, so the core promise is interactive in the first viewport.
 
-function HeroDemo() {
-  const [reach, setReach] = useState(38); // 0..100 personal reach
-  // Map reach → a difficulty for an open C chord: smaller reach scores harder.
-  const baseDiff = 7.6;
-  const score = Math.max(1, Math.min(10, baseDiff - (reach - 38) * 0.06));
+// Animated count toward a target (for the difficulty number).
+function useCountTo(target, ms = 700) {
+  const [v, setV] = useState(target);
+  const from = useRef(target);
+  useEffect(() => {
+    const start = performance.now(); const a = from.current;
+    let raf;
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / ms);
+      const e = 1 - Math.pow(1 - t, 3);
+      setV(a + (target - a) * e);
+      if (t < 1) raf = requestAnimationFrame(tick); else from.current = target;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return v;
+}
 
-  // Open C — finger color warms from amber→brass as reach grows (cosmetic cue).
-  const dotColor = reach < 30 ? '#f97316' : reach < 60 ? '#eab308' : '#c9a96e';
-  const cDots = [
-    { string: 0, muted: true },
-    { string: 1, fret: 3, finger: 3, color: dotColor },
-    { string: 2, fret: 2, finger: 2, color: dotColor },
-    { string: 3, fret: 0 },
-    { string: 4, fret: 1, finger: 1, color: dotColor },
-    { string: 5, fret: 0 },
-  ];
+// 2D fallback shapes mirroring the 3D neck (used when WebGL/motion unavailable).
+const F_BARRE_2D = {
+  barre: { fret: 1, from: 0, to: 5 },
+  dots: [
+    { string: 1, fret: 3, finger: 3, color: '#f87171' },
+    { string: 2, fret: 3, finger: 4, color: '#f87171' },
+    { string: 3, fret: 2, finger: 2, color: '#f87171' },
+  ],
+};
+const F_EASY_2D = {
+  barre: null,
+  dots: [
+    { string: 2, fret: 3, finger: 3, color: '#4ade80' },
+    { string: 3, fret: 2, finger: 2, color: '#4ade80' },
+    { string: 4, fret: 1, finger: 1, color: '#4ade80' },
+    { string: 0, muted: true }, { string: 1, muted: true }, { string: 5, fret: 0 },
+  ],
+};
+
+function HeroDemo() {
+  const [easy, setEasy] = useState(false);
+  const [use3D] = useState(can3D);
+  const score = useCountTo(easy ? 3.4 : 9.2);
+  const c = score <= 3.5 ? '#4ade80' : score <= 6 ? '#eab308' : score <= 8 ? '#f97316' : '#f87171';
+
+  // Auto play the F→easy morph once after the hero settles, then user-controlled.
+  useEffect(() => {
+    const t = setTimeout(() => setEasy(true), 2600);
+    return () => clearTimeout(t);
+  }, []);
+
+  const shape2D = easy ? F_EASY_2D : F_BARRE_2D;
 
   return (
     <div className="lp-hero-demo">
-      <div className="lp-hero-fb">
-        <Fretboard dots={cDots} width={300} />
+      <div className="lp-hero-3d">
+        {use3D ? (
+          <Suspense fallback={<div className="lp-3d-loading">loading the neck…</div>}>
+            <Neck3D easy={easy} />
+          </Suspense>
+        ) : (
+          <div className="lp-hero-fb"><Fretboard dots={shape2D.dots} barre={shape2D.barre} width={300}
+            accent={easy ? '#4ade80' : '#f87171'} /></div>
+        )}
       </div>
+
       <div className="lp-hero-ctrl">
-        <Diff score={score} label="for your hand" />
-        <label className="lp-reach-label">
-          <span>Smaller reach</span><span>Larger reach</span>
-        </label>
-        <input
-          type="range" min="0" max="100" value={reach}
-          onChange={e => setReach(+e.target.value)}
-          className="lp-range" aria-label="Your hand reach"
-        />
-        <p className="lp-hero-note">Drag to set your reach — every score re-rates to <em>your</em> hand.</p>
+        <div className="lp-diff">
+          <span className="lp-diff-num" style={{ color: c }}>{score.toFixed(1)}</span>
+          <span className="lp-diff-lbl">{easy ? 'playable — same chord' : 'the F-barre wall'}</span>
+        </div>
+        <button className="lp-toggle lp-hero-toggle" onClick={() => setEasy(v => !v)}>
+          {easy ? '↺ Show the barre' : 'Make the F easy →'}
+        </button>
+        <p className="lp-hero-note">
+          {use3D ? <>Drag the neck to look around. </> : null}
+          Same chord, re-fingered for <em>your</em> hand.
+        </p>
       </div>
     </div>
   );
