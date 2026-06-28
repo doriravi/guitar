@@ -47,16 +47,13 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/analyze-hand").permitAll()
                         .requestMatchers("/api/tab/**").permitAll()
-                        // Bundled single-page app: the HTML entry, the SPA
-                        // forward routes, and static assets are all public. The
-                        // app's own auth gate (not the server) controls access.
-                        .requestMatchers(HttpMethod.GET,
-                                "/", "/index.html", "/favicon.ico", "/vite.svg",
-                                "/assets/**", "/*.js", "/*.css", "/*.png", "/*.svg",
-                                "/*.json", "/*.txt", "/*.webmanifest").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/{path:^(?!api$|actuator$)[^\\.]*}").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/{path:^(?!api$|actuator$)[^\\.]*}/**").permitAll()
-                        .anyRequest().authenticated()
+                        // Protected REST endpoints (everything else under /api).
+                        .requestMatchers("/api/**").authenticated()
+                        // Everything NOT under /api is the bundled single-page app
+                        // (index.html, JS/CSS/img assets, and SPA deep-link routes
+                        // resolved by SpaWebConfig). These are public; the app's own
+                        // auth gate controls access, not the server.
+                        .anyRequest().permitAll()
                 )
                 // Allow H2 console iframes in dev
                 .headers(headers -> headers.frameOptions(fo -> fo.sameOrigin()))
