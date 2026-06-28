@@ -51,8 +51,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         // Everything NOT under /api is the bundled single-page app
                         // (index.html, JS/CSS/img assets, and SPA deep-link routes
-                        // resolved by SpaWebConfig). These are public; the app's own
-                        // auth gate controls access, not the server.
+                        // served by SpaForwardController). These are public; the
+                        // app's own auth gate controls access, not the server.
                         .anyRequest().permitAll()
                 )
                 // Allow H2 console iframes in dev
