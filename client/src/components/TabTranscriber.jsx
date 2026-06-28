@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { tab as tabApi } from '../lib/api';
 import { calcDifficulty } from '../lib/fretboard';
 import { personalDifficulty } from '../lib/handProfile';
 import { useHandProfile } from '../App';
 import { useT } from '../lib/i18n';
+import { playEvents, stopAudio } from '../lib/audio';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
 
@@ -50,21 +51,33 @@ function groupIntoChords(events, chords) {
   return groups;
 }
 
+function isYoutubeUrl(v) {
+  return /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]+/.test(v.trim());
+}
+
 export default function TabTranscriber() {
   const tr = useT();
   const handProfile = useHandProfile();
+  const [source, setSource] = useState('file'); // 'file' | 'youtube'
   const [file, setFile] = useState(null);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const urlValid = isYoutubeUrl(youtubeUrl);
+  const canSubmit = source === 'file' ? !!file : urlValid;
 
   async function handleTranscribe() {
-    if (!file) return;
+    if (!canSubmit) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const data = await tabApi.transcribe(file);
+      const data = source === 'youtube'
+        ? await tabApi.transcribe(null, { youtubeUrl: youtubeUrl.trim() })
+        : await tabApi.transcribe(file);
       setResult(data);
     } catch (e) {
       // 503 from the proxy when the sidecar isn't configured/running.
@@ -77,6 +90,24 @@ export default function TabTranscriber() {
     }
   }
 
+  function handlePlay() {
+    if (isPlaying) {
+      stopAudio();
+      setIsPlaying(false);
+      return;
+    }
+    if (!result?.events?.length) return;
+    setIsPlaying(true);
+    playEvents(result.events, () => setIsPlaying(false));
+  }
+
+  // Stop playback when a new result arrives or the component unmounts.
+  useEffect(() => {
+    setIsPlaying(false);
+    stopAudio();
+  }, [result]);
+  useEffect(() => () => stopAudio(), []);
+
   const chordGroups = result ? groupIntoChords(result.events || [], result.chords || []) : [];
 
   return (
@@ -87,21 +118,63 @@ export default function TabTranscriber() {
           'Upload a short guitar clip. We transcribe it to tab and score each detected shape for your hand.'}
       </p>
 
-      <div className="flex items-center gap-3 mb-2">
-        <input
-          type="file"
-          accept="audio/*"
-          onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); setError(null); }}
-          className="text-sm"
-        />
+      {/* Source toggle: upload a file or paste a YouTube link */}
+      <div className="flex gap-1 mb-3 p-1 rounded-lg w-max" style={{ background: '#161616' }}>
+        {[
+          { id: 'file',    label: tr.tabAudioSourceFile || 'Upload file' },
+          { id: 'youtube', label: tr.tabAudioSourceYoutube || 'YouTube link' },
+        ].map(opt => (
+          <button
+            key={opt.id}
+            onClick={() => { setSource(opt.id); setError(null); }}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+            style={source === opt.id
+              ? { background: '#1e1e1e', color: '#c9a96e' }
+              : { color: '#5a5a5a' }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 mb-2">
+        {source === 'file' ? (
+          <input
+            type="file"
+            accept="audio/*"
+            onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); setError(null); }}
+            className="text-sm"
+          />
+        ) : (
+          <input
+            type="url"
+            inputMode="url"
+            value={youtubeUrl}
+            onChange={(e) => { setYoutubeUrl(e.target.value); setResult(null); setError(null); }}
+            placeholder={tr.tabAudioYoutubePlaceholder || 'https://www.youtube.com/watch?v=…'}
+            className="text-sm rounded-md px-3 py-2 flex-1 min-w-[260px] outline-none"
+            style={{ background: '#111', border: `1px solid ${youtubeUrl && !urlValid ? '#7f1d1d' : '#333'}`, color: '#f0ede8' }}
+          />
+        )}
         <button
           onClick={handleTranscribe}
-          disabled={!file || loading}
+          disabled={!canSubmit || loading}
           className="px-4 py-2 rounded-md text-sm font-semibold bg-gray-800 text-white disabled:opacity-40"
         >
           {loading ? (tr.tabAudioWorking || 'Transcribing…') : (tr.tabAudioGo || 'Transcribe')}
         </button>
       </div>
+
+      {source === 'youtube' && youtubeUrl && !urlValid && (
+        <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+          {tr.tabAudioYoutubeInvalid || 'Enter a valid YouTube link (youtube.com/watch?v=… or youtu.be/…).'}
+        </p>
+      )}
+      {source === 'youtube' && (
+        <p className="text-xs mb-2" style={{ color: '#5a5a5a' }}>
+          {tr.tabAudioYoutubeNote || 'We transcribe roughly the first minute of the video.'}
+        </p>
+      )}
 
       {loading && (
         <p className="text-xs text-gray-400 mb-4">
@@ -117,8 +190,21 @@ export default function TabTranscriber() {
 
       {result && (
         <div className="mt-4">
-          <div className="text-sm text-gray-500 mb-3">
-            BPM {result.bpm} · {result.note_count} {tr.tabAudioNotes || 'notes'}
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              onClick={handlePlay}
+              disabled={!result.events?.length}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-40"
+              style={isPlaying
+                ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
+                : { background: '#c9a96e', color: '#0f0f0f' }}
+            >
+              <span className="text-base leading-none">{isPlaying ? '■' : '▶'}</span>
+              {isPlaying ? (tr.tabAudioStop || 'Stop') : (tr.tabAudioPlay || 'Play transcription')}
+            </button>
+            <span className="text-sm text-gray-500">
+              BPM {result.bpm} · {result.note_count} {tr.tabAudioNotes || 'notes'}
+            </span>
           </div>
 
           {chordGroups.length > 0 && (

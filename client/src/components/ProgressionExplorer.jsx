@@ -4,6 +4,11 @@ import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty, fingerGapUsage, GAP_REF_MAX, transitionDifficulty } from '../lib/fretboard';
 import { DEFAULT_PROFILE } from '../lib/handProfile';
+import { suggestEasierProgression } from '../lib/substitutions';
+import { suggestUpperProgression } from '../lib/upperVoicings';
+import { suggestTriadProgression } from '../lib/triadVoicings';
+import { alignChordsToLyrics, suggestCapo } from '../lib/lyricChords';
+import { lyrics as lyricsApi } from '../lib/api';
 import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION } from '../lib/songs';
 import DifficultyBadge from './DifficultyBadge';
@@ -143,70 +148,106 @@ function LyricsSection({ title, artist, progChordsWithVoicings }) {
 
   useEffect(() => {
     setStatus('loading');
-    fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.lyrics) { setLyrics(data.lyrics); setStatus('done'); }
-        else setStatus('empty');
+    // Lyrics come from public databases (LRCLIB primary, with fuzzy-search and
+    // api.lyrics.ovh fallbacks) — see lyricsApi.fetch. It distinguishes "not
+    // found" from "all sources down" so the message stays honest.
+    const controller = new AbortController();
+    let alive = true;
+
+    lyricsApi.fetch(artist, title, { signal: controller.signal })
+      .then(res => {
+        if (!alive) return;
+        if (res.status === 'done') { setLyrics(res.text); setStatus('done'); }
+        else setStatus(res.status); // 'empty' | 'error'
       })
-      .catch(() => setStatus('error'));
+      .catch(() => { if (alive) setStatus('error'); });
+
+    return () => { alive = false; controller.abort(); };
   }, [title, artist]);
 
-  // Split lyrics into non-blank lines, then assign one chord per line cycling through the full progression
+  // A capo suggestion when the song's key forces barre chords — lets a short-
+  // fingered player restate the whole song as easy open shapes (e.g. a B♭/E♭/F
+  // song → "Capo 1, play A/D/E"). null when the chords are already easy.
+  const capo = useMemo(
+    () => suggestCapo(progChordsWithVoicings.map(c => c.chordName)),
+    [progChordsWithVoicings],
+  );
+
+  // Align chords over the lyrics realistically: chords change at phrase
+  // boundaries (punctuation), cycle through the progression across sub-phrases,
+  // and resolve to the tonic at sentence ends — instead of one chord per line.
   const annotatedLines = useMemo(() => {
     if (status !== 'done' || !lyrics || !progChordsWithVoicings.length) return [];
-    const n = progChordsWithVoicings.length;
-    const result = [];
-    let chordIdx = 0;
-    for (const raw of lyrics.split('\n')) {
-      if (!raw.trim()) {
-        result.push({ blank: true });
-        continue;
-      }
-      // Each lyric line gets the next chord; split the line into n segments if the progression
-      // has multiple chords so every chord appears at least once per "verse block".
-      // Simplest correct approach: one chord per line, cycling.
-      const chord = progChordsWithVoicings[chordIdx % n];
-      chordIdx++;
-      result.push({ blank: false, text: raw.trim(), chord });
-    }
-    return result;
+    return alignChordsToLyrics(lyrics.split('\n'), progChordsWithVoicings);
   }, [lyrics, status, progChordsWithVoicings]);
 
   if (status === 'loading') return (
     <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>Loading lyrics…</div>
   );
-  if (status === 'error' || status === 'empty') return (
-    <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>Lyrics not available.</div>
+  if (status === 'error') return (
+    <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>
+      Lyrics service is unavailable right now. Try again later.
+    </div>
+  );
+  if (status === 'empty') return (
+    <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>No lyrics found for this song.</div>
   );
 
   return (
     <div className="px-3 sm:px-4 py-3 max-h-72 overflow-y-auto font-mono text-xs"
       style={{ borderTop: '1px solid #1a1a1a', background: '#0f0f0f' }}>
+
+      {/* Capo banner — easy open shapes for a hard-key song */}
+      {capo && (
+        <div className="mb-3 px-2.5 py-1.5 rounded-lg text-[11px] leading-snug"
+          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)', color: '#4ade80' }}>
+          <span className="font-semibold">Capo {capo.fret}</span>
+          <span style={{ color: '#3a7a3a' }}> — play easy open shapes: </span>
+          {Object.entries(capo.map).map(([orig, easy], k) => (
+            <span key={orig}>
+              {k > 0 && <span style={{ color: '#2f5f2f' }}>, </span>}
+              <span style={{ color: '#5a5a5a' }}>{orig}</span>
+              <span style={{ color: '#3a7a3a' }}>→</span>
+              <span className="font-semibold">{easy}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {annotatedLines.map((line, i) => {
         if (line.blank) return <div key={i} className="mt-2" />;
-        const { chord, text } = line;
-        const v = chord?.voicings?.[0];
-        const inProg = chord?.inProgression !== false;
         return (
-          <div key={i} className="mb-0.5 flex items-baseline gap-2 leading-snug">
-            <span
-              className="font-bold shrink-0 w-10 text-right cursor-default select-none"
-              style={{ color: inProg ? '#818cf8' : '#f87171' }}
-              onMouseEnter={v ? e => {
-                const r = e.currentTarget.getBoundingClientRect();
-                const tipW = 148;
-                setTooltip({
-                  voicing: v,
-                  x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
-                  y: r.top - 10,
-                });
-              } : undefined}
-              onMouseLeave={v ? () => setTooltip(null) : undefined}
-            >
-              {chord?.chordName}
-            </span>
-            <span style={{ color: '#6a6a6a' }}>{text}</span>
+          <div key={i} className="mb-1.5 flex flex-wrap items-end gap-x-1 leading-tight">
+            {line.segments.map((seg, j) => {
+              const chord = progChordsWithVoicings[seg.chordIndex];
+              const v = chord?.voicings?.[0];
+              const inProg = chord?.inProgression !== false;
+              // With a capo active, show the easy open-shape name; keep the
+              // sounding (original) chord name in the tooltip for reference.
+              const shown = capo ? (capo.map[chord?.chordName] || chord?.chordName) : chord?.chordName;
+              return (
+                <span key={j} className="inline-flex flex-col">
+                  <span
+                    className="font-bold cursor-default select-none"
+                    style={{ color: inProg ? '#818cf8' : '#f87171' }}
+                    title={capo ? `${chord?.chordName} (sounding) — fret ${shown} shape with capo ${capo.fret}` : chord?.chordName}
+                    onMouseEnter={v ? e => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const tipW = 148;
+                      setTooltip({
+                        voicing: v,
+                        x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
+                        y: r.top - 10,
+                      });
+                    } : undefined}
+                    onMouseLeave={v ? () => setTooltip(null) : undefined}
+                  >
+                    {shown}
+                  </span>
+                  <span style={{ color: '#6a6a6a' }}>{seg.text}</span>
+                </span>
+              );
+            })}
           </div>
         );
       })}
@@ -585,6 +626,195 @@ function filterByHandData(progs, profile, aiFingers, handFilters) {
   });
 }
 
+// ─── Easier-alternative chords panel ──────────────────────────────────────────
+
+const SUB_KIND_LABEL = {
+  simplified: 'simplified shape',
+  power:      'power chord',
+};
+
+function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
+  // Compute once per (progression, profile) — cheap, but memoize anyway.
+  const { perChord, count } = useMemo(
+    () => suggestEasierProgression(prog.chords, profile),
+    [prog.chords, profile],
+  );
+
+  if (count === 0) {
+    return (
+      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+        No easier alternatives found — these shapes are already a good fit for your hand.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#4ade80' }}>
+        Easier alternatives for your hand
+      </div>
+      <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
+        {prog.chords.map((chord, j) => {
+          const sub = perChord[j];
+          if (!sub) {
+            return (
+              <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>ok as-is</span>
+              </div>
+            );
+          }
+          const v = sub.substitute.voicing;
+          return (
+            <div key={j} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'rgba(74,222,128,0.05)', border: '1px solid rgba(74,222,128,0.18)' }}>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-mono line-through" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
+                <span className="text-[11px]" style={{ color: '#4ade80' }}>→</span>
+                <span
+                  className="text-xs font-mono font-bold cursor-default"
+                  style={{ color: '#4ade80' }}
+                  onMouseEnter={e => onTooltip(e, v)}
+                  onMouseLeave={onTooltipLeave}
+                >{sub.substitute.name}</span>
+              </div>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#152015', color: '#6a9a6a' }}>
+                {SUB_KIND_LABEL[sub.substitute.kind]}
+              </span>
+              <span className="text-[9px] tabular-nums" style={{ color: '#3a7a3a' }}>
+                −{sub.saved.toFixed(1)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+        Substitutes keep each chord's root and harmonic role. Numbers show how much easier the shape is on
+        your personal 1–10 difficulty scale. Hover a chord to preview the fingering.
+      </p>
+    </div>
+  );
+}
+
+// ─── Up-the-neck voicings panel ────────────────────────────────────────────────
+
+function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
+  const { perChord, count } = useMemo(
+    () => suggestUpperProgression(prog.chords),
+    [prog.chords],
+  );
+
+  if (count === 0) {
+    return (
+      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+        No movable up-the-neck voicings available for these chords.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#c084fc' }}>
+        Play it higher up the neck
+      </div>
+      <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
+        {prog.chords.map((chord, j) => {
+          const up = perChord[j];
+          if (!up) {
+            return (
+              <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>—</span>
+              </div>
+            );
+          }
+          const v = up.voicing;
+          return (
+            <div key={j} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'rgba(192,132,252,0.05)', border: '1px solid rgba(192,132,252,0.18)' }}>
+              <span
+                className="text-xs font-mono font-bold cursor-default"
+                style={{ color: '#c084fc' }}
+                onMouseEnter={e => onTooltip(e, v)}
+                onMouseLeave={onTooltipLeave}
+              >{chord.chordName}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#1d1726', color: '#9a7ab8' }}>
+                {up.shape} · fret {up.barreFret}
+              </span>
+              <span className="text-[10px] font-mono" style={{ color: '#5a5a5a' }}>{v.tab}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+        Movable barre (CAGED) shapes for the same chords, positioned further up the neck — the same hand shape
+        slides between chords. Hover a chord to preview the fingering.
+      </p>
+    </div>
+  );
+}
+
+// ─── Up-the-neck triads panel (no barre) ───────────────────────────────────────
+
+function TriadVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
+  const { perChord, count } = useMemo(
+    () => suggestTriadProgression(prog.chords),
+    [prog.chords],
+  );
+
+  if (count === 0) {
+    return (
+      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+        No up-the-neck triad voicings available for these chords.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#fbbf24' }}>
+        Up the neck — triads (no barre)
+      </div>
+      <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
+        {prog.chords.map((chord, j) => {
+          const t = perChord[j];
+          if (!t) {
+            return (
+              <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>—</span>
+              </div>
+            );
+          }
+          const v = t.voicing;
+          return (
+            <div key={j} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.18)' }}>
+              <span
+                className="text-xs font-mono font-bold cursor-default"
+                style={{ color: '#fbbf24' }}
+                onMouseEnter={e => onTooltip(e, v)}
+                onMouseLeave={onTooltipLeave}
+              >{chord.chordName}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#241f10', color: '#b89a4a' }}>
+                triad · fret {t.baseFret}
+              </span>
+              <span className="text-[10px] font-mono" style={{ color: '#5a5a5a' }}>{v.tab}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+        Three-note triad grips on adjacent strings, higher up the neck — same root/3rd/5th as each chord,
+        no barre. Hover a chord to preview the fingering.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ProgressionExplorer({ lang, onSaveProfile }) {
@@ -598,6 +828,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const [liveGaps, setLiveGaps] = useState(null); // overrides handProfile gaps for live preview
   const [playState,   setPlayState]   = useState(null);  // { key, chordIdx }
   const [openSongs,   setOpenSongs]   = useState(new Set()); // Set of card keys
+  const [openEasier,  setOpenEasier]  = useState(new Set()); // Set of card keys
+  const [openUpper,   setOpenUpper]   = useState(new Set()); // Set of card keys
+  const [openTriad,   setOpenTriad]   = useState(new Set()); // Set of card keys
   const [tooltip,     setTooltip]     = useState(null);  // { voicing, x, y }
 
   const allRoots   = root === 'all';
@@ -611,6 +844,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
   const resolved = useMemo(() => {
     setOpenSongs(new Set());
+    setOpenEasier(new Set());
+    setOpenUpper(new Set());
+    setOpenTriad(new Set());
     const roots  = allRoots   ? ROOT_NOTES         : [root];
     const scales = bothScales ? ['major', 'minor'] : [scaleType];
     const all = [];
@@ -652,6 +888,30 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
   const toggleSongs = useCallback((key) => {
     setOpenSongs(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleEasier = useCallback((key) => {
+    setOpenEasier(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleUpper = useCallback((key) => {
+    setOpenUpper(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleTriad = useCallback((key) => {
+    setOpenTriad(prev => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
@@ -772,6 +1032,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           const isPlaying   = playState?.key === key;
           const activeChord = isPlaying ? playState.chordIdx : -1;
           const songsOpen   = openSongs.has(key);
+          const easierOpen  = openEasier.has(key);
+          const upperOpen   = openUpper.has(key);
+          const triadOpen   = openTriad.has(key);
           const songCount   = (SONGS_BY_PROGRESSION[prog.name] || []).length;
 
           return (
@@ -796,6 +1059,39 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   <span className="hidden sm:flex items-center gap-1 text-xs" style={{ color: '#3a3a3a' }}>
                     max <DifficultyBadge score={prog.maxScore} />
                   </span>
+
+                  <button
+                    onClick={() => toggleEasier(key)}
+                    title="Suggest easier chords that fit your hand"
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
+                    style={easierOpen
+                      ? { background: 'rgba(74,222,128,0.14)', color: '#4ade80' }
+                      : { background: '#252525', color: '#5a5a5a' }}
+                  >
+                    ✋ easier
+                  </button>
+
+                  <button
+                    onClick={() => toggleUpper(key)}
+                    title="Play this progression higher up the neck (movable barre shapes)"
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
+                    style={upperOpen
+                      ? { background: 'rgba(192,132,252,0.14)', color: '#c084fc' }
+                      : { background: '#252525', color: '#5a5a5a' }}
+                  >
+                    ▲ up the neck
+                  </button>
+
+                  <button
+                    onClick={() => toggleTriad(key)}
+                    title="Up the neck without barre chords — 3-note triad grips using the same notes"
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
+                    style={triadOpen
+                      ? { background: 'rgba(251,191,36,0.14)', color: '#fbbf24' }
+                      : { background: '#252525', color: '#5a5a5a' }}
+                  >
+                    ♦ triads
+                  </button>
 
                   <button
                     onClick={() => toggleSongs(key)}
@@ -875,6 +1171,34 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   );
                 })}
               </div>
+
+              {/* Easier-alternatives panel (collapsible) */}
+              {easierOpen && (
+                <EasierChordsPanel
+                  prog={prog}
+                  profile={activeProfile}
+                  onTooltip={showTooltip}
+                  onTooltipLeave={hideTooltip}
+                />
+              )}
+
+              {/* Up-the-neck voicings panel (collapsible) */}
+              {upperOpen && (
+                <UpperVoicingsPanel
+                  prog={prog}
+                  onTooltip={showTooltip}
+                  onTooltipLeave={hideTooltip}
+                />
+              )}
+
+              {/* Up-the-neck triads panel — no barre (collapsible) */}
+              {triadOpen && (
+                <TriadVoicingsPanel
+                  prog={prog}
+                  onTooltip={showTooltip}
+                  onTooltipLeave={hideTooltip}
+                />
+              )}
 
               {/* Songs panel (collapsible) */}
               {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} tr={tr} />}

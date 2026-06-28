@@ -47,10 +47,13 @@ Then point the backend at it via `tab.service.url=http://localhost:8000`
 `{ "status": "UP" }`
 
 ### `POST /transcribe` (multipart/form-data)
+Provide **either** an `audio` file **or** a `youtube_url` (URL takes precedence).
+
 | field | type | required | notes |
 |---|---|---|---|
-| `audio` | file | yes | `.mp3/.wav/.flac/.ogg/.m4a/.aac` |
-| `duration_seconds` | float | no | limit analysis length |
+| `audio` | file | one of | `.mp3/.wav/.flac/.ogg/.m4a/.aac` |
+| `youtube_url` | string | one of | a YouTube link; audio is downloaded via **yt-dlp** (needs FFmpeg on PATH). Defaults to transcribing the first ~60s. |
+| `duration_seconds` | float | no | limit analysis length (default 60s for YouTube) |
 | `start_seconds` | float | no | start offset (default 0) |
 
 **Response**

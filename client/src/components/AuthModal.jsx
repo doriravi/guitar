@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { auth } from '../lib/api';
-import { useT } from '../lib/i18n';
+import { useT, LANGUAGES } from '../lib/i18n';
 
 // Small helper: read a translation key, falling back to an English default so
 // the 9 non-English language blocks don't render `undefined` for the new
@@ -9,8 +9,9 @@ function tk(tr, key, fallback) {
   return tr[key] != null ? tr[key] : fallback;
 }
 
-export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, fullPage = false }) {
+export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, onLangSelect, fullPage = false }) {
   const tr = useT(lang);
+  const [showLangMenu, setShowLangMenu] = useState(false);
 
   // step: 'email' (enter email) -> 'auth' (password / name)
   const [step, setStep] = useState('email');
@@ -103,7 +104,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
     try {
       const isNew = mode === 'register';
       const user = isNew
-        ? await auth.register(form.email, form.password, form.name)
+        ? await auth.register(form.email, form.password, form.name, lang)
         : await auth.login(form.email, form.password);
       onSuccess(user, { isNew });
     } catch (err) {
@@ -204,6 +205,50 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
             style={{ color: '#888' }}
             aria-label="Close"
           >×</button>
+        )}
+
+        {/* Language picker — lives on the lobby so the user chooses their language
+            before/at registration. Defaults to English. */}
+        {onLangSelect && (
+          <div className="mb-5 flex justify-center">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowLangMenu(v => !v)}
+                className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                style={{ color: '#aaa', border: '1px solid #2a2a2a', background: '#111' }}
+              >
+                🌐 {LANGUAGES.find(l => l.code === lang)?.label || 'English'}
+                <span style={{ color: '#666' }}>▾</span>
+              </button>
+              {showLangMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
+                  <div
+                    className="absolute left-1/2 -translate-x-1/2 mt-1 rounded-xl overflow-hidden z-50 max-h-72 overflow-y-auto"
+                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '150px' }}
+                  >
+                    {LANGUAGES.map(l => (
+                      <button
+                        key={l.code}
+                        type="button"
+                        onClick={() => { onLangSelect(l.code); setShowLangMenu(false); }}
+                        className="w-full text-left text-xs px-3 py-2 transition-colors"
+                        style={{
+                          color: l.code === lang ? '#c9a96e' : '#aaa',
+                          background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
+                        }}
+                        onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
+                        onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {l.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
 
         {step === 'email' && (

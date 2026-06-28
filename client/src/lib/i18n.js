@@ -49,6 +49,7 @@ export const t = {
 
     // Account Settings
     accountSettings: 'Account Settings', emailNotVerified: '⚠ Your email is not verified.',
+    language: 'Language',
     resendEmail: 'Resend email', profile: 'Profile', name: 'Name',
     leaveBlankPassword: 'Leave blank to keep your current password.',
     currentPassword: 'Current password', requiredToChange: 'Required to change password',
@@ -911,3 +912,18 @@ export const t = {
 export function useT(lang) {
   return t[lang] || t.en;
 }
+
+// Supported UI languages (code + native label), shared by the lobby language
+// picker and account settings. English is the default everywhere.
+export const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'zh', label: '中文' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'pt', label: 'Português' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
+];

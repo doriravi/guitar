@@ -28,10 +28,10 @@ export const SONGS_BY_PROGRESSION = {
   ],
 
   'I – IV – V – I': [
-    { title: 'Amazing Grace',            artist: 'Traditional',                    year: 1779, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4, 0] },
+    { title: 'Amazing Grace',            artist: 'Elvis Presley',                  year: 1779, key: 'G',  scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4, 0] },
     { title: 'This Land Is Your Land',   artist: 'Woody Guthrie',                  year: 1940, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
     { title: 'Blowin\' in the Wind',     artist: 'Bob Dylan',                      year: 1963, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
-    { title: 'He\'s Got the Whole World', artist: 'Traditional',                   year: 1927, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 4, 0] },
+    { title: 'He\'s Got the Whole World', artist: 'Mahalia Jackson',              year: 1927, key: 'C',  scaleType: 'major', section: 'Main',      degrees: [0, 3, 4, 0] },
     { title: '500 Miles',                artist: 'The Proclaimers',                year: 1988, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
     { title: 'Ring of Fire',             artist: 'Johnny Cash',                    year: 1963, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4, 0] },
   ],
@@ -94,7 +94,7 @@ export const SONGS_BY_PROGRESSION = {
     // verse: vi – ii – V – I – IV – vii° – iii – vi  →  contains ii–V–I at position 1
     { title: 'Fly Me to the Moon',       artist: 'Frank Sinatra',                  year: 1954, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [5, 1, 4, 0, 3, 6, 2, 5] },
     // main turnaround: I – vi – ii – V – I  →  contains ii–V–I at position 2
-    { title: 'Autumn Leaves',            artist: 'Traditional Jazz',               year: 1945, key: 'G',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4, 0] },
+    { title: 'Autumn Leaves',            artist: 'Nat King Cole',                  year: 1945, key: 'G',  scaleType: 'major', section: 'Main',      degrees: [0, 5, 1, 4, 0] },
     { title: 'Satin Doll',               artist: 'Duke Ellington',                 year: 1953, key: 'C',  scaleType: 'major', section: 'Verse',     degrees: [0, 5, 1, 4, 0] },
   ],
 
@@ -224,7 +224,7 @@ export const SONGS_BY_PROGRESSION = {
   ],
 
   'ii° – v – i': [
-    { title: 'Autumn Leaves',            artist: 'Traditional Jazz',               year: 1945, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [1, 4, 0] },
+    { title: 'Autumn Leaves',            artist: 'Nat King Cole',                  year: 1945, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [1, 4, 0] },
     { title: 'Misty',                    artist: 'Erroll Garner',                  year: 1954, key: 'Ebm', scaleType: 'minor', section: 'Bridge',   degrees: [1, 4, 0] },
     { title: 'Summertime',               artist: 'George Gershwin',                year: 1935, key: 'Am', scaleType: 'minor', section: 'Bridge',    degrees: [1, 4, 0] },
   ],

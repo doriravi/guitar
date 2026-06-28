@@ -153,6 +153,60 @@ export function playProgression(voicings, bpm = 72, onChord, onDone) {
   }
 }
 
+/**
+ * Play a transcribed clip from its timed note events.
+ *
+ * Unlike playProgression (fixed tempo, one strum per chord), this honors each
+ * note's real onset time and duration, so it sounds like what was transcribed.
+ *
+ * @param {Array<{string:number, fret:number, time:number, duration?:number}>} events
+ *        Note events from the tab service (string 0=low E … 5=high e). `time` and
+ *        `duration` are in seconds, relative to the clip start.
+ * @param {() => void} onDone  - called when playback finishes.
+ * @returns {number} the total playback duration in seconds (0 if nothing to play).
+ */
+export function playEvents(events, onDone) {
+  _timeouts.forEach(clearTimeout);
+  _timeouts = [];
+
+  const ctx = getCtx();
+
+  // iOS unlock — same synchronous prime + resume as playProgression.
+  try {
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b; s.connect(ctx.destination); s.start(0);
+  } catch { /* ignore */ }
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+  _lastState = ctx.state;
+
+  const playable = (events || []).filter(
+    e => e && e.string >= 0 && e.string <= 5 && e.fret >= 0,
+  );
+  if (!playable.length) {
+    if (onDone) onDone();
+    return 0;
+  }
+
+  const lead = 0.15;
+  const t0 = Math.min(...playable.map(e => e.time || 0)); // normalize so playback starts now
+  let endRel = 0;
+
+  for (const e of playable) {
+    const rel = (e.time || 0) - t0;
+    // Ring for the note's own duration, with sane floor/ceiling so very short
+    // detected notes are still audible and very long ones don't pile up.
+    const decay = Math.min(2.5, Math.max(0.25, e.duration || 0.4));
+    pluck(ctx, fretHz(e.string, e.fret), ctx.currentTime + lead + rel, decay);
+    endRel = Math.max(endRel, rel + decay);
+  }
+
+  if (onDone) {
+    _timeouts.push(setTimeout(onDone, (lead + endRel + 0.2) * 1000));
+  }
+  return lead + endRel;
+}
+
 export function stopAudio() {
   _timeouts.forEach(clearTimeout);
   _timeouts = [];

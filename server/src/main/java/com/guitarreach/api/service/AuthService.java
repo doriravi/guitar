@@ -25,6 +25,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AuthService {
 
+    // Languages the frontend ships translations for; mirrors UserService.
+    private static final java.util.Set<String> SUPPORTED_LANGUAGES =
+            java.util.Set.of("en", "es", "zh", "hi", "ar", "pt", "fr", "de", "ja", "ko");
+
     private final UserRepository userRepository;
     private final HandProfileRepository handProfileRepository;
     private final PasswordEncoder passwordEncoder;
@@ -45,12 +49,14 @@ public class AuthService {
             throw new DuplicateEmailException(req.getEmail());
         }
 
-        User user = User.builder()
+        User.UserBuilder builder = User.builder()
                 .email(req.getEmail())
                 .passwordHash(passwordEncoder.encode(req.getPassword()))
-                .name(req.getName())
-                .build();
-        user = userRepository.save(user);
+                .name(req.getName());
+        if (SUPPORTED_LANGUAGES.contains(req.getLanguage())) {
+            builder.language(req.getLanguage());
+        }
+        User user = userRepository.save(builder.build());
 
         // Create default hand profile so the frontend can immediately sync
         HandProfile profile = HandProfile.builder().user(user).build();
@@ -113,6 +119,7 @@ public class AuthService {
                 .email(user.getEmail())
                 .name(user.getName())
                 .role(user.getRole().name())
+                .language(user.getLanguage())
                 .build();
     }
 
