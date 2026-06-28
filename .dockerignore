@@ -1,0 +1,41 @@
+# Keep the Docker build context small and reproducible.
+# The image builds the frontend (npm ci) and backend (mvn) from source, so we
+# exclude all local build artifacts, dependencies, and dev cruft.
+
+# Version control / editor / CI
+.git
+.gitignore
+.github
+.idea
+.vscode
+*.iml
+
+# Node (frontend deps + build output are produced inside the image)
+client/node_modules
+client/dist
+**/node_modules
+
+# Java build output
+server/target
+**/target
+
+# Python tab-service: venv + caches are NOT used by the image
+tab-service/venv
+tab-service/__pycache__
+**/__pycache__
+*.pyc
+
+# Local data / databases (never ship the dev SQLite DB)
+server/data
+**/*.db
+**/*.sqlite
+
+# Agent / tooling scratch
+.claude
+**/.claude
+scratchpad
+nginx-*.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
