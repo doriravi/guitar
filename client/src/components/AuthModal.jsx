@@ -22,6 +22,10 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [providers, setProviders] = useState({ google: false, facebook: false });
+  // True once Google's OFFICIAL rendered button is on screen. Until then we show
+  // a styled fallback button, so a blocked/slow GSI SDK never leaves the user
+  // with no Google option at all.
+  const [googleBtnRendered, setGoogleBtnRendered] = useState(false);
 
   const googleBtnRef = useRef(null);
 
@@ -29,8 +33,18 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
   useEffect(() => {
     let alive = true;
     auth.oauthConfig()
-      .then(cfg => { if (alive && cfg) setProviders(cfg); })
-      .catch(() => {});
+      .then(cfg => {
+        if (!alive || !cfg) return;
+        setProviders(cfg);
+        // Clear a stale "not available" message if the user clicked a social
+        // button before this config finished loading.
+        setError(e => (e === tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.') ? '' : e));
+      })
+      .catch(err => {
+        // Don't swallow silently — a failure here is exactly why the social
+        // buttons say "not available". Surface it so it's diagnosable.
+        console.error('[oauth] config fetch failed:', err);
+      });
     return () => { alive = false; };
   }, []);
 
@@ -56,16 +70,30 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
   // otherwise.
   useEffect(() => {
     if (step !== 'email' || !providers.google) return;
-    const g = window.google?.accounts?.id;
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!g || !clientId || !googleBtnRef.current) return;
-    try {
-      g.initialize({
-        client_id: clientId,
-        callback: (resp) => handleOAuth('google', resp.credential),
-      });
-      g.renderButton(googleBtnRef.current, { theme: 'filled_black', size: 'large', width: 320, text: 'continue_with' });
-    } catch { /* SDK shape changed — keep stub */ }
+    if (!clientId) return; // no client id baked in → fallback button handles it
+
+    // The GSI script loads async (and may be slow or blocked). Poll briefly for
+    // it; render the official button as soon as it's available, otherwise leave
+    // the styled fallback button in place.
+    let tries = 0;
+    const timer = setInterval(() => {
+      const g = window.google?.accounts?.id;
+      if (g && googleBtnRef.current) {
+        try {
+          g.initialize({
+            client_id: clientId,
+            callback: (resp) => handleOAuth('google', resp.credential),
+          });
+          g.renderButton(googleBtnRef.current, { theme: 'filled_black', size: 'large', width: 320, text: 'continue_with' });
+          setGoogleBtnRendered(true);
+        } catch { /* SDK shape changed — fallback button remains */ }
+        clearInterval(timer);
+      } else if (++tries > 40) {
+        clearInterval(timer); // ~6s; give up, fallback button stays
+      }
+    }, 150);
+    return () => clearInterval(timer);
   }, [step, providers.google]);
 
   function handleChange(e) {
@@ -152,20 +180,46 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
   // "not available" message rather than failing silently.
   function onGoogleClick() {
     const g = window.google?.accounts?.id;
-    if (providers.google && g) { g.prompt(); return; }
-    setError(tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.'));
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!providers.google || !clientId) {
+      setError(tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.'));
+      return;
+    }
+    if (!g) {
+      // SDK never loaded — almost always an ad-/tracking-blocker or extension
+      // blocking accounts.google.com. Tell the user the real cause.
+      setError(tk(tr, 'providerSdkBlocked',
+        'Google sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
+      return;
+    }
+    try {
+      // Ensure it's initialized (the render effect may not have run if the SDK
+      // arrived late), then open the One Tap / account chooser prompt.
+      g.initialize({ client_id: clientId, callback: (resp) => handleOAuth('google', resp.credential) });
+      g.prompt();
+    } catch {
+      setError(tk(tr, 'somethingWrong', 'Something went wrong'));
+    }
   }
 
   async function onFacebookClick() {
-    if (providers.facebook && window.FB) {
-      window.FB.login((resp) => {
-        if (resp.authResponse?.accessToken) {
-          handleOAuth('facebook', resp.authResponse.accessToken);
-        }
-      }, { scope: 'email' });
+    if (!providers.facebook) {
+      setError(tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.'));
       return;
     }
-    setError(tk(tr, 'providerNotConfigured', 'This sign-in option is not available yet.'));
+    if (!window.FB) {
+      setError(tk(tr, 'providerSdkBlocked',
+        'Facebook sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
+      return;
+    }
+    window.FB.login((resp) => {
+      if (resp.authResponse?.accessToken) {
+        handleOAuth('facebook', resp.authResponse.accessToken);
+      } else {
+        // User closed the popup or denied — not an error worth a red banner.
+        setInfo(tk(tr, 'facebookCancelled', 'Facebook sign-in was cancelled.'));
+      }
+    }, { scope: 'email' });
   }
 
   function onInstitutionClick() {
@@ -308,9 +362,11 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
             </div>
 
             <div className="flex flex-col gap-2">
-              {/* Official Google button renders here when SDK + client id present */}
+              {/* Official Google button renders into this div once the GSI SDK
+                  is ready. Until then (or if it's blocked), show a styled
+                  fallback button so Google is never missing entirely. */}
               <div ref={googleBtnRef} />
-              {!window.google?.accounts?.id && (
+              {!googleBtnRendered && (
                 <button
                   onClick={onGoogleClick}
                   className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium"

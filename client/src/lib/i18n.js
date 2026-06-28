@@ -29,6 +29,8 @@ export const t = {
     signInThroughInstitution: 'Sign in', throughYourInstitution: 'through your institution',
     institutionComingSoon: 'Institutional sign-in is coming soon. Please contact your group administrator for access.',
     providerNotConfigured: 'This sign-in option is not available yet.',
+    providerSdkBlocked: 'Sign-in could not load. Disable any ad/tracking blocker for this site and try again.',
+    facebookCancelled: 'Facebook sign-in was cancelled.',
     welcomeBack: 'Welcome back', createYourAccount: 'Create your account',
     enterPasswordFor: 'Enter your password for', choosePasswordFor: 'Choose a password for',
     back: 'Back',
