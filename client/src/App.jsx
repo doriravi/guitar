@@ -9,6 +9,7 @@ import TabTranscriber from './components/TabTranscriber';
 import GuitarStrings from './components/GuitarStrings';
 import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
+import LandingPage from './components/LandingPage';
 import AccountSettings from './components/AccountSettings';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
@@ -63,6 +64,9 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  // Whether a never-logged-in visitor has moved past the marketing landing page
+  // to the sign-in form. Skipped automatically when arriving via an email link.
+  const [showSignIn, setShowSignIn] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -283,6 +287,29 @@ export default function App() {
   }
 
   if (!currentUser) {
+    // Never-logged-in visitors land on the marketing page first; the CTA reveals
+    // the sign-in form. Email-link flows (reset/forgot) skip straight to the form.
+    const inEmailFlow = showResetModal || showForgot;
+    if (!inEmailFlow && !showSignIn) {
+      return (
+        <LangContext.Provider value={lang}>
+          <LandingPage
+            onGetStarted={() => setShowSignIn(true)}
+            langSlot={
+              <select
+                value={lang}
+                onChange={e => handleLangSelect(e.target.value)}
+                aria-label="Language"
+                style={{ background: '#15151a', color: '#8a8a93', border: '1px solid #26262c',
+                  borderRadius: 9, padding: '7px 10px', fontSize: 13 }}
+              >
+                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+              </select>
+            }
+          />
+        </LangContext.Provider>
+      );
+    }
     return (
       <LangContext.Provider value={lang}>
         <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
@@ -306,6 +333,7 @@ export default function App() {
               fullPage
               onSuccess={handleAuthSuccess}
               onForgotPassword={() => setShowForgot(true)}
+              onBack={() => setShowSignIn(false)}
               lang={lang}
               onLangSelect={handleLangSelect}
             />

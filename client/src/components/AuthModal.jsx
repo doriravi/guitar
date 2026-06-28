@@ -9,7 +9,7 @@ function tk(tr, key, fallback) {
   return tr[key] != null ? tr[key] : fallback;
 }
 
-export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, onLangSelect, fullPage = false }) {
+export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack, lang, onLangSelect, fullPage = false }) {
   const tr = useT(lang);
   const [showLangMenu, setShowLangMenu] = useState(false);
 
@@ -259,6 +259,15 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, lang, 
             style={{ color: '#888' }}
             aria-label="Close"
           >×</button>
+        )}
+
+        {/* Back to the landing page (only on the full-page lobby). */}
+        {fullPage && onBack && (
+          <button
+            onClick={onBack}
+            className="absolute left-6 top-6 text-xs"
+            style={{ color: '#888' }}
+          >← {tk(tr, 'back', 'Back')}</button>
         )}
 
         {/* Language picker — lives on the lobby so the user chooses their language
