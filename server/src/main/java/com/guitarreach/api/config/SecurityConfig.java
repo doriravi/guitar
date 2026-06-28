@@ -45,6 +45,7 @@ public class SecurityConfig {
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/api/version").permitAll()
                         .requestMatchers("/api/analyze-hand").permitAll()
                         .requestMatchers("/api/tab/**").permitAll()
                         // Protected REST endpoints (everything else under /api).
