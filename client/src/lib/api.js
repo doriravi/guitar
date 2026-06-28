@@ -1,4 +1,21 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+// API base URL resolution:
+//   - VITE_API_URL set to a non-empty host → use it (separate backend).
+//   - VITE_API_URL "same-origin" → talk to this app's own origin via relative
+//     /api/... paths (used when the backend serves the built frontend).
+//   - VITE_DEV truthy or running on Vite's dev port → default to :8080.
+// Default is SAME-ORIGIN (empty base) so a production build that forgets to set
+// the var still points at its own host, never a dead localhost.
+const _envUrl = (import.meta.env.VITE_API_URL || '').trim();
+const _isLocalDev =
+  typeof window !== 'undefined' &&
+  /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) &&
+  window.location.port === '5173';
+
+const API_BASE = _envUrl && _envUrl !== 'same-origin'
+  ? _envUrl
+  : _isLocalDev
+    ? 'http://localhost:8080'
+    : ''; // same-origin → relative /api/...
 
 async function apiFetch(path, options = {}) {
   const headers = {
