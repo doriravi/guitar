@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "serve -s dist",
+    "start": "serve dist",
     "test:e2e": "playwright test"
   },
   "dependencies": {
