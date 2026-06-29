@@ -25,7 +25,7 @@ export default function LandingPage({ onGetStarted, langSlot }) {
         src="/explainer.html"
         title="FretFit — the full story"
         className="lp-embed-frame"
-        allow="autoplay; microphone"
+        allow="autoplay; fullscreen; encrypted-media"
       />
 
       {/* Overlay controls — sit above the iframe, top-right. */}
