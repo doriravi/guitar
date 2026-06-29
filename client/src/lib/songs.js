@@ -9,13 +9,20 @@ export const SONGS_BY_PROGRESSION = {
   // ─── Major progressions ────────────────────────────────────────────────────
 
   'I – IV – V': [
-    { title: 'Johnny B. Goode',          artist: 'Chuck Berry',                    year: 1958, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
-    { title: 'Wild Thing',               artist: 'The Troggs',                     year: 1966, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Johnny B. Goode',          artist: 'Chuck Berry',                    year: 1958, key: 'Bb', scaleType: 'major', section: 'Verse',     degrees: [0, 3, 4],
+      // Per-line chord pattern (positions into degrees: 0=I/A, 1=IV/D, 2=V/E),
+      // cycling verse (A A D A E A) then chorus (A D A E A) — matches the
+      // beginner capo-1 sheet. Repeats over the song's lines.
+      lineChords: [0, 0, 1, 0, 2, 0, 0, 1, 0, 2, 0] },
+    { title: 'Wild Thing',               artist: 'The Troggs',                     year: 1966, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4],
+      // Per-line chord starts (0=A, 1=D, 2=E), cycling: A D E A then four A lines.
+      // Key of A — no capo needed (A/D/E already easy open chords).
+      lineChords: [0, 1, 2, 0, 0, 0, 0, 0] },
     { title: 'Twist and Shout',          artist: 'The Beatles',                    year: 1963, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
     { title: 'La Grange',                artist: 'ZZ Top',                         year: 1973, key: 'A',  scaleType: 'major', section: 'Main riff', degrees: [0, 3, 4] },
-    { title: 'Hound Dog',                artist: 'Elvis Presley',                  year: 1956, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
-    { title: 'Rock Around the Clock',    artist: 'Bill Haley & His Comets',        year: 1954, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
-    { title: 'Blue Suede Shoes',         artist: 'Elvis Presley',                  year: 1956, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
+    { title: 'Hound Dog',                artist: 'Elvis Presley',                  year: 1956, key: 'Bb', scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4], qualities: ['7', '7', '7'] },
+    { title: 'Rock Around the Clock',    artist: 'Bill Haley & His Comets',        year: 1954, key: 'A',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4], qualities: ['7', '7', '7'] },
+    { title: 'Blue Suede Shoes',         artist: 'Elvis Presley',                  year: 1956, key: 'E',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4], qualities: ['7', '7', '7'] },
     { title: 'Brown Eyed Girl',          artist: 'Van Morrison',                   year: 1967, key: 'G',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
     { title: 'Blueberry Hill',           artist: 'Fats Domino',                    year: 1956, key: 'F',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
     { title: 'Proud Mary',               artist: 'Creedence Clearwater Revival',   year: 1969, key: 'D',  scaleType: 'major', section: 'Chorus',    degrees: [0, 3, 4] },
@@ -264,3 +271,80 @@ export const SONGS_BY_PROGRESSION = {
     { title: 'Dust in the Wind',         artist: 'Kansas',                         year: 1977, key: 'Am', scaleType: 'minor', section: 'Verse',     degrees: [0, 5, 2, 4] },
   ],
 };
+
+// ─── Real tempos (BPM), keyed by song title ───────────────────────────────────
+// Used by the synth song player so playback paces like the recording (one chord
+// per bar at this tempo). Values are the well-known approximate tempos of the
+// original recordings. Titles not listed fall back to a neutral default.
+export const SONG_BPM = {
+  '3 AM': 100, '500 Miles': 132, 'A Thousand Miles': 118, 'Africa': 93,
+  'All Along the Watchtower': 116, 'All of Me': 126, 'Am I Wrong': 105,
+  'Amazing Grace': 70, 'Angels': 102, 'Animals': 120, 'Apologize': 120,
+  'Autumn Leaves': 120, 'Back in Black': 94, 'Basket Case': 171, 'Black': 84,
+  'Blinding Lights': 171, "Blowin' in the Wind": 100, 'Blue Moon': 96,
+  'Blue Suede Shoes': 165, 'Blueberry Hill': 90, 'Boulevard of Broken Dreams': 168,
+  'Brown Eyed Girl': 146, 'Budapest': 126, 'Can You Feel the Love Tonight': 70,
+  'Canon in D': 64, 'Chasing Cars': 104, 'Come On Eileen': 140, 'Counting Stars': 122,
+  'Creep': 92, 'Crocodile Rock': 145, 'Demons': 90, 'Despacito': 89,
+  "Don't Stop Believin'": 119, 'Dust in the Wind': 92, 'Earth Angel': 70,
+  'Eleanor Rigby': 137, 'Enter Sandman': 123, 'Every Breath You Take': 117,
+  'Every Rose Has Its Thorn': 100, 'Everywhere': 110, 'Eye of the Tiger': 109,
+  'Fast Car': 104, 'Fix You': 138, 'Fly Me to the Moon': 120,
+  'Game of Thrones Theme': 84, 'Go West': 117, 'Go Your Own Way': 135,
+  'Good Riddance (Time of Your Life)': 94, 'Graduation (Friends Forever)': 128,
+  'Greensleeves': 70, 'Hallelujah': 60, 'Happier': 100, "He's Got the Whole World": 100,
+  'Heart and Soul': 130, 'Here Without You': 72, 'Hey Soul Sister': 97,
+  'Hey There Delilah': 104, 'Highway to Hell': 116, 'Ho Hey': 80,
+  'Hotel California': 75, 'Hound Dog': 87, 'House of the Rising Sun': 76,
+  "I Love Rock 'n' Roll": 92, 'I Will Follow You into the Dark': 120,
+  "I'm Yours": 76, 'In the Air Tonight': 96, 'In the End': 105, 'Iris': 100,
+  "It's My Life": 120, 'Johnny B. Goode': 168, 'Just the Way You Are': 109,
+  'La Bamba': 150, 'La Grange': 122, 'Let Her Go': 75, 'Let It Be': 73,
+  "Livin' on a Prayer": 123, 'Losing My Religion': 126, 'Louie Louie': 122,
+  'Love Story': 119, 'Love Yourself': 100, 'Mad World': 90, 'Master of Puppets': 220,
+  'Memories': 91, 'Misty': 100, 'Moondance': 124, 'More Than Words': 64,
+  'More Than a Feeling': 110, 'Mr. Brightside': 148, 'No Woman No Cry': 80,
+  'Nothing Else Matters': 70, 'Numb': 110, 'Oye Como Va': 130, 'Payphone': 110,
+  'People Are Strange': 130, 'Perfect': 95, 'Photograph': 108, 'Poker Face': 119,
+  'Pompeii': 128, 'Proud Mary': 120, 'Radioactive': 137, 'Riders on the Storm': 110,
+  'Ring of Fire': 134, 'Riptide': 102, 'Rock Around the Clock': 180, 'Roxanne': 134,
+  'Run': 84, 'Sail': 119, 'Satin Doll': 120, 'Scarborough Fair': 120, 'Shallow': 96,
+  'Shape of You': 96, 'She Will Be Loved': 102, "She's Always a Woman": 96,
+  'Smooth': 116, 'Somebody That I Used to Know': 129, 'Someone Like You': 135,
+  'Someone You Loved': 110, 'Sound of Silence': 108, 'The Sound of Silence': 108,
+  'Stairway to Heaven': 82, 'Stand By Me': 118, 'Stay With Me': 85,
+  'Stereo Hearts': 90, 'Still Loving You': 70, 'Sultans of Swing': 148,
+  "Summer of '69": 139, 'Summertime': 86, 'Sweet Home Alabama': 98,
+  'Sweet Home Chicago': 110, 'Take Me Home, Country Roads': 82, 'Take On Me': 169,
+  'Tenerife Sea': 100, 'The A Team': 85, 'The Lion Sleeps Tonight': 124,
+  'The Only Exception': 110, 'The Scientist': 146, 'The Thrill Is Gone': 78,
+  'Thinking Out Loud': 79, 'This Land Is Your Land': 120, 'Tom Sawyer': 176,
+  'Turn the Page': 76, 'Twist and Shout': 124, 'Use Somebody': 136,
+  'Viva La Vida': 138, 'Wake Me Up When September Ends': 105, "What's Up": 136,
+  'When I Was Your Man': 73, 'White Rabbit': 130, 'Why Do Fools Fall in Love': 180,
+  'Wicked Game': 112, 'Wild Thing': 100, 'Wish You Were Here': 60,
+  'With or Without You': 110, 'Wonderful Tonight': 96, 'Wonderwall': 87,
+  'Your Song': 124, 'Zombie': 84,
+};
+
+// Resolve a song's tempo. Returns undefined when unknown (caller picks a default).
+export function songBpm(title) {
+  return SONG_BPM[title];
+}
+
+// Flattened, de-duplicated list of every built-in song (the same song appears
+// under multiple progressions in SONGS_BY_PROGRESSION). Used to show the full
+// catalog in the Import screen. Key is normalized to a bare root (minor entries
+// like 'Em' → root 'E' + scaleType 'minor'), and bpm is filled from SONG_BPM.
+export const ALL_BUILTIN_SONGS = (() => {
+  const byKey = new Map();
+  for (const list of Object.values(SONGS_BY_PROGRESSION)) {
+    for (const s of list) {
+      const id = `${s.title}|${s.artist}`;
+      if (byKey.has(id)) continue;
+      const root = (s.key || '').replace(/m$/, '');  // 'Em' → 'E'
+      byKey.set(id, { ...s, key: root, bpm: s.bpm ?? SONG_BPM[s.title] });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.title.localeCompare(b.title));
+})();

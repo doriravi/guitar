@@ -11,6 +11,7 @@ import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
 import LandingPage from './components/LandingPage';
 import GuideAvatar from './components/GuideAvatar';
+import SongImporter from './components/SongImporter';
 import AccountSettings from './components/AccountSettings';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
@@ -55,6 +56,7 @@ function getTabs(tr) {
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
     { id: 'triplets',     label: tr.tabTriplets,     icon: '🎵' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
+    { id: 'import',       label: tr.tabImport || 'Import', icon: '📋' },
   ];
 }
 
@@ -68,6 +70,7 @@ const TAB_HELP = {
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
   chords:       'The Chords tab is a table of chord shapes, each rated from one to ten for how hard it is for your hand.',
   triplets:     'The Triplets tab rates small three-note shapes by difficulty for your hand.',
+  import:       'The Import tab lets you paste a chord sheet and save it as your own playable song with hand-friendly chords.',
   progressions: 'The Progressions tab shows common chord sequences and famous songs, with easier voicings and capo tips tailored to your reach.',
 };
 
@@ -523,6 +526,7 @@ export default function App() {
             {activeTab === 'chords'       && <ChordTable lang={lang} />}
             {activeTab === 'triplets'     && <TripletTable lang={lang} />}
             {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
+            {activeTab === 'import'       && <SongImporter />}
           </div>
         </main>
 

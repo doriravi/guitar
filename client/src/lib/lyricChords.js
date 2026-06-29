@@ -100,6 +100,55 @@ export function suggestCapo(chordNames) {
   return { fret: best.fret, map };
 }
 
+// ─── Idiomatic chord enrichment ───────────────────────────────────────────────
+// Turns the plain diatonic triads into the kinds of chords real arrangements
+// commonly use, from GENERAL music-theory patterns (not any specific copyrighted
+// arrangement): dominant 7ths on the V, all-7ths for a 3-chord blues, and a
+// descending-bass slash chord on a I → V → vi move (the "G/B" walkdown).
+//
+// `degrees` are 0-based scale degrees (0=I … 6=vii). `names` are the matching
+// diatonic chord names. Returns a new array of chord names, same length.
+
+function rootOf(name) {
+  const m = (name || '').match(/^([A-G][#b]?)/);
+  return m ? m[1] : name;
+}
+// Note a given number of semitones above a root (sharp-spelled).
+function noteAbove(root, semitones) {
+  const pc = NOTE_TO_PC[root];
+  if (pc == null) return null;
+  return PC_TO_SHARP[(pc + semitones) % 12];
+}
+
+export function enrichChords(degrees, names, scaleType = 'major') {
+  if (!degrees?.length) return names;
+  const uniqueDeg = new Set(degrees);
+  // A 3-chord major song using only I, IV, V → treat as a blues: all dominant 7ths.
+  const isBluesTrio = scaleType === 'major'
+    && [...uniqueDeg].every(d => d === 0 || d === 3 || d === 4)
+    && uniqueDeg.has(0) && uniqueDeg.has(4);
+
+  return names.map((name, i) => {
+    const deg = degrees[i];
+    const prev = degrees[i - 1];
+    const next = degrees[i + 1];
+
+    if (isBluesTrio) return rootOf(name) + '7'; // I7 / IV7 / V7
+
+    // Descending bass: I → V → vi is classically voiced V/<third> (e.g. C → G/B → Am),
+    // putting the 3rd of the V in the bass to walk down to vi.
+    if (scaleType === 'major' && deg === 4 && prev === 0 && next === 5) {
+      const bass = noteAbove(rootOf(name), 4); // major 3rd of the V chord
+      if (bass) return `${name}/${bass}`;
+    }
+
+    // Dominant 7th on the V in general (very common cadential colour).
+    if (scaleType === 'major' && deg === 4) return rootOf(name) + '7';
+
+    return name; // leave everything else as the plain diatonic chord
+  });
+}
+
 // Split a lyric line into sub-phrases at punctuation, keeping the terminal mark
 // of each piece so we can read its cadence. Returns [{ text, endMark }].
 function splitSubPhrases(line) {
@@ -126,18 +175,33 @@ function splitSubPhrases(line) {
  * @param {string[]} rawLines  lyric lines (may contain blanks)
  * @param {Array<{chordName:string}>} chords  progression chords, in order;
  *        index 0 is treated as the tonic for cadence resolution.
+ * @param {number[]} [lineChords]  optional per-line chord indices (into `chords`),
+ *        applied cyclically to each NON-BLANK line. When provided, this overrides
+ *        the inference so the song follows a known per-line chord pattern (one
+ *        chord at the start of each line) instead of guessing.
  * @returns {Array<{ blank:true } | { blank:false, segments:Array<{ chordIndex:number, text:string }> }>}
  *          one entry per input line; non-blank lines carry 1+ chord segments.
  */
-export function alignChordsToLyrics(rawLines, chords) {
+export function alignChordsToLyrics(rawLines, chords, lineChords) {
   const n = chords.length;
   if (!n) return rawLines.map(l => (l.trim() ? { blank: false, segments: [{ chordIndex: 0, text: l.trim() }] } : { blank: true }));
+
+  // Per-line override: one chord per non-blank line, cycling the given pattern.
+  if (lineChords && lineChords.length) {
+    let k = 0;
+    return rawLines.map(raw => {
+      if (!raw.trim()) return { blank: true };
+      const chordIndex = lineChords[k % lineChords.length] % n;
+      k++;
+      return { blank: false, segments: [{ chordIndex, text: raw.trim() }] };
+    });
+  }
 
   const lines = rawLines;
   const lastTextIdx = (() => { for (let i = lines.length - 1; i >= 0; i--) if (lines[i].trim()) return i; return -1; })();
 
   const out = [];
-  let cursor = 0; // walks through the progression, advancing per sub-phrase
+  let cursor = 0; // walks through the progression, advancing ~once per line
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -145,21 +209,41 @@ export function alignChordsToLyrics(rawLines, chords) {
 
     const subs = splitSubPhrases(raw);
     const segments = [];
+    const isLastLine = i === lastTextIdx;
 
-    subs.forEach((sub, si) => {
-      let chordIndex;
-      const isLastPhraseOfSong = i === lastTextIdx && si === subs.length - 1;
+    // Real chord sheets mostly change chord ONCE per line (≈ one bar), not at
+    // every comma. So: place one chord at the line start (advancing the
+    // progression), and only add a SECOND chord mid-line when the line is long
+    // enough to plausibly span two bars AND has an internal phrase boundary.
+    const firstChord = cursor % n;
+    cursor++;
+    segments.push({ chordIndex: firstChord, text: subs[0].text });
 
-      if (sub.endMark === 'resolve' || isLastPhraseOfSong) {
-        // Cadence: land on the tonic (degree 0) and realign the cycle after it.
-        chordIndex = 0;
-        cursor = 1 % n;
-      } else {
-        chordIndex = cursor % n;
+    // Merge the remaining sub-phrases of this line. Add at most one extra chord,
+    // at the first internal boundary, if the line is long (multi-bar feel).
+    const rest = subs.slice(1);
+    if (rest.length) {
+      const restText = rest.map(s => s.text).join(', ');
+      const lineWords = raw.trim().split(/\s+/).length;
+      if (lineWords >= 8) {
+        // long line → a second chord change partway through
+        segments.push({ chordIndex: cursor % n, text: restText });
         cursor++;
+      } else {
+        // short line → the line stays on its one chord; append the words to it
+        segments[0] = { chordIndex: firstChord, text: subs.map(s => s.text).join(', ') };
+        segments.length = 1;
       }
-      segments.push({ chordIndex, text: sub.text });
-    });
+    }
+
+    // Cadence: the final line of the section resolves to the tonic, and realign
+    // the cycle so the next section starts cleanly.
+    if (isLastLine) {
+      segments[segments.length - 1] = {
+        ...segments[segments.length - 1], chordIndex: 0,
+      };
+      cursor = 1 % n;
+    }
 
     out.push({ blank: false, segments });
   }
