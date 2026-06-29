@@ -1,7 +1,6 @@
 import { useState, createContext, useContext, useEffect } from 'react';
 import StartHere from './components/StartHere';
 import ChordTable from './components/ChordTable';
-import TripletTable from './components/TripletTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
@@ -45,16 +44,21 @@ function getTokenFromUrl(param) {
   return new URLSearchParams(window.location.search).get(param);
 }
 
+// True when the currently active tab is one that lives in the side menu — used
+// to keep the ☰ Menu button highlighted while a side tab (e.g. Tuner) is open.
+function SIDE_TABS_ACTIVE(tabs, activeId) {
+  return tabs.some(t => t.side && t.id === activeId);
+}
+
 function getTabs(tr) {
   return [
     { id: 'start',        label: tr.tabStart || 'Start',  icon: '🚀' },
     { id: 'hand',         label: tr.tabHand,         icon: '✋' },
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
-    { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️' },
+    { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️', side: true },
     { id: 'listen',       label: tr.tabListen,       icon: '🎙️' },
     { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼' },
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
-    { id: 'triplets',     label: tr.tabTriplets,     icon: '🎵' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
     { id: 'import',       label: tr.tabImport || 'Import', icon: '📋' },
   ];
@@ -69,13 +73,13 @@ const TAB_HELP = {
   listen:       'The Listen tab detects the chord you play and tells you what it is in real time.',
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
   chords:       'The Chords tab is a table of chord shapes, each rated from one to ten for how hard it is for your hand.',
-  triplets:     'The Triplets tab rates small three-note shapes by difficulty for your hand.',
   import:       'The Import tab lets you paste a chord sheet and save it as your own playable song with hand-friendly chords.',
   progressions: 'The Progressions tab shows common chord sequences and famous songs, with easier voicings and capo tips tailored to your reach.',
 };
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('start');
+  const [sideMenuOpen, setSideMenuOpen] = useState(false);
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
@@ -479,6 +483,24 @@ export default function App() {
         {/* Header */}
         {renderHeader()}
 
+        {/* Side-menu toggle — fixed at the top-left of the screen. */}
+        <button
+          onClick={() => setSideMenuOpen(true)}
+          aria-label={tr.menu || 'Menu'}
+          data-explain="Opens the side menu with extra tools, like the Tuner."
+          className="fixed top-3 left-3 z-30 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
+          style={{
+            background: '#161616', border: '1px solid #262626',
+            color: SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? '#c9a96e' : '#9a9a9a',
+            boxShadow: '0 1px 6px rgba(0,0,0,0.4)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#d0d0d0'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? '#c9a96e' : '#9a9a9a'; }}
+        >
+          <span className="text-base leading-none">☰</span>
+          <span className="hidden sm:inline">{tr.menu || 'Menu'}</span>
+        </button>
+
         <main className="max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
 
           {/* Email verify banner */}
@@ -494,10 +516,11 @@ export default function App() {
             </div>
           )}
 
-          {/* Tab bar */}
-          <div className="flex gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}
-            data-explain="This is the tab bar. Each tab opens a different tool — your hand profile, the tuner, chord tables, song progressions, and more. Tap one to switch tools.">
-            {getTabs(tr).map(tab => (
+          {/* Tab bar — main tabs inline; tabs flagged `side` live in the side menu,
+              opened by the ☰ button. The active side tab stays highlighted here too. */}
+          <div className="flex items-stretch gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}
+            data-explain="This is the tab bar. Each tab opens a different tool — your hand profile, chord tables, song progressions, and more. The menu button at the top-left of the screen opens extra tools like the tuner.">
+            {getTabs(tr).filter(t => !t.side).map(tab => (
               <button
                 key={tab.id}
                 data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
@@ -515,6 +538,42 @@ export default function App() {
             ))}
           </div>
 
+          {/* Side menu — slide-in drawer for tabs flagged `side` (e.g. the Tuner). */}
+          {sideMenuOpen && (
+            <div className="fixed inset-0 z-40" onClick={() => setSideMenuOpen(false)}>
+              <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.55)' }} />
+              <aside
+                onClick={e => e.stopPropagation()}
+                className="absolute top-0 left-0 h-full w-64 max-w-[80vw] p-4 flex flex-col gap-1"
+                style={{ background: '#161616', borderRight: '1px solid #262626', boxShadow: '2px 0 24px rgba(0,0,0,0.5)' }}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+                    {tr.menu || 'Menu'}
+                  </span>
+                  <button onClick={() => setSideMenuOpen(false)} aria-label="Close"
+                    className="text-lg leading-none px-1" style={{ color: '#5a5a5a' }}>×</button>
+                </div>
+                {getTabs(tr).filter(t => t.side).map(tab => (
+                  <button
+                    key={tab.id}
+                    data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
+                    onClick={() => { setActiveTab(tab.id); setSideMenuOpen(false); }}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all text-left"
+                    style={activeTab === tab.id
+                      ? { background: '#1e1e1e', color: '#c9a96e' }
+                      : { color: '#9a9a9a' }}
+                    onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#d0d0d0'; }}
+                    onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#9a9a9a'; }}
+                  >
+                    <span className="text-base leading-none">{tab.icon}</span>
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </aside>
+            </div>
+          )}
+
           {/* Content */}
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
             {activeTab === 'start'        && <StartHere lang={lang} onGoToHand={() => setActiveTab('hand')} />}
@@ -524,7 +583,6 @@ export default function App() {
             {activeTab === 'listen'       && <ChordListener lang={lang} />}
             {activeTab === 'audiotab'     && <TabTranscriber />}
             {activeTab === 'chords'       && <ChordTable lang={lang} />}
-            {activeTab === 'triplets'     && <TripletTable lang={lang} />}
             {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
             {activeTab === 'import'       && <SongImporter />}
           </div>
