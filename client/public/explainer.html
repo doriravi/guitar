@@ -17,8 +17,8 @@
     --display:'Space Grotesk',sans-serif; --body:'Inter',sans-serif; --mono:'JetBrains Mono',monospace;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;background:#0B0A08;color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased}
-  .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:26px 16px}
+  html,body{margin:0;height:100%;background:#0B0A08;color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased}
+  .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:26px 16px}
 
   .stage{position:relative;width:100%;max-width:1180px;border-radius:20px;overflow:hidden;
     background:linear-gradient(165deg,#1C1812,#120E08 75%);
@@ -168,8 +168,14 @@
   .time{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:84px;text-align:right}
 
   @media (max-width:820px){
-    .frame{aspect-ratio:auto;min-height:0}
-    .scene{padding:60px 24px 110px;position:relative;min-height:560px}
+    /* On phones the desktop 16:9.6 aspect-ratio collapses (the scenes are
+       absolutely positioned, so they give the frame no intrinsic height). Pin
+       the frame to the viewport height so the stage actually fills the screen
+       instead of collapsing to 0 (which showed a blank/black page on mobile). */
+    .wrap{padding:0;min-height:100dvh}
+    .stage{border-radius:0;min-height:100dvh}
+    .frame{aspect-ratio:auto;min-height:100dvh;height:100dvh}
+    .scene{padding:72px 22px 120px;min-height:0}
     .inner{grid-template-columns:1fr;gap:28px;text-align:center;justify-items:center}
     .sub{margin-left:auto;margin-right:auto}
     .chordcard,.compose,.lib,.fix{align-items:center}
