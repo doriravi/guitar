@@ -159,61 +159,103 @@ export const subscriptions = {
 //   { status:'empty' }           track exists but has no lyrics / instrumental, or no match
 //   { status:'error' }           every source was unreachable (network/timeout/5xx)
 export const lyrics = {
-  async fetch(artist, title, { signal, timeoutMs = 8000 } = {}) {
-    // Combine an external abort signal (component unmount) with a timeout.
-    const ctrl = new AbortController();
-    const onAbort = () => ctrl.abort();
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    const get = (url) => fetch(url, { signal: ctrl.signal });
+  async fetch(artist, title, { signal, timeoutMs = 15000 } = {}) {
     let sawError = false; // a source was unreachable (vs. cleanly "not found")
 
-    try {
-      // 1) LRCLIB exact get.
-      try {
-        const r = await get(`https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}`);
-        if (r.ok) {
-          const d = await r.json();
-          if (d.instrumental) return { status: 'empty' };
-          if (d.plainLyrics) return { status: 'done', text: d.plainLyrics };
-        } else if (r.status !== 404) {
-          sawError = true;
-        }
-      } catch { sawError = true; }
+    // A song's `artist` field may list several performers ("Village People /
+    // Pet Shop Boys", "Elton John & Kiki Dee", "Jay-Z feat. Rihanna"). LRCLIB
+    // matches a SINGLE artist, so we split on the common separators and try each
+    // performer in turn — otherwise the combined string matches nothing.
+    const artistVariants = [...new Set(
+      [artist, ...String(artist || '').split(/\s*(?:\/|&|,|\bfeat\.?\b|\bft\.?\b|\bx\b|\bvs\.?\b)\s*/i)]
+        .map(a => a.trim())
+        .filter(Boolean),
+    )];
 
-      // 2) LRCLIB fuzzy search (handles imperfect artist/title tags). LRCLIB is
-      // our reliable source — if its search succeeds but returns no usable hit,
-      // treat that as a definitive "not found" and don't let the flaky legacy
-      // fallback below flip it to a misleading "service unavailable".
+    // Each source gets its OWN timeout/abort, so a slow step doesn't poison the
+    // ones after it (one shared abort used to kill every fallback at once). The
+    // caller's external signal (component unmount) still cancels any in-flight
+    // request. Returns null when the request times out / is aborted / throws.
+    const get = async (url) => {
+      const ctrl = new AbortController();
+      const onAbort = () => ctrl.abort();
+      if (signal) {
+        if (signal.aborted) return null;
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const r = await get(`https://lrclib.net/api/search?q=${encodeURIComponent(`${title} ${artist}`)}`);
+        return await fetch(url, { signal: ctrl.signal });
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+      }
+    };
+
+    try {
+      // 1) LRCLIB exact get, per artist variant — retried once each, since this
+      //    source is occasionally slow and a single timeout shouldn't drop us to
+      //    the weaker fallbacks.
+      for (const a of artistVariants) {
+        const exactUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(a)}&track_name=${encodeURIComponent(title)}`;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (signal?.aborted) return { status: 'error' };
+          const r = await get(exactUrl);
+          if (!r) { sawError = true; continue; }   // timed out/threw → retry once
+          if (r.ok) {
+            const d = await r.json();
+            if (d.instrumental) return { status: 'empty' };
+            if (d.plainLyrics) return { status: 'done', text: d.plainLyrics };
+          } else if (r.status !== 404) {
+            sawError = true;
+          }
+          break; // a definite answer (200/404/non-404) → move to next variant
+        }
+      }
+
+      // 2) LRCLIB fuzzy search — per artist variant, then a title-only search as
+      //    a last resort. LRCLIB is our reliable source, but a "no hit" answer
+      //    for ONE query no longer ends the whole search (the old code returned
+      //    'empty' on the first miss, which is why a multi-artist string failed).
+      const searchQueries = [
+        ...artistVariants.map(a => `${title} ${a}`),
+        title, // title alone — catches messy/foreign artist tags
+      ];
+      for (const q of searchQueries) {
+        if (signal?.aborted) return { status: 'error' };
+        const r = await get(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`);
+        if (!r) { sawError = true; continue; }
         if (r.ok) {
           const arr = await r.json();
           const hit = Array.isArray(arr) ? arr.find(x => x && x.plainLyrics) : null;
           if (hit) return { status: 'done', text: hit.plainLyrics };
-          return { status: 'empty' }; // LRCLIB answered cleanly: no such lyrics
+          // clean "no hit" for this query → try the next query, don't give up yet
+        } else {
+          sawError = true;
         }
-        sawError = true;
-      } catch { sawError = true; }
+      }
 
-      // 3) Legacy fallback: api.lyrics.ovh.
-      try {
-        const r = await get(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`);
-        if (r.ok) {
+      // 3) Legacy fallback: api.lyrics.ovh, per artist variant.
+      for (const a of artistVariants) {
+        if (signal?.aborted) return { status: 'error' };
+        const r = await get(`https://api.lyrics.ovh/v1/${encodeURIComponent(a)}/${encodeURIComponent(title)}`);
+        if (!r) {
+          sawError = true;
+        } else if (r.ok) {
           const d = await r.json();
           if (d.lyrics) return { status: 'done', text: d.lyrics };
         } else if (r.status !== 404) {
           sawError = true;
         }
-      } catch { sawError = true; }
+      }
 
       // Nothing found. If at least one source was reachable and simply had no
       // match, that's an honest "not found"; if every source errored, say so.
       return { status: sawError ? 'error' : 'empty' };
-    } finally {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onAbort);
+    } catch {
+      return { status: 'error' };
     }
   },
 };
