@@ -1,8 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
-import { CHORDS } from '../lib/chords';
-import { calcDifficulty, fingerGapUsage, GAP_REF_MAX, transitionDifficulty } from '../lib/fretboard';
+import { fingerGapUsage, GAP_REF_MAX, transitionDifficulty } from '../lib/fretboard';
 import { DEFAULT_PROFILE } from '../lib/handProfile';
 import { suggestEasierProgression } from '../lib/substitutions';
 import { suggestUpperProgression } from '../lib/upperVoicings';
@@ -13,37 +12,12 @@ import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION, songBpm } from '../lib/songs';
 import { loadCustomSongs, addCustomSong, updateCustomSong, songToText } from '../lib/customSongs';
 import { parseChordSheet } from '../lib/chordSheetParser';
+import { lookupVoicings } from '../lib/voicingLookup';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
+import SongEditor from './SongEditor';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers } from '../App';
-
-const ENHARMONIC = {
-  'C#': 'Db', Db: 'C#', 'D#': 'Eb', Eb: 'D#',
-  'F#': 'Gb', Gb: 'F#', 'G#': 'Ab', Ab: 'G#',
-  'A#': 'Bb', Bb: 'A#',
-};
-
-const CHORD_MAP = (() => {
-  const map = new Map();
-  for (const chord of CHORDS) {
-    const score = calcDifficulty(chord.notes);
-    if (!map.has(chord.name)) map.set(chord.name, []);
-    map.get(chord.name).push({ ...chord, score });
-  }
-  return map;
-})();
-
-function lookupVoicings(chordName) {
-  const exact = CHORD_MAP.get(chordName);
-  if (exact?.length) return exact;
-  const m = chordName.match(/^([A-G][#b]?)(.*)$/);
-  if (m) {
-    const alt = ENHARMONIC[m[1]];
-    if (alt) return CHORD_MAP.get(alt + m[2]) || [];
-  }
-  return [];
-}
 
 function resolveForKey(root, scaleType, maxDiff) {
   const diatonic = getDiatonicChords(root, scaleType);
@@ -510,6 +484,8 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
   const [editText, setEditText] = useState('');
   const [editMsg, setEditMsg] = useState('');
   const [preview, setPreview] = useState(null); // parsed result from "Check", before Save
+  const [editorOpen, setEditorOpen] = useState(false); // full-screen Song Editor overlay
+  const editorProfile = useHandProfile();
 
   // Every song can be edited. A custom song (has its own stored lyricLines) edits
   // in place; a built-in is theory-derived, so editing it saves an editable copy.
@@ -751,8 +727,19 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           >
             {editing ? 'Close' : 'Edit'}
           </button>
+          <button
+            onClick={() => { stopAudio(); setIsPlaying(false); setEditorOpen(true); }}
+            className="text-xs px-2 py-0.5 rounded font-medium transition-all"
+            style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}
+            title="Open the Song Editor — mark a section and transform it (move up frets, easier voicings, capo, melody, rhythm, style)"
+          >
+            Editor
+          </button>
         </div>
       </div>
+      {editorOpen && (
+        <SongEditor song={song} profile={editorProfile} onClose={() => setEditorOpen(false)} />
+      )}
       <div className="flex flex-wrap gap-x-0 overflow-x-auto pb-1" style={{ borderTop: '1px solid #1a1a1a' }}>
         {stripChords.map((c, j) => (
           <div key={j} className="px-2 sm:px-3 py-1" style={{ minWidth: 48 }}>
