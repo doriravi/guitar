@@ -488,15 +488,22 @@ export default function SongEditor({ song, profile, onClose }) {
       lyricLines.push({ text: '', chordNames: cells.map(c => applied[c.pos]?.name || c.chordName) });
     }
 
+    // Title handling: an edit of an already-edited song must NOT re-append
+    // "(my edit)". Track the clean original in `editedFrom`; the edit title is
+    // "<original> (my edit)" exactly once. Strip any accidental stacked suffixes.
+    const stripEditSuffix = (t) => (t || '').replace(/(\s*\(my edit\))+$/i, '').trim();
+    const originalTitle = song.editedFrom || stripEditSuffix(song.title);
+    const editTitle = `${originalTitle} (my edit)`;
+
     const edited = {
       ...song,
       id: song.id || undefined,                 // keep id if this was already a saved song
-      title: song.editedTitle || `${song.title} (my edit)`,
+      title: editTitle,
       artist: song.artist || '',
       key: song.key, scaleType: song.scaleType, bpm,
       lyricLines,
       custom: true,
-      editedFrom: song.title,
+      editedFrom: originalTitle,                 // stable clean origin, never re-suffixed
     };
 
     try {
