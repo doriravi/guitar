@@ -167,6 +167,17 @@ export const compose = {
       .catch(() => null),
 };
 
+// Floating AI advisor — multi-turn music/guitar/app consultant. Sends the chat
+// history plus a snapshot of the user's current app context; returns the reply
+// string, or null on any failure (no key → 503, network, malformed) so the
+// widget can show a graceful "unavailable" message.
+export const advise = {
+  ask: ({ messages, context }) =>
+    apiFetch('/api/advise', { method: 'POST', body: JSON.stringify({ messages, context }) })
+      .then(r => (r && r.reply) ? r.reply : null)
+      .catch(() => null),
+};
+
 export const subscriptions = {
   getStatus: () => apiFetch('/api/subscriptions/me'),
 
