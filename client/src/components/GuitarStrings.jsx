@@ -3,6 +3,11 @@ import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
 import { useT } from '../lib/i18n';
+import { useHandProfile, useAIFingers } from '../App';
+import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
+import { MAJOR_PROGRESSIONS } from '../lib/progressions';
+import { getDiatonicChords } from '../lib/scales';
+import { compose } from '../lib/api';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -120,28 +125,6 @@ function tabToFrets(tab) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function ModeBar({ mode, setMode }) {
-  const modes = [
-    { id: 'play',   label: 'Play',   icon: '🎸' },
-    { id: 'scale',  label: 'Scale',  icon: '🎵' },
-    { id: 'chord',  label: 'Chords', icon: '🎼' },
-    { id: 'editor', label: 'Editor', icon: '🎹' },
-  ];
-  return (
-    <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#161616' }}>
-      {modes.map(m => (
-        <button key={m.id} onClick={() => setMode(m.id)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
-          style={mode === m.id
-            ? { background: '#1e1e1e', color: '#c9a96e', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
-            : { color: '#5a5a5a' }}>
-          <span>{m.icon}</span><span>{m.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ── Fretboard ─────────────────────────────────────────────────────────────────
 // Shared visual component used by all three modes.
@@ -707,16 +690,535 @@ function ChordFinderMode({ diffMax, tr }) {
 
 const EMPTY_BEAT = () => [null, null, null, null, null, null];
 
-function ChordPicker({ onApply, diffMax, tr }) {
+// ── Notation sheet ─────────────────────────────────────────────────────────
+// Renders the composed beats as notes on a treble staff. Guitar music is
+// notated an octave above where it sounds (treble clef, 8vb), so we map the
+// actual MIDI pitch up one octave for a readable staff position.
+
+// Diatonic step index for each pitch class (C=0, D=1, … B=6) and whether it
+// needs a sharp accidental in the key of C.
+const PC_STEP  = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]; // C C# D D# E F F# G G# A A# B
+const PC_SHARP = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0];
+
+// Key signatures. Each major key has a fixed count of sharps (+) or flats (−)
+// applied in a fixed order of letter names. This drives both the notated
+// key-signature glyphs and whether an accidental is spelled sharp or flat.
+const SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];       // order sharps appear
+const FLAT_ORDER  = ['B', 'E', 'A', 'D', 'G', 'C', 'F'];       // order flats appear
+const LETTER_STEP = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+
+// tonic pitch class → { name, count, accidental } (count of sharps/flats).
+const KEYS = [
+  { name: 'C',  pc: 0,  acc: 'sharp', count: 0 },
+  { name: 'G',  pc: 7,  acc: 'sharp', count: 1 },
+  { name: 'D',  pc: 2,  acc: 'sharp', count: 2 },
+  { name: 'A',  pc: 9,  acc: 'sharp', count: 3 },
+  { name: 'E',  pc: 4,  acc: 'sharp', count: 4 },
+  { name: 'B',  pc: 11, acc: 'sharp', count: 5 },
+  { name: 'F♯', pc: 6,  acc: 'sharp', count: 6 },
+  { name: 'F',  pc: 5,  acc: 'flat',  count: 1 },
+  { name: 'B♭', pc: 10, acc: 'flat',  count: 2 },
+  { name: 'E♭', pc: 3,  acc: 'flat',  count: 3 },
+  { name: 'A♭', pc: 8,  acc: 'flat',  count: 4 },
+  { name: 'D♭', pc: 1,  acc: 'flat',  count: 5 },
+];
+
+function keyByName(name) {
+  return KEYS.find(k => k.name === name) ?? KEYS[0];
+}
+
+// Pitch classes of the major scale for a key (used to flag "in-key" chords).
+const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+function keyScalePcs(key) {
+  return new Set(MAJOR_SCALE.map(i => (key.pc + i) % 12));
+}
+
+// Composer key names use ♯/♭ glyphs (e.g. "F♯", "B♭"); getDiatonicChords wants
+// ASCII (# / b). Normalize the tonic letter for that lookup.
+function keyRootAscii(keyName) {
+  return keyName.replace('♯', '#').replace('♭', 'b');
+}
+
+// Find the easiest playable voicing (lowest reach difficulty) for a chord name,
+// within the difficulty ceiling. Falls back to the easiest overall if none fit.
+function easiestVoicing(chordName, diffMax) {
+  const matches = CHORDS.filter(c => c.name === chordName);
+  if (matches.length === 0) return null;
+  const scored = matches
+    .map(c => ({ chord: c, diff: calcDifficulty(c.notes) }))
+    .sort((a, b) => a.diff - b.diff);
+  const withinLimit = scored.find(s => s.diff <= diffMax);
+  return (withinLimit ?? scored[0]).chord;
+}
+
+// Parse a chord name's root note into a pitch class. Chord names look like
+// "Am", "C#", "F#m7", "Bb", "Gsus4" — the root is the leading letter plus an
+// optional accidental.
+function chordRootPc(name) {
+  const m = /^([A-G])([#b♯♭]?)/.exec(name);
+  if (!m) return null;
+  const base = NOTE_TO_SEMITONE[m[1]];
+  if (base == null) return null;
+  const acc = m[2];
+  if (acc === '#' || acc === '♯') return (base + 1) % 12;
+  if (acc === 'b' || acc === '♭') return (base + 11) % 12;
+  return base;
+}
+
+// The set of letter names altered by a key's signature (e.g. G major → {F}).
+function keySignatureLetters(key) {
+  const order = key.acc === 'sharp' ? SHARP_ORDER : FLAT_ORDER;
+  return order.slice(0, key.count);
+}
+
+// Spell a pitch class within a key: returns { letter, accidental } where
+// accidental is '', '♯', or '♭'. Flat keys prefer flat spelling of the black
+// keys; sharp keys prefer sharp spelling. Natural notes have no accidental.
+const SHARP_SPELL = [ // pc → [letter, accidental]
+  ['C',''],['C','♯'],['D',''],['D','♯'],['E',''],['F',''],
+  ['F','♯'],['G',''],['G','♯'],['A',''],['A','♯'],['B',''],
+];
+const FLAT_SPELL = [
+  ['C',''],['D','♭'],['D',''],['E','♭'],['E',''],['F',''],
+  ['G','♭'],['G',''],['A','♭'],['A',''],['B','♭'],['B',''],
+];
+
+function spellPitch(pc, key) {
+  return (key.acc === 'flat' ? FLAT_SPELL : SHARP_SPELL)[((pc % 12) + 12) % 12];
+}
+
+// A note's vertical staff position, computed from its spelled letter + octave
+// so an F♯ and G♭ land on different lines. dia = "diatonic number": letter-steps
+// above C0. midi octave = floor(midi/12) - 1 (C4/midi 60 → octave 4).
+function diatonicNumberFor(midi, letter, accidental) {
+  let octave = Math.floor(midi / 12) - 1;
+  const pc = ((midi % 12) + 12) % 12;
+  // A B♭/B-flat spelling of A♯ keeps the same octave; but Cb/B# would cross an
+  // octave boundary. Guard the two wrap cases: B♯ (pc 0 spelled B) and C♭.
+  if (accidental === '♯' && letter === 'B' && pc === 0) octave -= 1;
+  if (accidental === '♭' && letter === 'C' && pc === 11) octave += 1;
+  return octave * 7 + LETTER_STEP[letter];
+}
+
+// Simple diatonic number for a natural midi pitch (used for staff-line refs).
+function diatonicNumber(midi) {
+  const pc = ((midi % 12) + 12) % 12;
+  const octave = Math.floor(midi / 12) - 1;
+  return octave * 7 + PC_STEP[pc];
+}
+
+// Convert a beat's frets into notated note descriptors for the given key.
+function beatToStaffNotes(frets, key) {
+  const sigLetters = new Set(keySignatureLetters(key));
+  const notes = [];
+  for (let s = 0; s < 6; s++) {
+    const f = frets[s];
+    if (f === null) continue;
+    const midi = OPEN_MIDI[s] + f + 12; // +12: notate an octave up (treble 8vb)
+    const pc = midi % 12;
+    const [letter, accidental] = spellPitch(pc, key);
+    // The key signature already alters these letters, so only draw an explicit
+    // accidental when the note's accidental disagrees with the signature.
+    const alteredBySig = sigLetters.has(letter);
+    let glyph = '';
+    if (accidental && !alteredBySig) glyph = accidental;   // e.g. F♯ in C major
+    else if (!accidental && alteredBySig) glyph = '♮';     // natural cancels the sig
+    notes.push({
+      dia: diatonicNumberFor(midi, letter, accidental),
+      glyph,
+      color: STRING_COLORS[s],
+    });
+  }
+  // Draw lowest pitch first so stems/heads stack predictably.
+  return notes.sort((a, b) => a.dia - b.dia);
+}
+
+function NotationSheet({ beats, activeIdx, musicKey, tr }) {
+  const key = keyByName(musicKey);
+
+  // Staff geometry. One space = STEP px between adjacent diatonic positions is
+  // half a line gap, so a full line-to-line gap is 2*STEP.
+  const STEP     = 5;               // px per diatonic step (half staff space)
+  const TOP_PAD  = 40;              // room for high ledger lines
+  const BOT_PAD  = 40;              // room for low ledger lines
+  const COL_W    = 34;             // px per beat column
+  const CLEF_W   = 34;
+  const H        = TOP_PAD + BOT_PAD + 8 * STEP; // 5 lines span 8 half-steps
+
+  // Reference diatonic numbers for the treble staff lines (bottom→top): E4 G4 B4 D5 F5.
+  // Top line F5 (midi 77) sits at y = TOP_PAD; each diatonic step up moves up STEP.
+  const F5_DIA = diatonicNumber(77);
+  const yFor = (dia) => TOP_PAD + (F5_DIA - dia) * STEP;
+
+  // Staff line diatonic numbers (top F5 down to bottom E4).
+  const lineDias = [77, 74, 71, 67, 64].map(diatonicNumber);
+
+  // Key-signature accidentals: place each altered letter at its conventional
+  // staff position in the treble clef, in signature order.
+  const sigLetters = keySignatureLetters(key);
+  // Conventional dia positions for treble-clef sharps (F♯ high) and flats (B♭).
+  const SHARP_DIA = { F: diatonicNumber(77), C: diatonicNumber(72), G: diatonicNumber(79),
+                      D: diatonicNumber(74), A: diatonicNumber(69), E: diatonicNumber(76), B: diatonicNumber(71) };
+  const FLAT_DIA  = { B: diatonicNumber(71), E: diatonicNumber(76), A: diatonicNumber(69),
+                      D: diatonicNumber(74), G: diatonicNumber(67), C: diatonicNumber(72), F: diatonicNumber(65) };
+  const sigGlyph  = key.acc === 'sharp' ? '♯' : '♭';
+  const SIG_X0    = CLEF_W;
+  const SIG_STEP  = 7;
+  const sigW      = sigLetters.length * SIG_STEP + (sigLetters.length ? 6 : 0);
+  const NOTES_X0  = SIG_X0 + sigW;
+
+  const width = NOTES_X0 + Math.max(beats.length, 1) * COL_W + 12;
+
+  // Ledger lines needed for a note far above/below the staff.
+  const ledgersFor = (dia) => {
+    const lines = [];
+    const topLine = lineDias[0];      // F5
+    const botLine = lineDias[4];      // E4
+    // Above the staff: A5 (topLine+2), C6, … at even step offsets.
+    for (let d = topLine + 2; d <= dia; d += 2) lines.push(d);
+    for (let d = botLine - 2; d >= dia; d -= 2) lines.push(d);
+    return lines;
+  };
+
+  return (
+    <div className="rounded-xl mb-3 overflow-x-auto"
+      style={{ background: '#faf8f3', border: '1px solid #2a2a2a' }}>
+      <div className="flex items-center gap-2 px-3 pt-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#8a7a5a' }}>
+          {tr.notationSheet}
+        </span>
+      </div>
+      <svg width={width} height={H + 12} style={{ display: 'block', minWidth: '100%' }}>
+        {/* Staff lines */}
+        {lineDias.map((d, i) => (
+          <line key={i} x1={8} y1={yFor(d)} x2={width - 6} y2={yFor(d)}
+            stroke="#3a3a3a" strokeWidth={1} />
+        ))}
+        {/* Treble clef glyph */}
+        <text x={10} y={yFor(lineDias[3]) + 10} fontSize={44} fill="#1a1a1a"
+          style={{ fontFamily: 'serif' }}>𝄞</text>
+
+        {/* Key signature */}
+        {sigLetters.map((letter, i) => {
+          const dia = (key.acc === 'sharp' ? SHARP_DIA : FLAT_DIA)[letter];
+          return (
+            <text key={letter} x={SIG_X0 + 4 + i * SIG_STEP} y={yFor(dia) + 4}
+              fontSize={15} textAnchor="middle" fill="#1a1a1a" style={{ fontFamily: 'serif' }}>
+              {sigGlyph}
+            </text>
+          );
+        })}
+
+        {/* Beats */}
+        {beats.map((beat, bi) => {
+          const cx = NOTES_X0 + bi * COL_W + COL_W / 2;
+          const staffNotes = beatToStaffNotes(beat.frets, key);
+          const isActive = bi === activeIdx;
+          return (
+            <g key={beat.id ?? bi}>
+              {/* Active-beat highlight */}
+              {isActive && (
+                <rect x={cx - COL_W / 2 + 2} y={4} width={COL_W - 4} height={H}
+                  rx={4} fill="rgba(56,189,248,0.12)" stroke="#38bdf8" strokeWidth={1} />
+              )}
+              {/* Barline between beats */}
+              {bi < beats.length - 1 && (
+                <line x1={cx + COL_W / 2} y1={yFor(lineDias[0])} x2={cx + COL_W / 2} y2={yFor(lineDias[4])}
+                  stroke="#d8d0c0" strokeWidth={1} />
+              )}
+              {staffNotes.length === 0 ? (
+                // Rest glyph for an empty beat
+                <text x={cx} y={yFor(lineDias[2]) + 4} fontSize={18} textAnchor="middle" fill="#8a7a5a"
+                  style={{ fontFamily: 'serif' }}>𝄽</text>
+              ) : staffNotes.map((n, ni) => {
+                const y = yFor(n.dia);
+                return (
+                  <g key={ni}>
+                    {/* Ledger lines */}
+                    {ledgersFor(n.dia).map((ld, li) => (
+                      <line key={li} x1={cx - 8} y1={yFor(ld)} x2={cx + 8} y2={yFor(ld)}
+                        stroke="#3a3a3a" strokeWidth={1} />
+                    ))}
+                    {/* Accidental */}
+                    {n.glyph && (
+                      <text x={cx - 11} y={y + 3.5} fontSize={12} textAnchor="middle" fill="#1a1a1a"
+                        style={{ fontFamily: 'serif' }}>{n.glyph}</text>
+                    )}
+                    {/* Note head */}
+                    <ellipse cx={cx} cy={y} rx={4.2} ry={3.2}
+                      transform={`rotate(-20 ${cx} ${y})`}
+                      fill={n.color} stroke="#1a1a1a" strokeWidth={0.75} />
+                  </g>
+                );
+              })}
+              {/* Stem (single, from lowest note upward) — only when notes exist */}
+              {staffNotes.length > 0 && (
+                <line
+                  x1={cx + 4} y1={yFor(staffNotes[0].dia)}
+                  x2={cx + 4} y2={yFor(staffNotes[staffNotes.length - 1].dia) - 22}
+                  stroke="#1a1a1a" strokeWidth={1} />
+              )}
+              {/* Beat number */}
+              <text x={cx} y={H + 8} fontSize={8} textAnchor="middle"
+                fill={isActive ? '#0284c7' : '#b0a890'} fontWeight={isActive ? 700 : 400}>
+                {bi + 1}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// Resolve a progression's diatonic degrees into concrete chords for a key,
+// each with the easiest voicing within the difficulty ceiling.
+function resolveProgression(prog, musicKey, diffMax) {
+  const diatonic = getDiatonicChords(keyRootAscii(musicKey), 'major');
+  return prog.degrees.map(deg => {
+    const chordName = diatonic[deg]?.chordName;
+    const voicing = chordName ? easiestVoicing(chordName, diffMax) : null;
+    return { degree: deg, roman: diatonic[deg]?.roman, chordName, voicing };
+  });
+}
+
+// "Ask the expert" — sends the current composition to the AI melody/harmony
+// expert and offers its suggestions as beats you can drop onto the track.
+function ExpertPicker({ beats, onInsert, musicKey, diffMax, want = 'chords', tr }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
+  const [error, setError] = useState(false);
+
+  const handProfile = useHandProfile();
+  const aiFingers = useAIFingers();
+
+  const ask = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    setSuggestions(null);
+    // Give the expert the player's hand so it only suggests reachable shapes.
+    const ability = abilityLabel(handProfile);
+    const hand = {
+      // gap measurements in cm (reach / flexibility signal)
+      thumbToIndex: handProfile.thumbToIndex,
+      indexToMiddle: handProfile.indexToMiddle,
+      middleToRing: handProfile.middleToRing,
+      ringToLittle: handProfile.ringToLittle,
+      abilityLabel: ability.label,       // e.g. "Very small hands"
+      abilityNote: ability.desc,         // e.g. "Limited reach — many standard chords…"
+      recommendedMaxDifficulty: recommendedMaxDifficulty(handProfile),
+      difficultyCeiling: diffMax,        // the user's current Max Difficulty setting
+      // Optional per-finger capability from the AI hand-photo analysis, if present.
+      fingerCapability: aiFingers ?? undefined,
+    };
+    const payload = {
+      key: musicKey,
+      want,
+      hand,
+      beats: beats.map(b => ({
+        chordLabel: b.chordLabel ?? '',
+        tab: b.frets.map(f => (f === null ? 'x' : f)).join(''),
+      })),
+    };
+    const res = await compose.get(payload);
+    setLoading(false);
+    if (res && Array.isArray(res.suggestions) && res.suggestions.length > 0) {
+      setSuggestions(res.suggestions);
+    } else {
+      setError(true); // no key configured / error / empty → show unavailable
+    }
+  }, [beats, musicKey, want, diffMax, handProfile, aiFingers]);
+
+  const insertOne = (s) => {
+    const frets = tabToFrets(s.tab);
+    strum(frets);
+    onInsert([{ tab: s.tab, name: s.label || 'Expert', type: 'suggested' }]);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setOpen(true); ask(); }}
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3"
+        style={{ background: '#1a1a1a', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }}>
+        {tr.askExpert}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#38bdf8' }}>
+          🎓 {tr.expertSuggestions}
+        </span>
+        <div className="flex items-center gap-2">
+          <button onClick={ask} disabled={loading}
+            className="text-xs font-semibold" style={{ color: loading ? '#3a3a3a' : '#38bdf8' }}>
+            {loading ? tr.expertThinking : '↻'}
+          </button>
+          <button onClick={() => setOpen(false)} className="text-xs" style={{ color: '#5a5a5a' }}>
+            {tr.close}
+          </button>
+        </div>
+      </div>
+
+      {loading && (
+        <p className="text-xs text-center py-4" style={{ color: '#5a5a5a' }}>{tr.expertThinking}</p>
+      )}
+
+      {error && !loading && (
+        <p className="text-xs text-center py-4" style={{ color: '#5a5a5a' }}>{tr.expertUnavailable}</p>
+      )}
+
+      {suggestions && !loading && (
+        <div className="flex flex-col gap-1.5">
+          {suggestions.map((s, i) => {
+            const notes = tabToFrets(s.tab)
+              .map((f, str) => (f === null ? null : { string: str, fret: f }))
+              .filter(Boolean);
+            const diff = notes.length ? calcDifficulty(notes) : null;
+            return (
+              <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+                style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold" style={{ color: '#f0ede8' }}>{s.label || '—'}</span>
+                    <span className="font-mono text-[10px]" style={{ color: '#5a5a5a' }}>{s.tab}</span>
+                    {diff != null && <DifficultyBadge score={diff} />}
+                  </div>
+                  {s.reason && (
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: '#6a6a6a' }}>{s.reason}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => insertOne(s)}
+                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
+                  style={{ background: 'rgba(56,189,248,0.14)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }}>
+                  {tr.add}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
+  const [open, setOpen] = useState(false);
+  const [progName, setProgName] = useState(MAJOR_PROGRESSIONS[0].name);
+
+  const prog = useMemo(
+    () => MAJOR_PROGRESSIONS.find(p => p.name === progName) ?? MAJOR_PROGRESSIONS[0],
+    [progName]
+  );
+
+  // Resolved chords for the current key + selected progression.
+  const resolved = useMemo(
+    () => resolveProgression(prog, musicKey, diffMax),
+    [prog, musicKey, diffMax]
+  );
+
+  const canInsert = resolved.some(r => r.voicing);
+
+  const handleInsert = () => {
+    const voicings = resolved.filter(r => r.voicing).map(r => r.voicing);
+    if (voicings.length === 0) return;
+    onInsert(voicings);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3"
+        style={{ background: '#1a1a1a', color: '#34d399', border: '1px solid rgba(52,211,153,0.25)' }}>
+        {tr.addProgression}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#34d399' }}>
+          {tr.progressionInKey} <span style={{ color: '#c9a96e' }}>{musicKey}</span>
+        </span>
+        <button onClick={() => setOpen(false)} className="text-xs" style={{ color: '#5a5a5a' }}>
+          {tr.close}
+        </button>
+      </div>
+
+      {/* Progression combo box */}
+      <select
+        value={progName}
+        onChange={e => setProgName(e.target.value)}
+        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2 appearance-none"
+        style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+      >
+        {MAJOR_PROGRESSIONS.map(p => (
+          <option key={p.name} value={p.name} style={{ background: '#1a1a1a' }}>
+            {p.name}  ·  {p.genre}
+          </option>
+        ))}
+      </select>
+
+      {/* Resolved chord preview */}
+      <div className="flex flex-wrap gap-1.5 mb-2.5">
+        {resolved.map((r, i) => (
+          <div key={i} className="flex flex-col items-center rounded-lg px-2.5 py-1.5"
+            style={{
+              background: r.voicing ? '#1e1e1e' : '#161010',
+              border: `1px solid ${r.voicing ? '#2a2a2a' : 'rgba(248,113,113,0.3)'}`,
+              minWidth: 54,
+            }}>
+            <span className="text-[9px]" style={{ color: '#5a5a5a' }}>{r.roman}</span>
+            <span className="text-xs font-bold" style={{ color: r.voicing ? '#f0ede8' : '#f87171' }}>
+              {r.chordName ?? '—'}
+            </span>
+            {r.voicing && (
+              <span className="font-mono text-[9px]" style={{ color: '#3a3a3a' }}>{r.voicing.tab}</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={handleInsert}
+        disabled={!canInsert}
+        className="w-full px-3 py-2 rounded-lg text-xs font-bold transition-all"
+        style={canInsert
+          ? { background: '#34d399', color: '#0f0f0f' }
+          : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+        {tr.insertProgression}
+      </button>
+    </div>
+  );
+}
+
+function ChordPicker({ onApply, diffMax, musicKey, tr }) {
   const [search, setSearch] = useState('');
   const [selectedName, setSelectedName] = useState('');
   const [open, setOpen] = useState(false);
 
+  // Chords whose root is in the selected key are flagged and sorted first.
+  const inKeyPcs = useMemo(() => keyScalePcs(keyByName(musicKey)), [musicKey]);
+  const isInKey = useCallback((name) => {
+    const pc = chordRootPc(name);
+    return pc != null && inKeyPcs.has(pc);
+  }, [inKeyPcs]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const names = q ? CHORD_NAMES.filter(n => n.toLowerCase().includes(q)) : CHORD_NAMES;
-    return names.filter(name => CHORDS.some(c => c.name === name && calcDifficulty(c.notes) <= diffMax));
-  }, [search, diffMax]);
+    const avail = names.filter(name => CHORDS.some(c => c.name === name && calcDifficulty(c.notes) <= diffMax));
+    // In-key chords first, preserving original order within each group.
+    return [...avail].sort((a, b) => (isInKey(b) ? 1 : 0) - (isInKey(a) ? 1 : 0));
+  }, [search, diffMax, isInKey]);
 
   const voicings = useMemo(() =>
     selectedName ? CHORDS.filter(c => c.name === selectedName && calcDifficulty(c.notes) <= diffMax).slice(0, 4) : [],
@@ -750,16 +1252,27 @@ function ChordPicker({ onApply, diffMax, tr }) {
         autoFocus
       />
 
+      <p className="text-[10px] mb-1.5 flex items-center gap-1.5" style={{ color: '#3a3a3a' }}>
+        <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#c9a96e' }} />
+        {tr.inKeyOf} <span style={{ color: '#c9a96e' }}>{musicKey}</span>
+      </p>
+
       <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto mb-2">
-        {filtered.slice(0, 40).map(name => (
-          <button key={name} onClick={() => setSelectedName(name)}
-            className="px-2 py-0.5 rounded-md text-xs font-semibold transition-all"
-            style={selectedName === name
-              ? { background: '#a78bfa', color: '#0f0f0f' }
-              : { background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #252525' }}>
-            {name}
-          </button>
-        ))}
+        {filtered.slice(0, 40).map(name => {
+          const inKey = isInKey(name);
+          const selected = selectedName === name;
+          return (
+            <button key={name} onClick={() => setSelectedName(name)}
+              className="px-2 py-0.5 rounded-md text-xs font-semibold transition-all"
+              style={selected
+                ? { background: '#a78bfa', color: '#0f0f0f' }
+                : inKey
+                  ? { background: 'rgba(201,169,110,0.14)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.4)' }
+                  : { background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #252525' }}>
+              {name}
+            </button>
+          );
+        })}
       </div>
 
       {voicings.length > 0 && (
@@ -986,6 +1499,7 @@ function MusicEditorMode({ diffMax, tr }) {
   const [bpm, setBpm] = useState(80);
   const [loop, setLoop] = useState(false);
   const [showSongs, setShowSongs] = useState(false);
+  const [musicKey, setMusicKey] = useState('C');
   const nextId = useRef(1);
   const playTimer = useRef(null);
   const bpmRef = useRef(bpm);
@@ -1108,10 +1622,50 @@ function MusicEditorMode({ diffMax, tr }) {
     ));
   }, [editIdx]);
 
+  // Insert a whole progression (list of voicings) as new beats at the cursor.
+  const insertProgression = useCallback((voicings) => {
+    const newBeats = voicings.map(v => ({
+      frets: tabToFrets(v.tab),
+      chordLabel: `${v.name} ${v.type}`,
+      id: nextId.current++,
+    }));
+    if (newBeats.length === 0) return;
+    setBeats(prev => {
+      const next = [...prev];
+      next.splice(editIdx + 1, 0, ...newBeats);
+      return next;
+    });
+    setEditIdx(editIdx + newBeats.length);
+    strum(newBeats[0].frets);
+  }, [editIdx]);
+
   const pct = ((bpm - 40) / (200 - 40)) * 100;
+
+  const sheetActiveIdx = isPlaying && playIdx !== null ? playIdx : editIdx;
 
   return (
     <div>
+      {/* Key selector */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+          {tr.key}
+        </span>
+        <div className="flex flex-wrap gap-1">
+          {KEYS.map(k => (
+            <button key={k.name} onClick={() => setMusicKey(k.name)}
+              className="px-2 py-0.5 rounded-md text-xs font-bold transition-all"
+              style={musicKey === k.name
+                ? { background: '#c9a96e', color: '#0f0f0f' }
+                : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+              {k.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Music notation sheet */}
+      <NotationSheet beats={beats} activeIdx={sheetActiveIdx} musicKey={musicKey} tr={tr} />
+
       {/* Transport controls */}
       <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
         style={{ background: '#1a1a1a', border: '1px solid #222' }}>
@@ -1196,8 +1750,14 @@ function MusicEditorMode({ diffMax, tr }) {
         />
       )}
 
+      {/* Ask the expert — AI melody/harmony suggestions */}
+      <ExpertPicker beats={beats} onInsert={insertProgression} musicKey={musicKey} diffMax={diffMax} tr={tr} />
+
+      {/* Progression picker — fills the track with a diatonic progression */}
+      <ProgressionPicker onInsert={insertProgression} diffMax={diffMax} musicKey={musicKey} tr={tr} />
+
       {/* Chord picker */}
-      <ChordPicker onApply={applyChord} diffMax={diffMax} tr={tr} />
+      <ChordPicker onApply={applyChord} diffMax={diffMax} musicKey={musicKey} tr={tr} />
 
       {/* Fretboard editor */}
       <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
@@ -1243,33 +1803,66 @@ function MusicEditorMode({ diffMax, tr }) {
 function DiffSlider({ diffMax, setDiffMax, tr }) {
   const pct = ((diffMax - 1) / 9) * 100;
   const color = diffMax <= 3 ? '#4ade80' : diffMax <= 6 ? '#c9a96e' : '#f87171';
+
+  // Recommended ceiling for the user's hand size — shown as a marker on the track.
+  const handProfile = useHandProfile();
+  const recommended = recommendedMaxDifficulty(handProfile);
+  const recPct = ((recommended - 1) / 9) * 100;
+
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-3"
+    <div className="px-3 py-2.5 rounded-xl mb-3"
       style={{ background: '#161616', border: '1px solid #1e1e1e' }}>
-      <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
-        {tr.maxDifficulty}
-      </span>
-      <input
-        type="range" min={1} max={10} value={diffMax}
-        onChange={e => setDiffMax(Number(e.target.value))}
-        className="flex-1"
-        style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)` }}
-      />
-      <span className="text-sm font-bold tabular-nums w-5 text-right" style={{ color }}>
-        {diffMax}
-      </span>
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
+          {tr.maxDifficulty}
+        </span>
+        <div className="relative flex-1">
+          <input
+            type="range" min={1} max={10} value={diffMax}
+            onChange={e => setDiffMax(Number(e.target.value))}
+            className="w-full block"
+            style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)` }}
+          />
+          {/* Recommended-for-your-hand marker */}
+          <button
+            type="button"
+            onClick={() => setDiffMax(recommended)}
+            title={`${tr.recommendedForHand}: ${recommended}`}
+            className="absolute -top-1 w-3 h-3 rounded-full pointer-events-auto"
+            style={{
+              left: `calc(${recPct}% - 6px)`,
+              background: '#a78bfa',
+              border: '2px solid #161616',
+              boxShadow: '0 0 6px rgba(167,139,250,0.7)',
+            }}
+          />
+        </div>
+        <span className="text-sm font-bold tabular-nums w-5 text-right" style={{ color }}>
+          {diffMax}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 mt-1.5 pl-0.5">
+        <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#a78bfa' }} />
+        <span className="text-[10px]" style={{ color: '#6a6a6a' }}>
+          {tr.recommendedForHand} · <span style={{ color: '#a78bfa', fontWeight: 600 }}>{recommended}</span>
+        </span>
+      </div>
     </div>
   );
 }
 
-export default function GuitarStrings({ lang }) {
+// The Composer tab now shows only the music editor. The Play / Scale / Chord
+// Finder tools live in their own top-level tabs and mount this component with a
+// `mode` prop. `diffMax` is only relevant to the chord/editor modes.
+export default function GuitarStrings({ lang, mode = 'editor' }) {
   const tr = useT(lang);
-  const [mode, setMode] = useState('play');
-  const [diffMax, setDiffMax] = useState(10);
+  const handProfile = useHandProfile();
+  // Default the difficulty ceiling to what's comfortable for the user's hand,
+  // not the max — so small-handed players don't start out seeing 10/10 shapes.
+  const [diffMax, setDiffMax] = useState(() => recommendedMaxDifficulty(handProfile));
 
   return (
     <div className="p-3 sm:p-5 select-none">
-      <ModeBar mode={mode} setMode={setMode} />
       {(mode === 'chord' || mode === 'editor') && (
         <DiffSlider diffMax={diffMax} setDiffMax={setDiffMax} tr={tr} />
       )}

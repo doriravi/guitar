@@ -54,6 +54,23 @@ export function personalDifficulty(rawScore, profile) {
 }
 
 /**
+ * Recommended "comfortable" max-difficulty ceiling for this hand (1-10).
+ *
+ * A chord that feels like a mild-to-moderate stretch (displayed ≈ 7/10) is a
+ * good upper limit for comfortable play. personalDifficulty maps raw→displayed
+ * by dividing by the hand multiplier, so the RAW difficulty that lands at 7 for
+ * this hand is `7 * multiplier`. A smaller hand (small multiplier) can only
+ * comfortably reach lower raw-difficulty shapes, so it gets a LOWER ceiling; a
+ * larger hand gets a higher one. Clamped to 1-10.
+ */
+export function recommendedMaxDifficulty(profile) {
+  const COMFORTABLE_DISPLAYED = 7;
+  const m = reachMultiplier(profile);
+  const ceiling = COMFORTABLE_DISPLAYED * m;
+  return Math.min(10, Math.max(1, Math.round(ceiling)));
+}
+
+/**
  * Map a multiplier value to a human-readable ability label.
  */
 export function abilityLabel(profile) {

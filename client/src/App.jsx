@@ -10,6 +10,7 @@ import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
 import LandingPage from './components/LandingPage';
 import GuideAvatar from './components/GuideAvatar';
+import AdvisorWidget from './components/AdvisorWidget';
 import SongImporter from './components/SongImporter';
 import AccountSettings from './components/AccountSettings';
 import ForgotPassword from './components/ForgotPassword';
@@ -61,6 +62,9 @@ function getTabs(tr) {
     { id: 'start',        label: tr.tabStart || 'Start',  icon: '🚀' },
     { id: 'hand',         label: tr.tabHand,         icon: '✋' },
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
+    { id: 'play',         label: tr.tabPlay || 'Play',        icon: '🎸', side: true },
+    { id: 'scale',        label: tr.tabScale || 'Scales',     icon: '🎵', side: true },
+    { id: 'chordfinder',  label: tr.tabChordFinder || 'Chord Finder', icon: '🔎', side: true },
     { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️', side: true },
     { id: 'listen',       label: tr.tabListen,       icon: '🎙️' },
     { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼' },
@@ -74,7 +78,10 @@ function getTabs(tr) {
 const TAB_HELP = {
   start:        'The Start tab is your home base. It welcomes you and points you to measure your hand first.',
   hand:         'The My Hand tab is where you measure your finger reach. Everything in the app uses these measurements to score how hard each chord is for you.',
-  strings:      'The Strings tab shows the six guitar strings so you can hear and learn each open note.',
+  strings:      'The Composer tab is a step editor: lay out your song beat by beat, hear it back, and read it as sheet music in any key.',
+  play:         'The Play tab is a live fretboard. Tap frets to sound notes and strum any shape you build.',
+  scale:        'The Scale tab shows any scale across the fretboard so you can see and hear its notes in every position.',
+  chordfinder:  'The Chord Finder lets you search a chord and see its playable voicings on the fretboard, each rated for your hand.',
   tuner:        'The Tuner listens through your microphone and tells you whether each string is in tune.',
   listen:       'The Listen tab detects the chord you play and tells you what it is in real time.',
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
@@ -587,7 +594,10 @@ export default function App() {
           <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
             {activeTab === 'start'        && <StartHere lang={lang} onGoToHand={() => setActiveTab('hand')} />}
             {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} onSaveAIFingers={handleSaveAIFingers} saveError={saveError} lang={lang} />}
-            {activeTab === 'strings'      && <GuitarStrings lang={lang} />}
+            {activeTab === 'strings'      && <GuitarStrings lang={lang} mode="editor" />}
+            {activeTab === 'play'         && <GuitarStrings lang={lang} mode="play" />}
+            {activeTab === 'scale'        && <GuitarStrings lang={lang} mode="scale" />}
+            {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} />}
             {activeTab === 'audiotab'     && <TabTranscriber />}
@@ -600,6 +610,9 @@ export default function App() {
         {/* Draggable guide: drag onto (or click then click) any component to
             hear what it does. Voice via the browser's speech synthesis. */}
         <GuideAvatar userName={currentUser?.name} />
+
+        {/* Floating AI advisor — music-theory + guitar + this-app consultant */}
+        <AdvisorWidget activeTab={activeTab} />
       </div>
     </HandProfileContext.Provider>
     </AIFingerContext.Provider>
