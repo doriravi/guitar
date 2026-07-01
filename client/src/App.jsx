@@ -16,6 +16,7 @@ import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import { DEFAULT_PROFILE } from './lib/handProfile';
 import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
+import { syncSongsOnLogin } from './lib/customSongs';
 import { unlockAudio } from './lib/audio';
 import { useT, LANGUAGES } from './lib/i18n';
 
@@ -31,6 +32,11 @@ export function useAIFingers() { return useContext(AIFingerContext); }
 
 export const LangContext = createContext('en');
 export function useLang() { return useContext(LangContext); }
+
+// The signed-in user (or null when logged out). Lets deep components (e.g. the
+// Song Editor's Save button) decide whether to persist to the DB.
+export const AuthContext = createContext(null);
+export function useAuth() { return useContext(AuthContext); }
 
 function loadLocalProfile() {
   try {
@@ -146,6 +152,7 @@ export default function App() {
       .then(user => {
         setCurrentUser(user);
         adoptUserLanguage(user);
+        syncSongsOnLogin().catch(() => {}); // best-effort merge of saved songs
         return syncProfileOnLogin();
       })
       .then(hasProfile => {
@@ -219,6 +226,7 @@ export default function App() {
     setCurrentUser(user);
     adoptUserLanguage(user);
     setShowAuth(false);
+    if (!opts.isNew) syncSongsOnLogin().catch(() => {}); // merge saved songs (not for fresh accounts)
     // After a successful login/registration, force users who have never saved a
     // real hand profile through the mandatory measurement step before the rest
     // of the app becomes available. A new registration always onboards.
@@ -428,6 +436,7 @@ export default function App() {
   }
 
   return (
+    <AuthContext.Provider value={currentUser}>
     <LangContext.Provider value={lang}>
     <AIFingerContext.Provider value={aiFingers}>
     <HandProfileContext.Provider value={handProfile}>
@@ -595,5 +604,6 @@ export default function App() {
     </HandProfileContext.Provider>
     </AIFingerContext.Provider>
     </LangContext.Provider>
+    </AuthContext.Provider>
   );
 }

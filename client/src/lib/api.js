@@ -91,6 +91,22 @@ export const handProfile = {
     }),
 };
 
+// Per-user saved songs (edited in the Song Editor, persisted to the DB).
+// Each row stores the full song object JSON in `body`, keyed by the localStorage
+// `clientId` so a re-save updates the same row. Save is an upsert (PUT).
+export const songs = {
+  list: () => apiFetch('/api/users/me/songs'),
+
+  save: ({ clientId, title, artist, body }) =>
+    apiFetch('/api/users/me/songs', {
+      method: 'PUT',
+      body: JSON.stringify({ clientId, title, artist, body }),
+    }),
+
+  remove: (id) =>
+    apiFetch(`/api/users/me/songs/${id}`, { method: 'DELETE' }),
+};
+
 export const user = {
   update: (data) =>
     apiFetch('/api/users/me', { method: 'PUT', body: JSON.stringify(data) }),
@@ -135,6 +151,19 @@ export const explain = {
   get: (ctx) =>
     apiFetch('/api/explain', { method: 'POST', body: JSON.stringify(ctx) })
       .then(r => (r && r.explanation) ? r.explanation : null)
+      .catch(() => null),
+};
+
+// AI composition hints for the Song Editor's melody/style transforms. Mirrors
+// `explain`: any failure (no GEMINI_API_KEY → 503, network error, malformed
+// JSON) resolves to null so the caller silently falls back to the local engine.
+// The backend /api/compose endpoint is NOT built yet (see editorTransforms.js
+// TODO) — until it exists this always resolves null, which is the correct
+// "local only" behaviour.
+export const compose = {
+  get: (ctx) =>
+    apiFetch('/api/compose', { method: 'POST', body: JSON.stringify(ctx) })
+      .then(r => r || null)
       .catch(() => null),
 };
 
