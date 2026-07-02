@@ -4,8 +4,8 @@ import { useT, LANGUAGES } from '../lib/i18n';
 
 function Section({ title, children }) {
   return (
-    <div className="rounded-xl p-5 mb-4" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
-      <h3 className="text-sm font-semibold mb-4" style={{ color: '#c9a96e' }}>{title}</h3>
+    <div className="rounded-xl p-5 mb-4 bg-surface-750 border border-surface-650">
+      <h3 className="text-sm font-semibold mb-4 text-brand">{title}</h3>
       {children}
     </div>
   );
@@ -14,14 +14,14 @@ function Section({ title, children }) {
 function Field({ label, children }) {
   return (
     <div className="mb-3">
-      <label className="block text-xs mb-1" style={{ color: '#888' }}>{label}</label>
+      <label className="block text-xs mb-1 text-ink-muted">{label}</label>
       {children}
     </div>
   );
 }
 
 const inputStyle = {
-  background: '#111', border: '1px solid #333', color: '#f0ede8',
+  background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)',
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
 
@@ -90,11 +90,11 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
     }
   }
 
-  const msgColor = profileMsg?.type === 'error' ? '#f87171' : profileMsg?.type === 'success' ? '#4ade80' : '#888';
+  const msgColor = profileMsg?.type === 'error' ? 'var(--color-danger)' : profileMsg?.type === 'success' ? 'var(--color-success)' : 'var(--color-ink-muted)';
 
   return (
     <div className="p-3 sm:p-6 max-w-lg mx-auto">
-      <h2 className="text-xl font-bold mb-6" style={{ color: '#f0ede8' }}>{tr.accountSettings}</h2>
+      <h2 className="text-xl font-bold mb-6 text-ink">{tr.accountSettings}</h2>
 
       {!currentUser.emailVerified && (
         <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-5 text-xs"
@@ -114,8 +114,8 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
           <Field label={tr.email}>
             <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder={tr.email} />
           </Field>
-          <div className="mt-4 pt-4" style={{ borderTop: '1px solid #222' }}>
-            <p className="text-xs mb-3" style={{ color: '#555' }}>{tr.leaveBlankPassword}</p>
+          <div className="mt-4 pt-4 border-t border-surface-650">
+            <p className="text-xs mb-3 text-ink-faint">{tr.leaveBlankPassword}</p>
             <Field label={tr.currentPassword}>
               <input style={inputStyle} type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={tr.requiredToChange} />
             </Field>
@@ -129,8 +129,8 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
           {profileMsg && <p className="text-xs mt-2" style={{ color: msgColor }}>{profileMsg.text}</p>}
           <div className="flex justify-end mt-4">
             <button type="submit" disabled={profileLoading}
-              className="px-5 py-2 rounded-xl text-sm font-semibold"
-              style={{ background: '#c9a96e', color: '#0f0f0f', opacity: profileLoading ? 0.6 : 1 }}>
+              className="px-5 py-2 rounded-xl text-sm font-semibold bg-brand text-surface-base"
+              style={{ opacity: profileLoading ? 0.6 : 1 }}>
               {profileLoading ? tr.saving : tr.saveChanges}
             </button>
           </div>
@@ -154,21 +154,21 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
       )}
 
       <Section title={tr.dangerZone}>
-        <p className="text-xs mb-3" style={{ color: '#666' }}>{tr.deleteAccountWarning}</p>
+        <p className="text-xs mb-3 text-ink-subtle">{tr.deleteAccountWarning}</p>
         <input
-          style={{ ...inputStyle, borderColor: deleteConfirm === currentUser.email ? '#f87171' : '#333' }}
+          style={{ ...inputStyle, borderColor: deleteConfirm === currentUser.email ? 'var(--color-danger)' : 'var(--color-surface-600)' }}
           value={deleteConfirm}
           onChange={e => setDeleteConfirm(e.target.value)}
           placeholder={currentUser.email}
         />
-        {deleteError && <p className="text-xs mt-2" style={{ color: '#f87171' }}>{deleteError}</p>}
+        {deleteError && <p className="text-xs mt-2 text-danger">{deleteError}</p>}
         <div className="flex justify-end mt-3">
           <button
             onClick={handleDelete}
             disabled={deleteConfirm !== currentUser.email || deleteLoading}
             className="px-5 py-2 rounded-xl text-sm font-semibold transition-opacity"
             style={{
-              background: 'rgba(248,113,113,0.1)', color: '#f87171',
+              background: 'rgba(248,113,113,0.1)', color: 'var(--color-danger)',
               border: '1px solid rgba(248,113,113,0.3)',
               opacity: deleteConfirm !== currentUser.email || deleteLoading ? 0.4 : 1,
               cursor: deleteConfirm !== currentUser.email ? 'not-allowed' : 'pointer',
