@@ -6,6 +6,15 @@ const MCP = { index: 5, pinky: 17 };
 // Fallback palm width (cm) used only when metric world landmarks are unavailable.
 const PALM_REF_CM = 8.5;
 
+// MediaPipe's world landmarks are relative to an internal average-hand model and
+// systematically UNDER-report absolute size — especially with the palm held flat
+// toward the camera, where foreshortening collapses the fingertip-to-fingertip
+// distances. Empirically this reads a real average hand ~30% too small, which
+// pushed average hands into "Very small". This factor rescales the world-landmark
+// measurements back toward true centimeters. (The card-calibration path has a
+// real reference and is unaffected.) Tune if a device reads consistently off.
+const WORLD_SCALE_CORRECTION = 1.4;
+
 const GAP_KEYS = ['thumbToIndex', 'indexToMiddle', 'middleToRing', 'ringToLittle'];
 
 // ISO/IEC 7810 ID-1 card (credit/debit/ID) — universal real-world ruler.
@@ -43,11 +52,12 @@ function dist3D(a, b) {
  */
 function landmarksToMeasurements(lm, world) {
   if (world && world.length >= 21) {
+    const k = 100 * WORLD_SCALE_CORRECTION; // meters→cm, plus under-report correction
     return {
-      thumbToIndex:  dist3D(world[TIP.thumb],  world[TIP.index])  * 100,
-      indexToMiddle: dist3D(world[TIP.index],  world[TIP.middle]) * 100,
-      middleToRing:  dist3D(world[TIP.middle], world[TIP.ring])   * 100,
-      ringToLittle:  dist3D(world[TIP.ring],   world[TIP.pinky])  * 100,
+      thumbToIndex:  dist3D(world[TIP.thumb],  world[TIP.index])  * k,
+      indexToMiddle: dist3D(world[TIP.index],  world[TIP.middle]) * k,
+      middleToRing:  dist3D(world[TIP.middle], world[TIP.ring])   * k,
+      ringToLittle:  dist3D(world[TIP.ring],   world[TIP.pinky])  * k,
     };
   }
   // Fallback: 2D image landmarks scaled by assumed palm width.
@@ -116,6 +126,186 @@ function clampMeasurements(m) {
   return out;
 }
 
+// Derive on-screen pixels-per-centimeter from the metric world landmarks.
+// World landmarks are real 3D in meters; the same two points in normalized image
+// space × canvas width give the pixel distance. We use the index-MCP↔pinky-MCP
+// span (the palm width) as the reference — it's stable and roughly frontal.
+function pxPerCmFromWorld(lm, world, W, H) {
+  if (!world || world.length < 21) return null;
+  // Apply the same under-report correction as the measurements so the on-screen
+  // ruler and average-hand overlay stay true-to-life.
+  const worldCm = dist3D(world[MCP.index], world[MCP.pinky]) * 100 * WORLD_SCALE_CORRECTION;
+  if (worldCm < 1e-3) return null;
+  const px = Math.sqrt(
+    ((lm[MCP.index].x - lm[MCP.pinky].x) * W) ** 2 +
+    ((lm[MCP.index].y - lm[MCP.pinky].y) * H) ** 2
+  );
+  if (px < 1e-3) return null;
+  return px / worldCm; // pixels per cm
+}
+
+// Draw a centimeter ruler along the bottom of the frame. The video/canvas are
+// mirrored via CSS scaleX(-1); we mirror the tick labels back so numbers read
+// correctly to the user. `pxPerCm` comes from the live hand scale.
+function drawRuler(ctx, W, H, pxPerCm) {
+  if (!pxPerCm || pxPerCm <= 0) return;
+  const marginX = 16;
+  const baseY = H - 22;              // ruler baseline
+  const usableW = W - marginX * 2;
+  const maxCm = Math.floor(usableW / pxPerCm);
+  if (maxCm < 1) return;             // hand too far / scale too small to be useful
+
+  ctx.save();
+  // Track background
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(marginX - 6, baseY - 20, Math.min(usableW, maxCm * pxPerCm) + 12, 34);
+
+  ctx.strokeStyle = '#c9a96e';
+  ctx.fillStyle = '#f0ede8';
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 1;
+
+  // Baseline
+  ctx.beginPath();
+  ctx.moveTo(marginX, baseY);
+  ctx.lineTo(marginX + maxCm * pxPerCm, baseY);
+  ctx.stroke();
+
+  const halfCmPx = pxPerCm / 2;
+  for (let cm = 0; cm <= maxCm; cm++) {
+    const x = marginX + cm * pxPerCm;
+    // Major (cm) tick
+    ctx.beginPath();
+    ctx.moveTo(x, baseY);
+    ctx.lineTo(x, baseY - 12);
+    ctx.stroke();
+    // Half-cm (5mm) tick
+    if (cm < maxCm) {
+      ctx.beginPath();
+      ctx.moveTo(x + halfCmPx, baseY);
+      ctx.lineTo(x + halfCmPx, baseY - 6);
+      ctx.stroke();
+    }
+    // Label every 2 cm to avoid crowding; un-mirror so digits read normally.
+    if (cm % 2 === 0) {
+      ctx.save();
+      ctx.translate(x, baseY - 14);
+      ctx.scale(-1, 1); // cancel the CSS mirror
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(cm), 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// Population-average finger gaps (cm), matching DEFAULT_PROFILE. Drawn as a
+// ghost reference hand so the user can compare their reach against "average".
+const AVG_GAPS = {
+  thumbToIndex: 13.5,
+  indexToMiddle: 7.5,
+  middleToRing: 6.0,
+  ringToLittle: 9.5,
+};
+// Rough average finger lengths (cm) from the knuckle line, for a recognizable
+// stylized outline. These are display-only; the gaps above drive the reach span.
+const AVG_FINGER_LEN_CM = { thumb: 6.0, index: 7.5, middle: 8.2, ring: 7.6, pinky: 6.0 };
+
+// Draw a translucent, true-to-scale "average hand" reference: a stylized skeleton
+// whose fingertip spacing equals the population-average gaps, with those gap
+// distances labeled in cm. `pxPerCm` gives real-world scale from the live hand.
+function drawAverageHand(ctx, W, H, pxPerCm, caption) {
+  if (!pxPerCm || pxPerCm <= 0) return;
+
+  // Lay out five fingertips along an arc so adjacent tips are spaced by the
+  // average gaps. We place them left-to-right: thumb, index, middle, ring, pinky.
+  const gapsPx = [
+    AVG_GAPS.thumbToIndex * pxPerCm,
+    AVG_GAPS.indexToMiddle * pxPerCm,
+    AVG_GAPS.middleToRing * pxPerCm,
+    AVG_GAPS.ringToLittle * pxPerCm,
+  ];
+  const totalSpan = gapsPx.reduce((a, b) => a + b, 0);
+
+  // Center the whole shape horizontally; anchor knuckles a bit below middle.
+  const startX = (W - totalSpan) / 2;
+  const knuckleY = H * 0.62;
+
+  // Fingertip x positions (cumulative), and per-finger tip y (length upward).
+  const names = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  const tipX = [startX];
+  for (const g of gapsPx) tipX.push(tipX[tipX.length - 1] + g);
+  const knuckleXs = tipX; // knuckle roughly under each tip for a splayed hand
+  const tips = names.map((n, i) => ({
+    name: n,
+    kx: knuckleXs[i],
+    ky: knuckleY,
+    tx: tipX[i],
+    ty: knuckleY - AVG_FINGER_LEN_CM[n] * pxPerCm,
+  }));
+
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  ctx.strokeStyle = '#6b7280';       // muted slate — clearly a "reference"
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+
+  // Palm baseline connecting knuckles + a wrist.
+  ctx.beginPath();
+  ctx.moveTo(tips[0].kx, tips[0].ky);
+  for (let i = 1; i < tips.length; i++) ctx.lineTo(tips[i].kx, tips[i].ky);
+  ctx.stroke();
+
+  // Fingers (knuckle → tip).
+  for (const t of tips) {
+    ctx.beginPath();
+    ctx.moveTo(t.kx, t.ky);
+    ctx.lineTo(t.tx, t.ty);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Fingertip dots.
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = '#9ca3af';
+  for (const t of tips) {
+    ctx.beginPath();
+    ctx.arc(t.tx, t.ty, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Gap labels (in cm) drawn between adjacent fingertips, un-mirrored.
+  const gapCm = [AVG_GAPS.thumbToIndex, AVG_GAPS.indexToMiddle, AVG_GAPS.middleToRing, AVG_GAPS.ringToLittle];
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = '#e5e7eb';
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  for (let i = 0; i < gapCm.length; i++) {
+    const a = tips[i], b = tips[i + 1];
+    const mx = (a.tx + b.tx) / 2;
+    const my = (a.ty + b.ty) / 2 - 8;
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.scale(-1, 1); // cancel the CSS mirror so text reads normally
+    ctx.fillText(`${gapCm[i]} cm`, 0, 0);
+    ctx.restore();
+  }
+
+  // "Average hand" caption near the wrist, un-mirrored.
+  const capX = (tips[0].kx + tips[4].kx) / 2;
+  ctx.save();
+  ctx.translate(capX, knuckleY + 16);
+  ctx.scale(-1, 1);
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = 'italic 10px system-ui, sans-serif';
+  ctx.fillText(caption || 'average hand', 0, 0);
+  ctx.restore();
+
+  ctx.restore();
+}
+
 function drawHand(ctx, lm, W, H) {
   const CONNECTIONS = [
     [0,1],[1,2],[2,3],[3,4],
@@ -144,6 +334,71 @@ function drawHand(ctx, lm, W, H) {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
+}
+
+// Target frame the hand must sit inside before a measurement is approved. Given
+// as a normalized rect (0..1) of the video. Sized so a correctly-distanced,
+// splayed hand fills most of it — too far (small) or clipped (out of bounds)
+// fails the check, which keeps reach + flexibility readings consistent.
+const FRAME = { x: 0.18, y: 0.10, w: 0.64, h: 0.80 };
+// Fraction of the frame the hand's bounding box should occupy to count as
+// "well-sized" (not too far away). Height is the more reliable axis for a
+// vertical splayed hand.
+const FRAME_MIN_FILL = 0.55;
+
+// Check the hand landmarks against the target frame. Returns { ok, reason }.
+// reason ∈ 'ok' | 'outside' | 'toosmall' so the UI can give specific guidance.
+function checkHandInFrame(lm) {
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  for (const p of lm) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  // Any landmark outside the frame → not contained.
+  const inside = minX >= FRAME.x && maxX <= FRAME.x + FRAME.w &&
+                 minY >= FRAME.y && maxY <= FRAME.y + FRAME.h;
+  if (!inside) return { ok: false, reason: 'outside' };
+  // Big enough? Compare the hand's height to the frame's height.
+  const fill = (maxY - minY) / FRAME.h;
+  if (fill < FRAME_MIN_FILL) return { ok: false, reason: 'toosmall' };
+  return { ok: true, reason: 'ok' };
+}
+
+// Draw the target frame. Colored green when the hand fits, amber otherwise, with
+// corner brackets for a clear "align here" affordance.
+function drawFrame(ctx, W, H, ok) {
+  const x = FRAME.x * W, y = FRAME.y * H, w = FRAME.w * W, h = FRAME.h * H;
+  const color = ok ? '#4ade80' : '#c9a96e';
+  ctx.save();
+  // Dim outside the frame to draw the eye in.
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.rect(x, y, w, h);
+  ctx.fill('evenodd');
+
+  ctx.globalAlpha = ok ? 0.95 : 0.7;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 6]);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+
+  // Corner brackets.
+  const c = Math.min(w, h) * 0.12;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  // TL
+  ctx.moveTo(x, y + c); ctx.lineTo(x, y); ctx.lineTo(x + c, y);
+  // TR
+  ctx.moveTo(x + w - c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + c);
+  // BL
+  ctx.moveTo(x, y + h - c); ctx.lineTo(x, y + h); ctx.lineTo(x + c, y + h);
+  // BR
+  ctx.moveTo(x + w - c, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - c);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Load MediaPipe from CDN as a classic script (avoids ESM bundling issues)
@@ -184,6 +439,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const [countdown, setCountdown] = useState(null);
   const [captured, setCaptured]   = useState(null);
   const [handVisible, setHandVisible] = useState(false);
+  const [frameFit, setFrameFit] = useState({ ok: false, reason: 'nohand' }); // hand-in-frame gate
+  const frameFitRef = useRef(false);                                          // latest ok, for handlers
+  const [rulerActive, setRulerActive] = useState(false); // true when cm ruler is scaled & drawn
   const [livePeaks, setLivePeaks] = useState(null); // { gapKey: cm } running p90 for live bars
   const pendingStreamRef = useRef(null); // stream waiting for video element to mount
 
@@ -233,7 +491,23 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           latestLm.current = lm;
           latestWorld.current = world;
           setHandVisible(true);
+
+          // Position gate: is the hand inside the target frame and well-sized?
+          const fit = checkHandInFrame(lm);
+          frameFitRef.current = fit.ok;
+          setFrameFit(fit);
+          drawFrame(ctx, W, H, fit.ok);
+
           drawHand(ctx, lm, W, H);
+
+          // Live cm ruler + average-hand reference, both scaled from the detected
+          // hand's metric world landmarks (real-world cm).
+          const pxPerCm = pxPerCmFromWorld(lm, world, W, H);
+          if (pxPerCm) {
+            drawAverageHand(ctx, W, H, pxPerCm, tr.averageHand || 'average hand');
+            drawRuler(ctx, W, H, pxPerCm);
+          }
+          setRulerActive(!!pxPerCm);
 
           // While recording, accumulate per-frame gaps for the peak-stretch measure.
           if (recordingRef.current) {
@@ -258,6 +532,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           latestLm.current = null;
           latestWorld.current = null;
           setHandVisible(false);
+          setRulerActive(false);
+          frameFitRef.current = false;
+          setFrameFit({ ok: false, reason: 'nohand' });
+          // Still draw the empty target frame so the user knows where to aim.
+          drawFrame(ctx, W, H, false);
         }
       });
       handsRef.current = hands;
@@ -381,7 +660,8 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   }, [finalize]);
 
   const startCountdown = useCallback(() => {
-    if (!handVisible) return;
+    // Require the hand to be inside the target frame before approving a measure.
+    if (!handVisible || !frameFitRef.current) return;
     setPhase('measuring');
     let n = 3;
     setCountdown(n);
@@ -422,6 +702,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     setCaptured(null);
     setPhase('idle');
     setHandVisible(false);
+    setRulerActive(false);
+    setFrameFit({ ok: false, reason: 'nohand' });
+    frameFitRef.current = false;
     setLivePeaks(null);
     setFrozenFrame(null);
     setCardCorners([]);
@@ -559,10 +842,28 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
               className="absolute inset-0 w-full h-full"
               style={{ transform: 'scaleX(-1)' }}
             />
-            <div className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-              style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? '#4ade80' : '#f87171' }}>
-              <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? '#4ade80' : '#f87171' }} />
-              {handVisible ? tr.handDetected : tr.noHandDetected}
+            <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? '#4ade80' : '#f87171' }}>
+                <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? '#4ade80' : '#f87171' }} />
+                {handVisible ? tr.handDetected : tr.noHandDetected}
+              </div>
+              {handVisible && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+                  style={{ background: 'rgba(0,0,0,0.75)', color: frameFit.ok ? '#4ade80' : '#c9a96e' }}>
+                  <span>{frameFit.ok ? '✅' : '🎯'}</span>
+                  {frameFit.ok
+                    ? (tr.frameGoodBadge || 'Hand in frame')
+                    : frameFit.reason === 'toosmall'
+                      ? (tr.frameTooFarBadge || 'Move closer')
+                      : (tr.frameOutsideBadge || 'Fit hand in frame')}
+                </div>
+              )}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: 'rgba(0,0,0,0.75)', color: rulerActive ? '#c9a96e' : '#7a7a7a' }}>
+                <span>📏</span>
+                {rulerActive ? (tr.rulerLive || 'cm ruler live') : (tr.rulerHint || 'Show your hand to scale the ruler')}
+              </div>
             </div>
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -602,18 +903,22 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           )}
 
           <div className="p-4 flex items-center justify-between gap-4">
-            <p className="text-xs" style={{ color: '#5a5a5a' }}>
+            <p className="text-xs" style={{ color: (phase === 'ready' && handVisible && !frameFit.ok) ? '#c9a96e' : '#5a5a5a' }}>
               {phase === 'recording'
                 ? (tr.keepStretching || 'Keep stretching — capturing your max…')
-                : cardMode
-                  ? (tr.cardHold || 'Hold a card flat against your hand, both in view, then tap Measure.')
-                  : tr.splayFingers}
+                : (phase === 'ready' && handVisible && !frameFit.ok)
+                  ? (frameFit.reason === 'toosmall'
+                      ? (tr.frameTooFar || 'Move your hand closer — fill the frame.')
+                      : (tr.frameOutside || 'Fit your whole hand inside the frame.'))
+                  : cardMode
+                    ? (tr.cardHold || 'Hold a card flat against your hand, both in view, then tap Measure.')
+                    : (frameFit.ok ? (tr.frameGood || 'Perfect — hold still and tap Measure.') : tr.splayFingers)}
             </p>
             <button
               onClick={startCountdown}
-              disabled={!handVisible || phase === 'measuring' || phase === 'recording'}
+              disabled={!handVisible || !frameFit.ok || phase === 'measuring' || phase === 'recording'}
               className="px-5 py-2 rounded-xl text-sm font-semibold shrink-0 transition-all"
-              style={handVisible && phase === 'ready'
+              style={handVisible && frameFit.ok && phase === 'ready'
                 ? { background: '#c9a96e', color: '#0f0f0f' }
                 : { background: '#1e1e1e', color: '#3a3a3a', cursor: 'not-allowed' }}
             >

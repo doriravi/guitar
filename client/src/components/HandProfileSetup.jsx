@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { DEFAULT_PROFILE, abilityLabel, reachMultiplier } from '../lib/handProfile';
+import { DEFAULT_PROFILE, abilityLabel, reachMultiplier, flexibilityScore, flexibilityLabel } from '../lib/handProfile';
 import CameraHandMeasure from './CameraHandMeasure';
 import { useT } from '../lib/i18n';
 
@@ -42,37 +42,37 @@ function GapSlider({ gap, value, onChange, tr }) {
   const impact = getImpact(gap.key, value);
 
   return (
-    <div className="rounded-xl p-4" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+    <div className="rounded-xl p-4 bg-surface-750 border border-surface-650">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             {gap.fingers.map((f, i) => (
               <span key={f} className="flex items-center">
                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold text-black" style={{ background: gap.color }}>{f}</span>
-                {i === 0 && <span className="text-xs mx-1" style={{ color: '#3a3a3a' }}>↔</span>}
+                {i === 0 && <span className="text-xs mx-1 text-ink-ghost">↔</span>}
               </span>
             ))}
           </div>
-          <span className="text-sm font-semibold" style={{ color: '#d0cdc8' }}>{tr[gap.labelKey]}</span>
+          <span className="text-sm font-semibold text-ink">{tr[gap.labelKey]}</span>
         </div>
         <span className="text-base font-bold tabular-nums" style={{ color: gap.color }}>{value.toFixed(1)} cm</span>
       </div>
 
-      <p className="text-xs mb-3" style={{ color: '#4a4a4a' }}>{tr[gap.descKey]}</p>
+      <p className="text-xs mb-3 text-ink-ghost">{tr[gap.descKey]}</p>
 
       <div className="mb-3">
         <input
           type="range" min={min} max={max} step={gap.step} value={value}
           onChange={e => onChange(gap.key, parseFloat(e.target.value))}
           className="w-full"
-          style={{ background: `linear-gradient(to right, ${gap.color} ${pct}%, #2a2a2a ${pct}%)`, color: gap.color }}
+          style={{ background: `linear-gradient(to right, ${gap.color} ${pct}%, var(--color-surface-550) ${pct}%)`, color: gap.color }}
         />
-        <div className="flex justify-between text-xs mt-1" style={{ color: '#333' }}>
+        <div className="flex justify-between text-xs mt-1 text-ink-ghost">
           <span>{min} cm</span><span>{max} cm</span>
         </div>
       </div>
 
-      <div className="flex items-start gap-2 pt-2" style={{ borderTop: '1px solid #222' }}>
+      <div className="flex items-start gap-2 pt-2 border-t border-surface-650">
         <span className="text-sm leading-none mt-0.5">🎸</span>
         <p className="text-xs" style={{ color: impact.color }}>{impact.text}</p>
       </div>
@@ -85,26 +85,26 @@ function GuitarReachLevel({ profile, tr }) {
   const current = getCurrentLevel(m);
 
   return (
-    <div className="rounded-xl p-5" style={{ background: '#1a1a1a', border: `1px solid ${current.color}22` }}>
+    <div className="rounded-xl p-5 bg-surface-750" style={{ border: `1px solid ${current.color}22` }}>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-xs uppercase tracking-widest font-semibold mb-1" style={{ color: '#5a5a5a' }}>Guitar Reach Level</p>
+          <p className="text-xs uppercase tracking-widest font-semibold mb-1 text-ink-faint">Guitar Reach Level</p>
           <p className="text-2xl font-bold" style={{ color: current.color }}>{tr[current.titleKey]}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex gap-1">
             {[1,2,3,4,5].map(l => (
-              <div key={l} className="w-5 h-2 rounded-sm transition-all" style={{ background: l <= current.level ? current.color : '#222' }} />
+              <div key={l} className="w-5 h-2 rounded-sm transition-all" style={{ background: l <= current.level ? current.color : 'var(--color-surface-650)' }} />
             ))}
           </div>
           <p className="text-xs font-semibold" style={{ color: current.color }}>Level {current.level} / 5</p>
         </div>
       </div>
 
-      <p className="text-sm mb-4" style={{ color: '#7a7a7a' }}>{current.summary}</p>
+      <p className="text-sm mb-4 text-ink-subtle">{current.summary}</p>
 
       <div className="mb-5">
-        <p className="text-xs uppercase tracking-wide font-semibold mb-2" style={{ color: '#3a3a3a' }}>{tr.withinYourReach}</p>
+        <p className="text-xs uppercase tracking-wide font-semibold mb-2 text-ink-ghost">{tr.withinYourReach}</p>
         <div className="flex flex-wrap gap-2">
           {current.chords.map(c => (
             <span key={c} className="text-xs font-medium px-3 py-1 rounded-full" style={{ background: `${current.color}15`, color: current.color, border: `1px solid ${current.color}30` }}>{c}</span>
@@ -112,18 +112,18 @@ function GuitarReachLevel({ profile, tr }) {
         </div>
       </div>
 
-      <div className="space-y-1" style={{ borderTop: '1px solid #1e1e1e', paddingTop: '1rem' }}>
-        <p className="text-xs uppercase tracking-wide font-semibold mb-2" style={{ color: '#3a3a3a' }}>{tr.allLevels}</p>
+      <div className="space-y-1 border-t border-surface-700" style={{ paddingTop: '1rem' }}>
+        <p className="text-xs uppercase tracking-wide font-semibold mb-2 text-ink-ghost">{tr.allLevels}</p>
         {GUITAR_LEVELS.slice().reverse().map(l => {
           const isActive = l.level === current.level;
           return (
             <div key={l.level} className="flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style={{
               background: isActive ? `${l.color}10` : 'transparent',
-              borderLeft: `2px solid ${isActive ? l.color : '#1e1e1e'}`,
+              borderLeft: `2px solid ${isActive ? l.color : 'var(--color-surface-700)'}`,
               opacity: isActive ? 1 : 0.4,
             }}>
               <span className="text-xs font-bold w-4" style={{ color: l.color }}>{l.level}</span>
-              <span className="text-xs font-medium" style={{ color: isActive ? l.color : '#5a5a5a' }}>{tr[l.titleKey]}</span>
+              <span className="text-xs font-medium" style={{ color: isActive ? l.color : 'var(--color-ink-faint)' }}>{tr[l.titleKey]}</span>
               {isActive && <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: `${l.color}20`, color: l.color }}>{tr.you}</span>}
             </div>
           );
@@ -539,30 +539,35 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
   const m = reachMultiplier(local);
   const levelColor = m >= 0.95 ? '#4ade80' : m >= 0.87 ? '#38bdf8' : m >= 0.78 ? '#c9a96e' : m >= 0.68 ? '#fb923c' : '#f87171';
 
+  // Flexibility — how well fingers splay relative to their span (size-independent).
+  const flex = flexibilityScore(local);
+  const flexInfo = flexibilityLabel(local);
+  const flexColor = flex >= 7.5 ? '#4ade80' : flex >= 5.5 ? '#38bdf8' : flex >= 3.5 ? '#c9a96e' : '#f87171';
+
   return (
     <div className="p-3 sm:p-6 max-w-2xl mx-auto">
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
-          <h2 className="text-xl font-bold mb-1" style={{ color: '#f0ede8' }}>{tr.handProfile}</h2>
-          <p className="text-sm" style={{ color: '#5a5a5a' }}>{tr.handProfileDesc}</p>
+          <h2 className="text-xl font-bold mb-1 text-ink">{tr.handProfile}</h2>
+          <p className="text-sm text-ink-faint">{tr.handProfileDesc}</p>
         </div>
         <div className="flex flex-col gap-2 shrink-0">
           <button
             onClick={() => { setShowCamera(v => !v); setShowAICamera(false); }}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${showCamera ? 'text-brand' : 'bg-surface-750 text-ink-subtle border-surface-650'}`}
             style={showCamera
-              ? { background: 'rgba(201,169,110,0.12)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }
-              : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
+              ? { background: 'rgba(201,169,110,0.12)', borderColor: 'rgba(201,169,110,0.25)' }
+              : undefined}
           >
             <span>📷</span>
             <span>{showCamera ? tr.hideCamera : tr.measureWithCamera}</span>
           </button>
           <button
             onClick={() => { setShowAICamera(v => !v); setShowCamera(false); }}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${showAICamera ? '' : 'bg-surface-750 text-ink-subtle border-surface-650'}`}
             style={showAICamera
-              ? { background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }
-              : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}
+              ? { background: 'rgba(99,102,241,0.15)', color: '#818cf8', borderColor: 'rgba(99,102,241,0.3)' }
+              : undefined}
           >
             <span>🤖</span>
             <span>{showAICamera ? 'Hide AI Analysis' : 'AI Hand Analysis'}</span>
@@ -590,25 +595,41 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
       )}
 
       {/* Summary card */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center mb-6 p-4 rounded-xl" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="flex flex-col sm:flex-row gap-4 items-center mb-6 p-4 rounded-xl bg-surface-750 border border-surface-650">
         <HandDiagram profile={local} />
         <div className="flex-1 text-center sm:text-left">
-          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: '#3a3a3a' }}>{tr.reachAssessment}</p>
+          <p className="text-xs uppercase tracking-widest mb-1 text-ink-ghost">{tr.reachAssessment}</p>
           <p className="text-2xl font-bold mb-1" style={{ color: levelColor }}>{ability.label}</p>
-          <p className="text-sm mb-4" style={{ color: '#5a5a5a' }}>{ability.desc}</p>
-          <div className="w-full max-w-xs rounded-full h-1.5" style={{ background: '#222' }}>
+          <p className="text-sm mb-4 text-ink-faint">{ability.desc}</p>
+          <div className="w-full max-w-xs rounded-full h-1.5 bg-surface-650">
             <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${Math.round(m * 100)}%`, background: levelColor }} />
+          </div>
+
+          {/* Flexibility — finger spread relative to span (independent of hand size) */}
+          <div className="mt-4 pt-4 border-t border-surface-650">
+            <p className="text-xs uppercase tracking-widest mb-1 text-ink-ghost">
+              {tr.flexibilityAssessment || 'Finger flexibility'}
+            </p>
+            <div className="flex items-baseline gap-2 mb-1 justify-center sm:justify-start">
+              <p className="text-lg font-bold" style={{ color: flexColor }}>{flexInfo.label}</p>
+              <span className="text-xs tabular-nums text-ink-faint">{flex.toFixed(1)}/10</span>
+            </div>
+            <p className="text-xs mb-2 text-ink-faint">{flexInfo.desc}</p>
+            <div className="w-full max-w-xs rounded-full h-1.5 bg-surface-650">
+              <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${Math.round((flex / 10) * 100)}%`, background: flexColor }} />
+            </div>
           </div>
         </div>
       </div>
 
       {/* Reference image */}
-      <div className="mb-5 rounded-xl overflow-hidden" style={{ border: '1px solid #1e1e1e' }}>
+      <div className="mb-5 rounded-xl overflow-hidden border border-surface-700">
         <img src="/Gemini_Generated_Image_3zi053zi053zi053.png" alt="Hand span diagram" className="w-full object-cover" />
       </div>
 
       {/* How to measure */}
-      <div className="flex gap-3 rounded-xl px-4 py-3 mb-5 text-xs" style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.12)', color: '#c9a96e' }}>
+      <div className="flex gap-3 rounded-xl px-4 py-3 mb-5 text-xs text-brand"
+        style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.12)' }}>
         <span className="text-base leading-none mt-0.5 shrink-0">📏</span>
         <span><strong>{tr.howToMeasure}</strong> {tr.howToMeasureDesc}</span>
       </div>
@@ -626,12 +647,12 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
       {/* Save */}
       <div className="mt-6 flex flex-col items-end gap-2">
         {saveError && (
-          <p className="text-xs" style={{ color: '#f87171' }}>{tr.failedToSave}</p>
+          <p className="text-xs text-danger">{tr.failedToSave}</p>
         )}
         <button
           onClick={handleSave}
-          className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
-          style={saved ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' } : { background: '#c9a96e', color: '#0f0f0f' }}
+          className={`px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${saved ? 'text-success' : 'bg-brand text-surface-base'}`}
+          style={saved ? { background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.2)' } : undefined}
         >
           {saved ? tr.saved : tr.saveProfile}
         </button>

@@ -72,10 +72,10 @@ export default function StartHere({ lang, onGoToHand }) {
     <div className="p-4 sm:p-6">
       {/* Welcome */}
       <div className="mb-5">
-        <h2 className="text-lg sm:text-xl font-bold mb-1" style={{ color: '#f0ede8' }}>
+        <h2 className="text-lg sm:text-xl font-bold mb-1 text-ink">
           {tr.startHereTitle || 'Start here 👋'}
         </h2>
-        <p className="text-sm leading-relaxed" style={{ color: '#7a7a7a' }}>
+        <p className="text-sm leading-relaxed text-ink-subtle">
           {tr.startHereIntro ||
             "These are the easiest chords for your hand — perfect first ones to learn. Tap ▶ to hear how each sounds, and follow the picture to place your fingers."}
         </p>
@@ -83,8 +83,8 @@ export default function StartHere({ lang, onGoToHand }) {
 
       {/* TEMP audio diagnostics — remove once iOS sound is confirmed working */}
       {audioDbg && (
-        <div className="mb-4 rounded-lg px-3 py-2 font-mono text-xs"
-          style={{ background: '#1e1e1e', border: '1px solid #c9a96e', color: '#c9a96e' }}>
+        <div className="mb-4 rounded-lg px-3 py-2 font-mono text-xs bg-surface-700 text-brand"
+          style={{ border: '1px solid var(--color-brand)' }}>
           audio: state={audioDbg.state} · last={audioDbg.last} · rate={audioDbg.sampleRate} · t={audioDbg.currentTime}
         </div>
       )}
@@ -93,15 +93,14 @@ export default function StartHere({ lang, onGoToHand }) {
       <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-5"
         style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.15)' }}>
         <div className="text-xs">
-          <span style={{ color: '#7a7a7a' }}>{tr.startHereYourHand || 'Your hand:'} </span>
+          <span className="text-ink-subtle">{tr.startHereYourHand || 'Your hand:'} </span>
           <span className={`font-semibold ${ability.color}`}>{ability.label}</span>
-          <span className="hidden sm:inline" style={{ color: '#5a5a5a' }}> — {ability.desc}</span>
+          <span className="hidden sm:inline text-ink-faint"> — {ability.desc}</span>
         </div>
         {usingDefault && onGoToHand && (
           <button
             onClick={onGoToHand}
-            className="text-xs px-3 py-1.5 rounded-lg font-semibold shrink-0"
-            style={{ background: '#c9a96e', color: '#0f0f0f' }}
+            className="text-xs px-3 py-1.5 rounded-lg font-semibold shrink-0 bg-brand text-surface-base"
           >
             {tr.startHereMeasure || 'Measure my hand'}
           </button>
@@ -109,7 +108,7 @@ export default function StartHere({ lang, onGoToHand }) {
       </div>
 
       {usingDefault && (
-        <p className="text-xs mb-4 italic" style={{ color: '#5a5a5a' }}>
+        <p className="text-xs mb-4 italic text-ink-faint">
           {tr.startHereDefaultNote ||
             'Showing results for an average hand. Measure your hand for a list tuned to you.'}
         </p>
@@ -120,28 +119,24 @@ export default function StartHere({ lang, onGoToHand }) {
         {shortlist.map((chord, i) => {
           const isPlaying = playing === chord.name;
           return (
-            <div key={chord.name} className="rounded-2xl p-4 flex flex-col items-center"
-              style={{ background: '#161616', border: '1px solid #1f1f1f' }}>
+            <div key={chord.name} className="rounded-2xl p-4 flex flex-col items-center bg-surface-800 border border-surface-700">
               <div className="flex items-center justify-between w-full mb-2">
-                <span className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: '#252525', color: '#7a7a7a' }}>{i + 1}</span>
+                <span className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center bg-surface-600 text-ink-subtle">{i + 1}</span>
                 <DifficultyBadge score={chord.personalScore} />
               </div>
 
-              <div className="text-2xl font-bold mb-2" style={{ color: '#c9a96e' }}>{chord.name}</div>
+              <div className="text-2xl font-bold mb-2 text-brand">{chord.name}</div>
 
               <FretboardDiagram chord={chord} showFingers />
 
-              <div className="font-mono text-xs mt-2 mb-3 text-center" style={{ color: '#6a6a6a' }}>
+              <div className="font-mono text-xs mt-2 mb-3 text-center" style={{ color: 'var(--color-ink-faint)' }}>
                 {fingerHint(chord.notes)}
               </div>
 
               <button
                 onClick={() => playChord(chord)}
-                className="w-full text-sm font-semibold py-2 rounded-lg transition-all"
-                style={isPlaying
-                  ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
-                  : { background: '#252525', color: '#c9a96e' }}
+                className={`w-full text-sm font-semibold py-2 rounded-lg transition-all ${isPlaying ? 'text-danger' : 'bg-surface-600 text-brand'}`}
+                style={isPlaying ? { background: 'rgba(239,68,68,0.15)' } : undefined}
               >
                 {isPlaying ? `■ ${tr.startHereStop || 'Stop'}` : `▶ ${tr.startHerePlay || 'Hear it'}`}
               </button>
@@ -150,7 +145,7 @@ export default function StartHere({ lang, onGoToHand }) {
         })}
       </div>
 
-      <p className="text-xs mt-5 text-center" style={{ color: '#3a3a3a' }}>
+      <p className="text-xs mt-5 text-center text-ink-ghost">
         {tr.startHereFooter ||
           'Got these? Explore more on the Chords and Progressions tabs.'}
       </p>
