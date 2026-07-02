@@ -26,11 +26,11 @@ function GapBar({ label, color, rawFraction, userFraction, requiredCm, userCm, r
   return (
     <div className="flex items-center gap-1.5" title={tooltip}>
       <span className="text-[9px] w-6 shrink-0" style={{ color }}>{label}</span>
-      <div className="relative h-1.5 rounded-full overflow-hidden" style={{ width: 44, background: '#2a2a2a' }}>
+      <div className="relative h-1.5 rounded-full overflow-hidden" style={{ width: 44, background: 'var(--color-surface-550)' }}>
         <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${userPct * 100}%`, background: barColor }} />
       </div>
-      <span className="text-[9px] tabular-nums" style={{ color: overUser ? '#ef4444' : '#666' }}>
-        {requiredCm.toFixed(1)}<span style={{ color: '#3a3a3a' }}>/{userCm.toFixed(1)}</span>cm
+      <span className="text-[9px] tabular-nums" style={{ color: overUser ? 'var(--color-danger)' : 'var(--color-ink-subtle)' }}>
+        {requiredCm.toFixed(1)}<span style={{ color: 'var(--color-ink-ghost)' }}>/{userCm.toFixed(1)}</span>cm
       </span>
     </div>
   );
@@ -66,7 +66,7 @@ function EasierVersion({ suggestions, tr, onHover, onLeave }) {
   if (!suggestions || suggestions.length === 0) return null;
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span className="text-[10px]" style={{ color: '#5a5a5a' }}>↳ {tr.easierVersion || 'Easier for your hand:'}</span>
+      <span className="text-[10px] text-ink-faint">↳ {tr.easierVersion || 'Easier for your hand:'}</span>
       {suggestions.map(s => (
         <span
           key={s.chord.name}
@@ -120,18 +120,18 @@ export default function ChordTable({ lang }) {
     <div className="p-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 gap-4">
-        <p className="text-sm" style={{ color: '#5a5a5a' }}>{tr.hoverChord}</p>
-        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: '#1a1a1a' }}>
+        <p className="text-sm text-ink-faint">{tr.hoverChord}</p>
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-surface-750">
           {['standard', 'personal'].map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
               className="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all"
               style={mode === m ? {
-                background: '#252525',
-                color: '#c9a96e',
+                background: 'var(--color-surface-600)',
+                color: 'var(--color-brand)',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
-              } : { color: '#5a5a5a' }}
+              } : { color: 'var(--color-ink-faint)' }}
             >
               {m === 'personal' ? tr.myHand : tr.standard}
             </button>
@@ -140,18 +140,18 @@ export default function ChordTable({ lang }) {
       </div>
 
       {isPersonal && (
-        <div className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-4 text-xs" style={{ background: 'rgba(201,169,110,0.08)', border: '1px solid rgba(201,169,110,0.15)', color: '#c9a96e' }}>
+        <div className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-4 text-xs text-brand" style={{ background: 'rgba(201,169,110,0.08)', border: '1px solid rgba(201,169,110,0.15)' }}>
           <span className="shrink-0 mt-0.5">✋</span>
           <span>{tr.myHandDesc}</span>
         </div>
       )}
 
-      <div className="overflow-auto max-h-[68vh] rounded-xl" style={{ border: '1px solid #1e1e1e' }}>
+      <div className="overflow-auto max-h-[68vh] rounded-xl border border-surface-700">
         <table className="text-sm w-full border-collapse">
           <thead className="sticky top-0 z-10">
             <tr>
               {[tr.chord, tr.type, tr.tab, tr.notes, isPersonal ? tr.myDifficulty : tr.difficulty].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left" style={{ borderBottom: '1px solid #1e1e1e' }}>{h}</th>
+                <th key={h} className="px-4 py-2.5 text-left border-b border-surface-700">{h}</th>
               ))}
             </tr>
           </thead>
@@ -159,28 +159,27 @@ export default function ChordTable({ lang }) {
             {rows.map((r, i) => (
               <tr
                 key={i}
-                className="transition-colors"
-                style={{ borderBottom: '1px solid #1a1a1a' }}
-                onMouseEnter={e => e.currentTarget.style.background = '#1a1a1a'}
+                className="transition-colors border-b border-surface-750"
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-surface-750)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 <td
-                  className="px-4 py-2 font-bold cursor-default select-none"
-                  style={{ color: '#c9a96e', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: '#3a3a3a', textUnderlineOffset: '3px' }}
+                  className="px-4 py-2 font-bold cursor-default select-none text-brand"
+                  style={{ textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--color-ink-ghost)', textUnderlineOffset: '3px' }}
                   onMouseEnter={e => showTooltip(e, r)}
                   onMouseLeave={hideTooltip}
                 >
                   {r.name}
                 </td>
-                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.type}</td>
-                <td className="px-4 py-2 font-mono text-xs tracking-widest" style={{ color: '#6a6a6a' }}>{r.tab}</td>
-                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.fingeringStr}</td>
+                <td className="px-4 py-2 text-xs text-ink-ghost">{r.type}</td>
+                <td className="px-4 py-2 font-mono text-xs tracking-widest text-ink-subtle">{r.tab}</td>
+                <td className="px-4 py-2 text-xs text-ink-ghost">{r.fingeringStr}</td>
                 <td className="px-4 py-2">
                   {isPersonal ? (
                     <div>
                       <span className="flex items-center gap-2">
                         <DifficultyBadge score={r.personalScore} />
-                        <span className="text-xs tabular-nums" style={{ color: '#333' }}>{r.score.toFixed(1)}</span>
+                        <span className="text-xs tabular-nums text-ink-ghost">{r.score.toFixed(1)}</span>
                       </span>
                       <FingerGapDisplay notes={r.notes} profile={handProfile} />
                       <EasierVersion suggestions={r.easier} tr={tr} onHover={showTooltip} onLeave={hideTooltip} />
@@ -198,7 +197,7 @@ export default function ChordTable({ lang }) {
       {tooltip && (
         <div
           className="fixed z-50 rounded-2xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
+          style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
           <FretboardDiagram chord={tooltip.chord} />
         </div>
