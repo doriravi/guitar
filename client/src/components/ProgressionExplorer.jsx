@@ -47,10 +47,10 @@ function cardKey(prog) {
 // ─── Finger gap bars ─────────────────────────────────────────────────────────
 
 const PAIR_META = [
-  { key: 'thumbToIndex',  label: 'T→I', color: '#a78bfa' },
-  { key: 'indexToMiddle', label: 'I→M', color: '#60a5fa' },
-  { key: 'middleToRing',  label: 'M→R', color: '#34d399' },
-  { key: 'ringToLittle',  label: 'R→P', color: '#f97316' },
+  { key: 'thumbToIndex',  label: 'T→I', color: 'var(--color-accent)' },
+  { key: 'indexToMiddle', label: 'I→M', color: 'var(--color-info)' },
+  { key: 'middleToRing',  label: 'M→R', color: 'var(--color-success)' },
+  { key: 'ringToLittle',  label: 'R→P', color: 'var(--color-warning)' },
 ];
 
 function FingerGapBars({ notes, profile }) {
@@ -72,17 +72,17 @@ function FingerGapBars({ notes, profile }) {
     <div className="flex flex-col gap-0.5 mt-1.5">
       {pairs.map(p => {
         const over = p.userFraction > 1;
-        const barColor = over ? '#ef4444' : p.userFraction > 0.9 ? '#f97316' : p.userFraction > 0.7 ? '#eab308' : '#22c55e';
+        const barColor = over ? 'var(--color-danger)' : p.userFraction > 0.9 ? 'var(--color-warning)' : p.userFraction > 0.7 ? '#eab308' : 'var(--color-success)';
         const tip = `${p.label}: needs ~${p.requiredCm.toFixed(1)} cm — your span ${p.userCm.toFixed(1)} cm (${Math.round(p.userFraction * 100)}%)`;
         return (
           <div key={p.key} className="flex items-center gap-1" title={tip}>
             <span className="text-[8px] w-5 shrink-0" style={{ color: p.color }}>{p.label}</span>
-            <div className="relative h-1 rounded-full overflow-hidden" style={{ width: 36, background: '#2a2a2a' }}>
+            <div className="relative h-1 rounded-full overflow-hidden" style={{ width: 36, background: 'var(--color-surface-550)' }}>
               <div className="absolute left-0 top-0 h-full rounded-full"
                 style={{ width: `${Math.min(1, p.userFraction) * 100}%`, background: barColor }} />
             </div>
-            <span className="text-[8px] tabular-nums" style={{ color: over ? '#ef4444' : '#555' }}>
-              {p.requiredCm.toFixed(1)}<span style={{ color: '#333' }}>/{p.userCm.toFixed(1)}</span>
+            <span className="text-[8px] tabular-nums" style={{ color: over ? 'var(--color-danger)' : 'var(--color-ink-faint)' }}>
+              {p.requiredCm.toFixed(1)}<span style={{ color: 'var(--color-surface-600)' }}>/{p.userCm.toFixed(1)}</span>
             </span>
           </div>
         );
@@ -94,10 +94,10 @@ function FingerGapBars({ notes, profile }) {
 // ─── Transition badge (difficulty of switching between two chords) ─────────────
 
 function transitionColor(score) {
-  if (score <= 3) return '#22c55e';
+  if (score <= 3) return 'var(--color-success)';
   if (score <= 6) return '#eab308';
-  if (score <= 8) return '#f97316';
-  return '#ef4444';
+  if (score <= 8) return 'var(--color-warning)';
+  return 'var(--color-danger)';
 }
 
 function TransitionBadge({ fromName, toName, score, tr }) {
@@ -106,7 +106,7 @@ function TransitionBadge({ fromName, toName, score, tr }) {
       className="flex flex-col items-center justify-center shrink-0 px-1 self-stretch select-none"
       title={`${tr.changeLabel || 'Change'} ${fromName} → ${toName}: ${score.toFixed(1)}/10`}
     >
-      <span className="text-[10px] leading-none" style={{ color: '#3a3a3a' }}>→</span>
+      <span className="text-[10px] leading-none" style={{ color: 'var(--color-ink-ghost)' }}>→</span>
       <span className="text-[10px] font-bold tabular-nums leading-tight mt-0.5"
         style={{ color: transitionColor(score) }}>
         {score.toFixed(1)}
@@ -162,19 +162,19 @@ function SongPlayer({ sequence, bpm, onActive }) {
   if (!sequence.length) return null;
 
   return (
-    <div className="mb-3" style={{ borderBottom: '1px solid #1a1a1a', paddingBottom: 10 }}>
+    <div className="mb-3" style={{ borderBottom: '1px solid var(--color-surface-750)', paddingBottom: 10 }}>
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={playing ? stop : start}
           className="flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
           style={playing
-            ? { background: 'rgba(239,68,68,0.14)', color: '#f87171' }
-            : { background: 'rgba(74,222,128,0.10)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)' }}
+            ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)' }
+            : { background: 'rgba(74,222,128,0.10)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.25)' }}
         >
           <span className="text-sm leading-none">{playing ? '■' : '▶'}</span>
           {playing ? 'Stop' : 'Play the song'}
         </button>
-        <span className="text-[10px]" style={{ color: '#3a3a3a' }}>
+        <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>
           synth · {tempo} BPM · plays the chords through the lyrics · loops
         </span>
       </div>
@@ -347,7 +347,7 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
 
   return (
     <div className="px-3 sm:px-4 py-3 font-mono text-xs"
-      style={{ borderTop: '1px solid #1a1a1a', background: '#0f0f0f' }}>
+      style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
 
       {/* Compare the app's inferred chords against a real, human-made chord sheet.
           DuckDuckGo's "!ducky" jumps straight to the top Ultimate Guitar chord
@@ -359,9 +359,9 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
           target="_blank" rel="noopener noreferrer"
           onClick={downloadPdf}
           className="text-[11px] font-semibold px-2 py-1 rounded hover:underline"
-          style={{ color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.08)' }}
+          style={{ color: 'var(--color-info)', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.08)' }}
         >Compare real chords ↗</a>
-        <span className="text-[10px]" style={{ color: '#3a3a3a' }}>
+        <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>
           opens the chord sheet to compare, and downloads a PDF of ours
         </span>
       </div>
@@ -370,15 +370,15 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
       <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
 
       {status === 'loading' && (
-        <div className="py-1 text-xs italic" style={{ color: '#3a3a3a' }}>Loading lyrics…</div>
+        <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>Loading lyrics…</div>
       )}
       {status === 'error' && (
-        <div className="py-1 text-xs italic" style={{ color: '#3a3a3a' }}>
+        <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>
           Lyrics service is unavailable right now. Try again later.
         </div>
       )}
       {status === 'empty' && (
-        <div className="py-1 text-xs italic" style={{ color: '#3a3a3a' }}>No lyrics found for this song.</div>
+        <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>No lyrics found for this song.</div>
       )}
 
       {status === 'done' && (
@@ -387,13 +387,13 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
       {/* Capo banner — easy open shapes for a hard-key song */}
       {capo && (
         <div className="mb-3 px-2.5 py-1.5 rounded-lg text-[11px] leading-snug"
-          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)', color: '#4ade80' }}>
+          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)', color: 'var(--color-success)' }}>
           <span className="font-semibold">Capo {capo.fret}</span>
           <span style={{ color: '#3a7a3a' }}> — play easy open shapes: </span>
           {Object.entries(capo.map).map(([orig, easy], k) => (
             <span key={orig}>
               {k > 0 && <span style={{ color: '#2f5f2f' }}>, </span>}
-              <span style={{ color: '#5a5a5a' }}>{orig}</span>
+              <span style={{ color: 'var(--color-ink-faint)' }}>{orig}</span>
               <span style={{ color: '#3a7a3a' }}>→</span>
               <span className="font-semibold">{easy}</span>
             </span>
@@ -428,7 +428,7 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
                   style={isActive ? { background: 'rgba(201,169,110,0.18)', padding: '0 3px' } : undefined}>
                   <span
                     className="font-bold cursor-default select-none"
-                    style={{ color: isActive ? '#c9a96e' : (inProg ? '#818cf8' : '#f87171') }}
+                    style={{ color: isActive ? 'var(--color-brand)' : (inProg ? 'var(--color-accent)' : 'var(--color-danger)') }}
                     title={hasEasy ? `${real} (sounding) — fret the ${easy} shape with capo ${capo.fret}` : real}
                     onMouseEnter={v ? e => {
                       const r = e.currentTarget.getBoundingClientRect();
@@ -441,9 +441,9 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
                     } : undefined}
                     onMouseLeave={v ? () => setTooltip(null) : undefined}
                   >
-                    {real}{hasEasy && <span style={{ color: '#4ade80', fontWeight: 600 }}>→{easy}</span>}
+                    {real}{hasEasy && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>→{easy}</span>}
                   </span>
-                  <span style={{ color: isActive ? '#b8a88a' : (line.problem ? '#facc15' : '#6a6a6a') }}>{seg.text}</span>
+                  <span style={{ color: isActive ? '#b8a88a' : (line.problem ? '#facc15' : 'var(--color-ink-subtle)') }}>{seg.text}</span>
                 </span>
               );
             })}
@@ -460,9 +460,9 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
       {tooltip && (
         <div
           className="fixed z-50 rounded-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
+          style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
-          <div className="text-xs mb-1 text-center" style={{ color: '#5a5a5a' }}>{tooltip.voicing.type}</div>
+          <div className="text-xs mb-1 text-center" style={{ color: 'var(--color-ink-faint)' }}>{tooltip.voicing.type}</div>
           <FretboardDiagram chord={tooltip.voicing} />
         </div>
       )}
@@ -674,20 +674,20 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
   }, [song.lyricLines, songChordsWithVoicings]);
 
   return (
-    <div style={{ borderBottom: '1px solid #1a1a1a' }}>
+    <div style={{ borderBottom: '1px solid var(--color-surface-750)' }}>
       <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-2 pb-1">
         <div className="min-w-0 flex-1">
           <a
             href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(song.title + ' ' + song.artist)}`}
             target="_blank" rel="noopener noreferrer"
             className="font-semibold text-sm hover:underline"
-            style={{ color: '#d0cdc8' }}
+            style={{ color: 'var(--color-ink)' }}
           >{song.title}</a>
-          <span className="text-sm" style={{ color: '#5a5a5a' }}> — {song.artist}</span>
+          <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-xs px-1.5 py-0.5 rounded font-medium hidden sm:inline"
-            style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8' }}>
+            style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
             {song.key}
           </span>
           <button
@@ -702,8 +702,8 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
             }}
             className="w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all"
             style={isPlaying
-              ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
-              : { background: '#252525', color: '#7a7a7a' }}
+              ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)' }
+              : { background: 'var(--color-surface-600)', color: 'var(--color-ink-subtle)' }}
             title="Play the whole song"
           >
             {isPlaying ? '■' : '▶'}
@@ -712,8 +712,8 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
             onClick={() => setLyricsOpen(v => !v)}
             className="text-xs px-2 py-0.5 rounded font-medium transition-all"
             style={lyricsOpen
-              ? { background: 'rgba(99,102,241,0.12)', color: '#818cf8' }
-              : { background: '#1e1e1e', color: '#5a5a5a' }}
+              ? { background: 'rgba(99,102,241,0.12)', color: 'var(--color-accent)' }
+              : { background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}
           >
             {lyricsOpen ? tr.hide : tr.lyrics}
           </button>
@@ -721,8 +721,8 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
             onClick={() => (editing ? setEditing(false) : openEditor())}
             className="text-xs px-2 py-0.5 rounded font-medium transition-all"
             style={editing
-              ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e' }
-              : { background: '#1e1e1e', color: '#5a5a5a' }}
+              ? { background: 'rgba(201,169,110,0.15)', color: 'var(--color-brand)' }
+              : { background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}
             title={isCustom ? 'Edit this saved song and save it back' : 'Edit this song — saves an editable copy to your songs'}
           >
             {editing ? 'Close' : 'Edit'}
@@ -730,7 +730,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           <button
             onClick={() => { stopAudio(); setIsPlaying(false); setEditorOpen(true); }}
             className="text-xs px-2 py-0.5 rounded font-medium transition-all"
-            style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}
+            style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--color-accent)' }}
             title="Open the Song Editor — mark a section and transform it (move up frets, easier voicings, capo, melody, rhythm, style)"
           >
             Editor
@@ -740,14 +740,14 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
       {editorOpen && (
         <SongEditor song={song} profile={editorProfile} onClose={() => setEditorOpen(false)} />
       )}
-      <div className="flex flex-wrap gap-x-0 overflow-x-auto pb-1" style={{ borderTop: '1px solid #1a1a1a' }}>
+      <div className="flex flex-wrap gap-x-0 overflow-x-auto pb-1" style={{ borderTop: '1px solid var(--color-surface-750)' }}>
         {stripChords.map((c, j) => (
           <div key={j} className="px-2 sm:px-3 py-1" style={{ minWidth: 48 }}>
             <a
               href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(c.chordName)}`}
               target="_blank" rel="noopener noreferrer"
               className="text-xs font-mono font-semibold hover:underline"
-              style={{ color: c.inProgression ? '#7a7a7a' : '#f87171' }}
+              style={{ color: c.inProgression ? 'var(--color-ink-subtle)' : 'var(--color-danger)' }}
             >
               {c.chordName}
             </a>
@@ -755,15 +755,15 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
         ))}
       </div>
       {editing && (
-        <div className="px-3 sm:px-4 py-3" style={{ borderTop: '1px solid #1a1a1a', background: '#0f0f0f' }}>
-          <div className="text-[11px] mb-1.5" style={{ color: '#5a5a5a' }}>
+        <div className="px-3 sm:px-4 py-3" style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
+          <div className="text-[11px] mb-1.5" style={{ color: 'var(--color-ink-faint)' }}>
             Edit the chord sheet — chord line above each lyric line.{' '}
             {isCustom
               ? 'Saves back to this song.'
               : existingCopy
                 ? 'Updates your saved copy of this song.'
                 : 'Saves an editable copy to your songs.'}
-            {' '}Use <span style={{ color: '#c9a96e' }}>Check</span> to preview before saving.
+            {' '}Use <span style={{ color: 'var(--color-brand)' }}>Check</span> to preview before saving.
           </div>
           <textarea
             value={editText}
@@ -771,50 +771,50 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
             spellCheck={false}
             className="w-full font-mono text-xs rounded p-2"
             rows={12}
-            style={{ background: '#161616', color: '#cfcfcf', border: '1px solid #2a2a2a', resize: 'vertical' }}
+            style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)', resize: 'vertical' }}
           />
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <button
               onClick={pasteRealChords}
               className="text-xs px-3 py-1 rounded font-semibold"
-              style={{ background: 'rgba(56,189,248,0.12)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }}
+              style={{ background: 'rgba(56,189,248,0.12)', color: 'var(--color-info)', border: '1px solid rgba(56,189,248,0.3)' }}
               title="Paste a chord sheet copied from the Ultimate Guitar tab — junk is filtered out, then Save to overwrite this song"
             >Paste real chords</button>
             <button
               onClick={checkEdit}
               className="text-xs px-3 py-1 rounded font-semibold"
-              style={{ background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }}
+              style={{ background: 'rgba(201,169,110,0.15)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.3)' }}
             >Check</button>
             <button
               onClick={saveEdit}
               className="text-xs px-3 py-1 rounded font-semibold"
-              style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)' }}
+              style={{ background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }}
             >Save</button>
             <button
               onClick={() => { setEditing(false); setPreview(null); }}
               className="text-xs px-3 py-1 rounded font-medium"
-              style={{ background: '#1e1e1e', color: '#5a5a5a' }}
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}
             >Cancel</button>
-            {editMsg && <span className="text-[11px]" style={{ color: '#4ade80' }}>{editMsg}</span>}
+            {editMsg && <span className="text-[11px]" style={{ color: 'var(--color-success)' }}>{editMsg}</span>}
           </div>
 
           {/* Preview of the parsed result, shown by "Check" before you Save. */}
           {preview && (
             <div className="mt-3 rounded p-2.5 text-[11px]"
-              style={{ background: '#141414', border: '1px solid #2a2a2a' }}>
-              <div className="font-semibold mb-1.5" style={{ color: '#c9a96e' }}>
+              style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-550)' }}>
+              <div className="font-semibold mb-1.5" style={{ color: 'var(--color-brand)' }}>
                 Preview — this is what will be saved
               </div>
-              <div style={{ color: '#9a9a9a' }}>
-                <span style={{ color: '#d0cdc8' }}>{preview.parsed.title || '(no title)'}</span>
-                <span style={{ color: '#5a5a5a' }}> — {preview.parsed.artist || '(no artist)'}</span>
+              <div style={{ color: 'var(--color-ink-muted)' }}>
+                <span style={{ color: 'var(--color-ink)' }}>{preview.parsed.title || '(no title)'}</span>
+                <span style={{ color: 'var(--color-ink-faint)' }}> — {preview.parsed.artist || '(no artist)'}</span>
               </div>
-              <div className="mt-0.5" style={{ color: '#7a7a7a' }}>
+              <div className="mt-0.5" style={{ color: 'var(--color-ink-subtle)' }}>
                 Key {keyLabelFor(preview.parsed)} · {preview.parsed.bpm ? `${preview.parsed.bpm} bpm · ` : ''}
                 {(preview.parsed.chords || []).length} chord{(preview.parsed.chords || []).length === 1 ? '' : 's'} · {(preview.parsed.lyricLines || []).length} line{(preview.parsed.lyricLines || []).length === 1 ? '' : 's'}
               </div>
               {(preview.parsed.chords || []).length > 0 && (
-                <div className="mt-1 font-mono" style={{ color: '#818cf8' }}>
+                <div className="mt-1 font-mono" style={{ color: 'var(--color-accent)' }}>
                   {(preview.parsed.chords || []).join('  ')}
                 </div>
               )}
@@ -824,11 +824,11 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
                 </ul>
               )}
               <div className="mt-2 max-h-40 overflow-y-auto font-mono leading-snug"
-                style={{ color: '#8a8a8a' }}>
+                style={{ color: 'var(--color-ink-muted)' }}>
                 {(preview.parsed.lyricLines || []).map((ln, k) => (
                   <div key={k}>
                     {(ln.chordNames || []).length > 0 && (
-                      <span style={{ color: '#818cf8' }}>[{(ln.chordNames || []).join(' ')}] </span>
+                      <span style={{ color: 'var(--color-accent)' }}>[{(ln.chordNames || []).join(' ')}] </span>
                     )}
                     <span>{ln.text || (ln.chordNames?.length ? '' : '·')}</span>
                   </div>
@@ -965,7 +965,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, c
   if (!songs.length) {
     const keyed = targetRoot && targetRoot !== 'all';
     return (
-      <div className="px-4 py-3 text-sm italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-4 py-3 text-sm italic" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
         {keyed
           ? `No famous songs on record for this progression in the key of ${targetRoot}. Try another key, or "All roots".`
           : 'No song examples on record for this progression.'}
@@ -974,11 +974,11 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, c
   }
 
   return (
-    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
-      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>
         {tr.famousSongs}
       </div>
-      <div style={{ borderTop: '1px solid #1a1a1a' }}>
+      <div style={{ borderTop: '1px solid var(--color-surface-750)' }}>
         {songs.map((song, i) => (
           <SongRow key={song.id || i} song={song} progDegreeSet={progDegreeSet} tr={tr} customSongs={customSongs} currentProgName={progressionName} onEdited={onSongEdited} onMoved={onSongMoved} />
         ))}
@@ -989,7 +989,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, c
 
 // ─── Hand filter helpers ──────────────────────────────────────────────────────
 
-const FINGER_COLORS = { thumb: '#a78bfa', index: '#38bdf8', middle: '#34d399', ring: '#c9a96e', pinky: '#f87171' };
+const FINGER_COLORS = { thumb: 'var(--color-accent)', index: 'var(--color-info)', middle: 'var(--color-success)', ring: 'var(--color-brand)', pinky: 'var(--color-danger)' };
 const FINGER_LABELS = { thumb: 'T', index: 'I', middle: 'M', ring: 'R', pinky: 'P' };
 
 const LENGTH_ORDER  = { Short: 0, Medium: 1, Long: 2 };
@@ -1002,10 +1002,10 @@ const INDEP_ORDER   = { Low: 0, Medium: 1, High: 2 };
 
 function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onSaveProfile, onGapsChange }) {
   const GAPS = [
-    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [0, 18],  step: 0.5, color: '#a78bfa' },
-    { key: 'indexToMiddle', label: 'Index → Middle', range: [0, 12],  step: 0.5, color: '#38bdf8' },
-    { key: 'middleToRing',  label: 'Middle → Ring',  range: [0, 10],  step: 0.5, color: '#34d399' },
-    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [0, 14],  step: 0.5, color: '#c9a96e' },
+    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [0, 18],  step: 0.5, color: 'var(--color-accent)' },
+    { key: 'indexToMiddle', label: 'Index → Middle', range: [0, 12],  step: 0.5, color: 'var(--color-info)' },
+    { key: 'middleToRing',  label: 'Middle → Ring',  range: [0, 10],  step: 0.5, color: 'var(--color-success)' },
+    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [0, 14],  step: 0.5, color: 'var(--color-brand)' },
   ];
 
   const [localGaps, setLocalGaps] = useState({
@@ -1060,25 +1060,25 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
         className="text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all"
         style={active
           ? { background: `${color}25`, color, border: `1px solid ${color}50` }
-          : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #2a2a2a' }}
+          : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
       >{label}</button>
     );
   }
 
   return (
-    <div className="rounded-xl p-4 mb-4 space-y-4" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-      <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: '#5a5a5a' }}>My Hand Filters</p>
+    <div className="rounded-xl p-4 mb-4 space-y-4" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+      <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-faint)' }}>My Hand Filters</p>
 
       {/* Gap sliders — editable, saves to profile */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-semibold" style={{ color: '#3a3a3a' }}>Finger Gap Measurements</p>
+          <p className="text-xs font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Finger Gap Measurements</p>
           <button
             onClick={handleSave}
             className="text-xs px-3 py-1 rounded-lg font-semibold transition-all"
             style={saved
-              ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }
-              : { background: '#c9a96e', color: '#0f0f0f' }}
+              ? { background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.2)' }
+              : { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
           >
             {saved ? '✓ Saved' : 'Save'}
           </button>
@@ -1088,18 +1088,18 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
             const val = localGaps[key];
             const pct = ((val - range[0]) / (range[1] - range[0])) * 100;
             return (
-              <div key={key} className="rounded-lg px-3 py-2" style={{ background: '#0a0a0a', border: `1px solid ${color}18` }}>
+              <div key={key} className="rounded-lg px-3 py-2" style={{ background: 'var(--color-surface-base)', border: `1px solid ${color}18` }}>
                 <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px]" style={{ color: '#4a4a4a' }}>{label}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>{label}</span>
                   <span className="text-xs font-bold tabular-nums" style={{ color }}>{val.toFixed(1)} cm</span>
                 </div>
                 <input
                   type="range" min={range[0]} max={range[1]} step={step} value={val}
                   onChange={e => handleGapChange(key, parseFloat(e.target.value))}
                   className="w-full"
-                  style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)`, color }}
+                  style={{ background: `linear-gradient(to right, ${color} ${pct}%, var(--color-surface-550) ${pct}%)`, color }}
                 />
-                <div className="flex justify-between text-[9px] mt-0.5" style={{ color: '#2a2a2a' }}>
+                <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--color-surface-550)' }}>
                   <span>{range[0]} cm</span><span>{range[1]} cm</span>
                 </div>
               </div>
@@ -1111,14 +1111,14 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
       {/* Per-finger filters — only shown if AI data available */}
       {Object.keys(fingers).length > 0 ? (
         <div>
-          <p className="text-xs font-semibold mb-2" style={{ color: '#7a7a7a' }}>Finger Attributes (from AI Analysis)</p>
+          <p className="text-xs font-semibold mb-2" style={{ color: 'var(--color-ink-subtle)' }}>Finger Attributes (from AI Analysis)</p>
           <div className="space-y-2">
             {['thumb', 'index', 'middle', 'ring', 'pinky'].map(name => {
               const f = fingers[name];
               if (!f) return null;
               const color = FINGER_COLORS[name];
               return (
-                <div key={name} className="flex items-start gap-3 rounded-lg px-3 py-2" style={{ background: '#0a0a0a', border: `1px solid ${color}15` }}>
+                <div key={name} className="flex items-start gap-3 rounded-lg px-3 py-2" style={{ background: 'var(--color-surface-base)', border: `1px solid ${color}15` }}>
                   <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-black shrink-0 mt-0.5" style={{ background: color }}>
                     {FINGER_LABELS[name]}
                   </div>
@@ -1150,9 +1150,9 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
                           onClick={() => toggleFilter('pinky_reach', v)} />
                       ))}
                       {/* Show AI-assessed value as info */}
-                      {f.length && <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ background: '#1e1e1e', color: '#8a8a8a', border: '1px solid #2a2a2a' }}>{f.length}</span>}
+                      {f.length && <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>{f.length}</span>}
                     </div>
-                    {f.note && <p className="text-[10px] mt-1.5" style={{ color: '#7a7a7a' }}>{f.note}</p>}
+                    {f.note && <p className="text-[10px] mt-1.5" style={{ color: 'var(--color-ink-subtle)' }}>{f.note}</p>}
                   </div>
                 </div>
               );
@@ -1160,8 +1160,8 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
           </div>
         </div>
       ) : (
-        <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#0a0a0a', border: '1px solid #1e1e1e', color: '#7a7a7a' }}>
-          Per-finger data not yet available. Use <strong style={{ color: '#818cf8' }}>AI Hand Analysis</strong> on the My Hand tab to unlock finger-level filters.
+        <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)', color: 'var(--color-ink-subtle)' }}>
+          Per-finger data not yet available. Use <strong style={{ color: 'var(--color-accent)' }}>AI Hand Analysis</strong> on the My Hand tab to unlock finger-level filters.
         </div>
       )}
 
@@ -1170,7 +1170,7 @@ function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onS
         <button
           onClick={() => setHandFilters({})}
           className="text-xs px-3 py-1 rounded-lg"
-          style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', background: 'rgba(248,113,113,0.05)' }}
+          style={{ color: 'var(--color-danger)', border: '1px solid rgba(248,113,113,0.2)', background: 'rgba(248,113,113,0.05)' }}
         >
           Clear all filters
         </button>
@@ -1232,15 +1232,15 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
 
   if (count === 0) {
     return (
-      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-4 py-3 text-xs italic" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
         No easier alternatives found — these shapes are already a good fit for your hand.
       </div>
     );
   }
 
   return (
-    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
-      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#4ade80' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-success)' }}>
         Easier alternatives for your hand
       </div>
       <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
@@ -1249,9 +1249,9 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
           if (!sub) {
             return (
               <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
-                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
-                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
-                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>ok as-is</span>
+                style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-800)' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-ink-faint)' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: 'var(--color-surface-550)' }}>ok as-is</span>
               </div>
             );
           }
@@ -1260,11 +1260,11 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
             <div key={j} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
               style={{ background: 'rgba(74,222,128,0.05)', border: '1px solid rgba(74,222,128,0.18)' }}>
               <div className="flex items-center gap-1">
-                <span className="text-xs font-mono line-through" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
-                <span className="text-[11px]" style={{ color: '#4ade80' }}>→</span>
+                <span className="text-xs font-mono line-through" style={{ color: 'var(--color-ink-faint)' }}>{chord.chordName}</span>
+                <span className="text-[11px]" style={{ color: 'var(--color-success)' }}>→</span>
                 <span
                   className="text-xs font-mono font-bold cursor-default"
-                  style={{ color: '#4ade80' }}
+                  style={{ color: 'var(--color-success)' }}
                   onMouseEnter={e => onTooltip(e, v)}
                   onMouseLeave={onTooltipLeave}
                 >{sub.substitute.name}</span>
@@ -1279,7 +1279,7 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
           );
         })}
       </div>
-      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: 'var(--color-ink-ghost)' }}>
         Substitutes keep each chord's root and harmonic role. Numbers show how much easier the shape is on
         your personal 1–10 difficulty scale. Hover a chord to preview the fingering.
       </p>
@@ -1297,14 +1297,14 @@ function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
 
   if (count === 0) {
     return (
-      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-4 py-3 text-xs italic" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
         No movable up-the-neck voicings available for these chords.
       </div>
     );
   }
 
   return (
-    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
       <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#c084fc' }}>
         Play it higher up the neck
       </div>
@@ -1314,9 +1314,9 @@ function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
           if (!up) {
             return (
               <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
-                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
-                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
-                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>—</span>
+                style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-800)' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-ink-faint)' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: 'var(--color-surface-550)' }}>—</span>
               </div>
             );
           }
@@ -1333,12 +1333,12 @@ function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
               <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#1d1726', color: '#9a7ab8' }}>
                 {up.shape} · fret {up.barreFret}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: '#5a5a5a' }}>{v.tab}</span>
+              <span className="text-[10px] font-mono" style={{ color: 'var(--color-ink-faint)' }}>{v.tab}</span>
             </div>
           );
         })}
       </div>
-      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: 'var(--color-ink-ghost)' }}>
         Movable barre (CAGED) shapes for the same chords, positioned further up the neck — the same hand shape
         slides between chords. Hover a chord to preview the fingering.
       </p>
@@ -1356,15 +1356,15 @@ function TriadVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
 
   if (count === 0) {
     return (
-      <div className="px-4 py-3 text-xs italic" style={{ color: '#3a3a3a', borderTop: '1px solid #1e1e1e', background: '#111' }}>
+      <div className="px-4 py-3 text-xs italic" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
         No up-the-neck triad voicings available for these chords.
       </div>
     );
   }
 
   return (
-    <div style={{ borderTop: '1px solid #1e1e1e', background: '#111' }}>
-      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#fbbf24' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-warning)' }}>
         Up the neck — triads (no barre)
       </div>
       <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
@@ -1373,9 +1373,9 @@ function TriadVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
           if (!t) {
             return (
               <div key={j} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
-                style={{ background: '#0a0a0a', border: '1px solid #161616' }}>
-                <span className="text-xs font-mono font-semibold" style={{ color: '#5a5a5a' }}>{chord.chordName}</span>
-                <span className="text-[10px]" style={{ color: '#2f2f2f' }}>—</span>
+                style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-800)' }}>
+                <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-ink-faint)' }}>{chord.chordName}</span>
+                <span className="text-[10px]" style={{ color: 'var(--color-surface-550)' }}>—</span>
               </div>
             );
           }
@@ -1385,19 +1385,19 @@ function TriadVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
               style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.18)' }}>
               <span
                 className="text-xs font-mono font-bold cursor-default"
-                style={{ color: '#fbbf24' }}
+                style={{ color: 'var(--color-warning)' }}
                 onMouseEnter={e => onTooltip(e, v)}
                 onMouseLeave={onTooltipLeave}
               >{chord.chordName}</span>
               <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#241f10', color: '#b89a4a' }}>
                 triad · fret {t.baseFret}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: '#5a5a5a' }}>{v.tab}</span>
+              <span className="text-[10px] font-mono" style={{ color: 'var(--color-ink-faint)' }}>{v.tab}</span>
             </div>
           );
         })}
       </div>
-      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#3a3a3a' }}>
+      <p className="px-3 sm:px-4 pb-3 text-[10px] leading-relaxed" style={{ color: 'var(--color-ink-ghost)' }}>
         Three-note triad grips on adjacent strings, higher up the neck — same root/3rd/5th as each chord,
         no barre. Hover a chord to preview the fingering.
       </p>
@@ -1541,7 +1541,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {moveNotice && (
         <div className="mb-4 px-3 py-2.5 rounded-lg flex items-start gap-2 text-sm"
           style={{ background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', color: '#bcdff0' }}>
-          <span style={{ color: '#38bdf8' }}>↪</span>
+          <span style={{ color: 'var(--color-info)' }}>↪</span>
           <div className="flex-1">
             {moveNotice.found ? (
               <>
@@ -1549,9 +1549,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                 {"'s chords no longer fit "}
                 {moveNotice.from ? <span style={{ color: '#7a9aad' }}>{moveNotice.from}</span> : 'that progression'}
                 {'. Moved it to '}
-                <span className="font-semibold" style={{ color: '#38bdf8' }}>{moveNotice.to}</span>
+                <span className="font-semibold" style={{ color: 'var(--color-info)' }}>{moveNotice.to}</span>
                 {' in the key of '}
-                <span className="font-semibold" style={{ color: '#38bdf8' }}>{moveNotice.key}</span>
+                <span className="font-semibold" style={{ color: 'var(--color-info)' }}>{moveNotice.key}</span>
                 {'. Open that progression to find it.'}
               </>
             ) : (
@@ -1572,12 +1572,12 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {/* ── Filters ── */}
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-4 items-end mb-4 sm:mb-5">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.root}</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-faint)' }}>{tr.root}</label>
           <select
             value={root}
             onChange={e => setRoot(e.target.value)}
             className="rounded px-2 py-1.5 text-sm"
-            style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+            style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
           >
             <option value="all">{tr.allRoots}</option>
             {ROOT_NOTES.map(n => <option key={n}>{n}</option>)}
@@ -1585,12 +1585,12 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.scale}</label>
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-faint)' }}>{tr.scale}</label>
           <select
             value={scaleType}
             onChange={e => setScaleType(e.target.value)}
             className="rounded px-2 py-1.5 text-sm"
-            style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+            style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
           >
             <option value="both">{tr.allScales}</option>
             <option value="major">{tr.major}</option>
@@ -1604,12 +1604,12 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
             onClick={() => setShowHandFilters(v => !v)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
             style={showHandFilters
-              ? { background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }
-              : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+              ? { background: 'rgba(99,102,241,0.15)', color: 'var(--color-accent)', border: '1px solid rgba(99,102,241,0.3)' }
+              : { background: 'var(--color-surface-750)', color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
             ✋ {showHandFilters ? 'Hide Hand Filters' : 'My Hand Filters'}
             {Object.keys(handFilters).length > 0 && (
-              <span className="rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold" style={{ background: '#818cf8', color: '#fff' }}>
+              <span className="rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold" style={{ background: 'var(--color-accent)', color: '#fff' }}>
                 {Object.keys(handFilters).length}
               </span>
             )}
@@ -1634,26 +1634,26 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {/* ── Scale summary (single key only) ── */}
       {!multiKey && diatonicChords && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 mb-4 sm:mb-5 px-3 py-2 rounded text-xs"
-          style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
-          <span className="font-semibold" style={{ color: '#c9a96e' }}>{root} {scaleType}:</span>
+          style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
+          <span className="font-semibold" style={{ color: 'var(--color-brand)' }}>{root} {scaleType}:</span>
           {diatonicChords.map(c => (
-            <span key={c.degree} style={{ color: '#5a5a5a' }}>
-              <span style={{ color: '#3a3a3a' }}>{c.roman}</span>&thinsp;{c.chordName}
+            <span key={c.degree} style={{ color: 'var(--color-ink-faint)' }}>
+              <span style={{ color: 'var(--color-ink-ghost)' }}>{c.roman}</span>&thinsp;{c.chordName}
             </span>
           ))}
         </div>
       )}
 
       {/* ── Result count ── */}
-      <p className="text-xs mb-3" style={{ color: '#3a3a3a' }}>
+      <p className="text-xs mb-3" style={{ color: 'var(--color-ink-ghost)' }}>
         {filtered.length} progression{filtered.length !== 1 ? 's' : ''}
         {showHandFilters ? ' matching your hand' : ''}
-        {filtered.length < resolved.length && <span style={{ color: '#5a5a5a' }}> (filtered from {resolved.length})</span>}
+        {filtered.length < resolved.length && <span style={{ color: 'var(--color-ink-faint)' }}> (filtered from {resolved.length})</span>}
       </p>
 
       {/* ── Empty state ── */}
       {filtered.length === 0 && (
-        <div className="text-center py-16 text-sm" style={{ color: '#3a3a3a' }}>
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--color-ink-ghost)' }}>
           {showHandFilters ? 'No progressions match your current hand filters. Try raising the personal difficulty or relaxing finger filters.' : tr.noProgressions}
         </div>
       )}
@@ -1672,24 +1672,24 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
           return (
             <div key={i} className="rounded-lg overflow-hidden"
-              style={{ border: '1px solid #1e1e1e' }}>
+              style={{ border: '1px solid var(--color-surface-700)' }}>
 
               {/* Card header */}
               <div className="flex items-center justify-between px-3 sm:px-4 py-2"
-                style={{ background: '#1a1a1a', borderBottom: '1px solid #1e1e1e' }}>
+                style={{ background: 'var(--color-surface-750)', borderBottom: '1px solid var(--color-surface-700)' }}>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 flex-wrap min-w-0">
                   {multiKey && (
                     <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
-                      style={{ background: '#252525', color: '#7a7a7a' }}>
+                      style={{ background: 'var(--color-surface-600)', color: 'var(--color-ink-subtle)' }}>
                       {prog.root} {prog.scaleType === 'major' ? 'maj' : 'min'}
                     </span>
                   )}
-                  <span className="font-semibold text-sm truncate" style={{ color: '#d0cdc8' }}>{prog.name}</span>
-                  <span className="text-xs hidden sm:inline" style={{ color: '#3a3a3a' }}>{prog.genre}</span>
+                  <span className="font-semibold text-sm truncate" style={{ color: 'var(--color-ink)' }}>{prog.name}</span>
+                  <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ink-ghost)' }}>{prog.genre}</span>
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-2">
-                  <span className="hidden sm:flex items-center gap-1 text-xs" style={{ color: '#3a3a3a' }}>
+                  <span className="hidden sm:flex items-center gap-1 text-xs" style={{ color: 'var(--color-ink-ghost)' }}>
                     max <DifficultyBadge score={prog.maxScore} />
                   </span>
 
@@ -1699,8 +1699,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     data-explain="The easier button suggests simpler chord shapes that fit your hand, with the same sound — so you can play this progression even with short fingers."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={easierOpen
-                      ? { background: 'rgba(74,222,128,0.14)', color: '#4ade80' }
-                      : { background: '#252525', color: '#5a5a5a' }}
+                      ? { background: 'rgba(74,222,128,0.14)', color: 'var(--color-success)' }
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
                     ✋ easier
                   </button>
@@ -1712,7 +1712,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={upperOpen
                       ? { background: 'rgba(192,132,252,0.14)', color: '#c084fc' }
-                      : { background: '#252525', color: '#5a5a5a' }}
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
                     ▲ up the neck
                   </button>
@@ -1723,8 +1723,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     data-explain="The triads button gives small three-note shapes higher up the neck, using the same notes but with no barre — easier grips for small hands."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={triadOpen
-                      ? { background: 'rgba(251,191,36,0.14)', color: '#fbbf24' }
-                      : { background: '#252525', color: '#5a5a5a' }}
+                      ? { background: 'rgba(251,191,36,0.14)', color: 'var(--color-warning)' }
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
                     ♦ triads
                   </button>
@@ -1733,8 +1733,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     onClick={() => toggleSongs(key)}
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={songsOpen
-                      ? { background: 'rgba(56,189,248,0.12)', color: '#38bdf8' }
-                      : { background: '#252525', color: '#5a5a5a' }}
+                      ? { background: 'rgba(56,189,248,0.12)', color: 'var(--color-info)' }
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
                     ♪{songCount > 0 ? ` ${songCount}` : ''}
                   </button>
@@ -1743,8 +1743,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     onClick={() => handlePlay(prog, key)}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all"
                     style={isPlaying
-                      ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
-                      : { background: '#252525', color: '#7a7a7a' }}
+                      ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)' }
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-subtle)' }}
                   >
                     {isPlaying ? '■' : '▶'}
                   </button>
@@ -1752,7 +1752,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
               </div>
 
               {/* Chord cells, with change-difficulty badges between them */}
-              <div className="flex overflow-x-auto items-stretch" style={{ background: '#141414' }}>
+              <div className="flex overflow-x-auto items-stretch" style={{ background: 'var(--color-surface-850)' }}>
                 {prog.chords.map((chord, j) => {
                   const next = prog.chords[j + 1];
                   const here = chord.voicings[0];
@@ -1769,9 +1769,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                           background: activeChord === j ? 'rgba(201,169,110,0.07)' : 'transparent',
                         }}
                       >
-                        <div className="text-xs mb-0.5" style={{ color: '#3a3a3a' }}>{chord.roman}</div>
+                        <div className="text-xs mb-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{chord.roman}</div>
                         <div className="font-bold text-sm mb-1.5 transition-colors"
-                          style={{ color: activeChord === j ? '#c9a96e' : '#d0cdc8' }}>
+                          style={{ color: activeChord === j ? 'var(--color-brand)' : 'var(--color-ink)' }}>
                           <a
                             href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
                             target="_blank" rel="noopener noreferrer"
@@ -1794,7 +1794,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                         )}
                       </div>
                       {transScore !== null && (
-                        <div style={{ borderLeft: '1px solid #1e1e1e', borderRight: '1px solid #1e1e1e' }}>
+                        <div style={{ borderLeft: '1px solid var(--color-surface-700)', borderRight: '1px solid var(--color-surface-700)' }}>
                           <TransitionBadge
                             fromName={chord.chordName}
                             toName={next.chordName}
@@ -1848,9 +1848,9 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {tooltip && (
         <div
           className="fixed z-50 rounded-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
+          style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
-          <div className="text-xs mb-1 text-center" style={{ color: '#5a5a5a' }}>{tooltip.voicing.type}</div>
+          <div className="text-xs mb-1 text-center" style={{ color: 'var(--color-ink-faint)' }}>{tooltip.voicing.type}</div>
           <FretboardDiagram chord={tooltip.voicing} />
         </div>
       )}

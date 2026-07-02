@@ -530,24 +530,24 @@ export default function SongEditor({ song, profile, onClose }) {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#0b0b0b' }}>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--color-surface-base)' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 shrink-0"
-        style={{ borderBottom: '1px solid #1e1e1e', background: '#111' }}>
+        style={{ borderBottom: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
         <button onClick={() => { stop(); onClose(); }}
-          className="text-sm font-medium px-2 py-1 rounded" style={{ color: '#9a9a9a' }}>
+          className="text-sm font-medium px-2 py-1 rounded" style={{ color: 'var(--color-ink-muted)' }}>
           ‹ Back
         </button>
-        <div className="text-sm min-w-0 flex-1 text-center truncate" style={{ color: '#d0cdc8' }}>
+        <div className="text-sm min-w-0 flex-1 text-center truncate" style={{ color: 'var(--color-ink)' }}>
           Editing: <span className="font-semibold">{song.title}</span>
-          <span style={{ color: '#5a5a5a' }}> — {song.artist}</span>
+          <span style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded mr-2" style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8' }}>
+        <span className="text-xs px-2 py-0.5 rounded mr-2" style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
           {song.key}{song.scaleType === 'minor' ? 'm' : ''} · {bpm}bpm
         </span>
         <button onClick={saveEditedSong} disabled={saving || !timeline.length}
           className="text-xs font-semibold px-3 py-1.5 rounded-lg"
-          style={{ background: '#c9a96e', color: '#0f0f0f', opacity: (saving || !timeline.length) ? 0.5 : 1 }}
+          style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)', opacity: (saving || !timeline.length) ? 0.5 : 1 }}
           title={currentUser ? 'Save this edited song to your account' : 'Save on this device — sign in to sync across devices'}>
           {saving ? 'Saving…' : '💾 Save song'}
         </button>
@@ -555,25 +555,25 @@ export default function SongEditor({ song, profile, onClose }) {
       {saveMsg && (
         <div className="px-4 py-1.5 text-xs text-center shrink-0"
           style={{ background: saveMsg.type === 'ok' ? 'rgba(74,222,128,0.1)' : 'rgba(239,68,68,0.12)',
-                   color: saveMsg.type === 'ok' ? '#4ade80' : '#f87171' }}>
+                   color: saveMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)' }}>
           {saveMsg.text}
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {/* Song sheet — the words + lyrics + chords, copied onto the editor screen */}
-        <div className="rounded-lg" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+        <div className="rounded-lg" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
           <button
             onClick={() => setSheetOpen(o => !o)}
             className="w-full flex items-center justify-between px-3 py-2 text-[10px] uppercase tracking-widest font-semibold"
-            style={{ color: '#5a5a5a' }}
+            style={{ color: 'var(--color-ink-faint)' }}
           >
             <span>Song sheet — tap chords to mark a section</span>
-            <span style={{ color: '#444' }}>{sheetOpen ? '▾' : '▸'}</span>
+            <span style={{ color: 'var(--color-ink-ghost)' }}>{sheetOpen ? '▾' : '▸'}</span>
           </button>
           {sheetOpen && (
             <div className="px-3 pb-3">
-              <p className="text-[11px] mb-2" style={{ color: hasMark ? '#c9a96e' : '#5a5a5a' }}>
+              <p className="text-[11px] mb-2" style={{ color: hasMark ? 'var(--color-brand)' : 'var(--color-ink-faint)' }}>
                 {hasMark
                   ? `Marked ${markStart + 1}–${markEnd + 1} — tap any chord to start over`
                   : markStart != null
@@ -582,10 +582,10 @@ export default function SongEditor({ song, profile, onClose }) {
               </p>
 
               {sheetStatus === 'loading' && (
-                <p className="text-xs italic" style={{ color: '#5a5a5a' }}>Loading lyrics…</p>
+                <p className="text-xs italic" style={{ color: 'var(--color-ink-faint)' }}>Loading lyrics…</p>
               )}
               {(sheetStatus === 'error' || sheetStatus === 'empty' || (sheetStatus === 'done' && !sheetLines.length)) && (
-                <p className="text-xs italic mb-2" style={{ color: sheetStatus === 'error' ? '#f87171' : '#5a5a5a' }}>
+                <p className="text-xs italic mb-2" style={{ color: sheetStatus === 'error' ? 'var(--color-danger)' : 'var(--color-ink-faint)' }}>
                   {sheetStatus === 'error'
                     ? 'Couldn’t load lyrics — mark the chords directly below.'
                     : 'No lyrics found — mark the chords directly below.'}
@@ -632,11 +632,11 @@ export default function SongEditor({ song, profile, onClose }) {
               </div>
 
               <div className="mt-2.5 flex items-center gap-2">
-                <button onClick={clearMarks} className="text-[11px] px-2.5 py-1 rounded" style={{ background: '#1a1a1a', color: '#7a7a7a' }}>
+                <button onClick={clearMarks} className="text-[11px] px-2.5 py-1 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
                   Clear marks
                 </button>
                 {melodyTrack && (
-                  <span className="text-[11px] px-2.5 py-1 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>
+                  <span className="text-[11px] px-2.5 py-1 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' }}>
                     ♪ melody applied ({melodyTrack.events.length} notes)
                   </span>
                 )}
@@ -647,8 +647,8 @@ export default function SongEditor({ song, profile, onClose }) {
 
         {/* Transform buttons */}
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold mb-2" style={{ color: '#5a5a5a' }}>
-            Transforms {!hasMark && <span style={{ color: '#444' }}>— mark a section first</span>}
+          <p className="text-[10px] uppercase tracking-widest font-semibold mb-2" style={{ color: 'var(--color-ink-faint)' }}>
+            Transforms {!hasMark && <span style={{ color: 'var(--color-ink-ghost)' }}>— mark a section first</span>}
           </p>
           <div className="flex flex-wrap gap-2">
             {TRANSFORMS.map(t => (
@@ -657,15 +657,15 @@ export default function SongEditor({ song, profile, onClose }) {
                 onClick={() => selectTransform(t.id)}
                 className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
                 style={transformId === t.id
-                  ? { background: 'rgba(201,169,110,0.18)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.4)' }
-                  : { background: '#1a1a1a', color: hasMark ? '#9a9a9a' : '#444', border: '1px solid #2a2a2a' }}
+                  ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                  : { background: 'var(--color-surface-750)', color: hasMark ? 'var(--color-ink-muted)' : 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-550)' }}
               >{t.label}</button>
             ))}
           </div>
 
           {/* Options strip (per active transform) */}
           {transformId && (
-            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px]" style={{ color: '#7a7a7a' }}>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'var(--color-ink-subtle)' }}>
               {transformId === 'moveUp' && (
                 <Seg label="shape" value={moveStyle} options={[['barre', 'Barre'], ['triad', 'Triad']]} onPick={setMoveStyle} />
               )}
@@ -679,7 +679,7 @@ export default function SongEditor({ song, profile, onClose }) {
                 <>
                   <Seg label="density" value={density} options={DENSITIES.map(d => [d, d])} onPick={setDensity} />
                   <SelectStrip label="contour" value={contour} options={CONTOURS} onPick={setContour} />
-                  <button onClick={() => setSeed(s => s + 1)} className="px-2 py-0.5 rounded" style={{ background: '#1a1a1a', color: '#9a9a9a' }}>↻ Reroll</button>
+                  <button onClick={() => setSeed(s => s + 1)} className="px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)' }}>↻ Reroll</button>
                 </>
               )}
               {transformId === 'rhythm' && (
@@ -703,8 +703,8 @@ export default function SongEditor({ song, profile, onClose }) {
 
         {/* Manual chord editor — pick a new chord (and voicing) for each marked cell. */}
         {isManual && hasMark && section && (
-          <div className="rounded-xl p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-            <p className="text-[11px] mb-3" style={{ color: '#9a9a9a' }}>
+          <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+            <p className="text-[11px] mb-3" style={{ color: 'var(--color-ink-muted)' }}>
               Change each chord by hand — pick a chord name, then an optional shape. The change lands on the song immediately.
             </p>
             <div className="flex flex-col gap-3">
@@ -727,30 +727,30 @@ export default function SongEditor({ song, profile, onClose }) {
 
         {/* What changed — the transform is already applied to the selection. */}
         {result && (
-          <div className="rounded-xl p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
+          <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}>
+              <span className="text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)' }}>
                 ✓ Applied to selection
               </span>
-              {busy && <span className="text-[11px]" style={{ color: '#7a7a7a' }}>working…</span>}
+              {busy && <span className="text-[11px]" style={{ color: 'var(--color-ink-subtle)' }}>working…</span>}
             </div>
             {/* Headline reach badge for reach transforms */}
             {reachHeadline && (
-              <div className="flex items-center gap-2 mb-2 text-xs" style={{ color: '#9a9a9a' }}>
+              <div className="flex items-center gap-2 mb-2 text-xs" style={{ color: 'var(--color-ink-muted)' }}>
                 <span>Hardest reach:</span>
                 <DifficultyBadge score={reachHeadline.before} />
                 <span>→</span>
                 <DifficultyBadge score={reachHeadline.after} />
                 {result.fret != null && (
-                  <span className="ml-1 px-2 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>
+                  <span className="ml-1 px-2 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' }}>
                     Capo {result.fret}
                   </span>
                 )}
               </div>
             )}
             {result.meta?.label && (
-              <div className="text-xs mb-2" style={{ color: '#9a9a9a' }}>
-                {result.meta.label} <span style={{ color: '#4a4a4a' }}>· {result.meta.source}</span>
+              <div className="text-xs mb-2" style={{ color: 'var(--color-ink-muted)' }}>
+                {result.meta.label} <span style={{ color: 'var(--color-ink-ghost)' }}>· {result.meta.source}</span>
               </div>
             )}
 
@@ -758,14 +758,14 @@ export default function SongEditor({ song, profile, onClose }) {
             {result.chords && result.chords.length > 0 && (
               <div className="flex flex-wrap gap-3 mb-3">
                 {result.chords.map((c) => (
-                  <div key={c.index} className="flex flex-col items-center gap-1 rounded-lg p-2" style={{ background: '#0c0c0c', border: '1px solid #1e1e1e' }}>
+                  <div key={c.index} className="flex flex-col items-center gap-1 rounded-lg p-2" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)' }}>
                     <div className="flex items-center gap-1 text-[11px]">
-                      <span style={{ color: '#7a7a7a' }}>{c.fromName}</span>
-                      {c.changed && <><span style={{ color: '#4a4a4a' }}>→</span><span style={{ color: '#4ade80' }}>{c.toName}</span></>}
+                      <span style={{ color: 'var(--color-ink-subtle)' }}>{c.fromName}</span>
+                      {c.changed && <><span style={{ color: 'var(--color-ink-ghost)' }}>→</span><span style={{ color: 'var(--color-success)' }}>{c.toName}</span></>}
                     </div>
                     <div className="flex items-center gap-1">
                       {c.fromScore != null && <DifficultyBadge score={c.fromScore} />}
-                      {c.toScore != null && <><span style={{ color: '#4a4a4a' }}>→</span><DifficultyBadge score={c.toScore} /></>}
+                      {c.toScore != null && <><span style={{ color: 'var(--color-ink-ghost)' }}>→</span><DifficultyBadge score={c.toScore} /></>}
                     </div>
                     {(c.toVoicing || c.fromVoicing) && (
                       <FretboardDiagram chord={c.toVoicing || c.fromVoicing} />
@@ -793,13 +793,13 @@ export default function SongEditor({ song, profile, onClose }) {
             plays just that run so you hear each transform as you tap it. */}
         {timeline.length > 0 && (
           <div className="sticky bottom-0 flex flex-wrap items-center gap-2 py-2 px-1"
-            style={{ background: '#0b0b0b', borderTop: '1px solid #1e1e1e' }}>
+            style={{ background: 'var(--color-surface-base)', borderTop: '1px solid var(--color-surface-700)' }}>
             {/* Play full song */}
             <button onClick={(playing && playScope === 'song') ? stop : playSong}
               className="text-sm font-semibold px-4 py-2 rounded-lg"
               style={(playing && playScope === 'song')
-                ? { background: 'rgba(239,68,68,0.14)', color: '#f87171' }
-                : { background: 'rgba(129,140,248,0.12)', color: '#818cf8', border: '1px solid rgba(129,140,248,0.3)' }}>
+                ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)' }
+                : { background: 'rgba(129,140,248,0.12)', color: 'var(--color-accent)', border: '1px solid rgba(129,140,248,0.3)' }}>
               {(playing && playScope === 'song') ? '■ Stop' : '▶ Play full song'}
             </button>
 
@@ -808,8 +808,8 @@ export default function SongEditor({ song, profile, onClose }) {
               <button onClick={(playing && playScope === 'selection') ? stop : play}
                 className="text-sm font-semibold px-4 py-2 rounded-lg"
                 style={(playing && playScope === 'selection')
-                  ? { background: 'rgba(239,68,68,0.14)', color: '#f87171' }
-                  : { background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)' }}>
+                  ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)' }
+                  : { background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }}>
                 {(playing && playScope === 'selection') ? '■ Stop' : '▶ Play selection'}
               </button>
             )}
@@ -817,15 +817,15 @@ export default function SongEditor({ song, profile, onClose }) {
             <button onClick={toggleLoop}
               className="text-xs px-3 py-2 rounded-lg"
               style={loopEnabled.current
-                ? { background: 'rgba(56,189,248,0.12)', color: '#38bdf8' }
-                : { background: '#1a1a1a', color: '#7a7a7a' }}>
+                ? { background: 'rgba(56,189,248,0.12)', color: 'var(--color-info)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
               ⟲ Loop
             </button>
             <div className="flex-1" />
             {hasMark && (
               <button onClick={revertSection}
                 className="text-xs font-medium px-3 py-2 rounded-lg"
-                style={{ background: '#1a1a1a', color: '#9a9a9a' }}>
+                style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)' }}>
                 ↶ Revert selection
               </button>
             )}
@@ -833,7 +833,7 @@ export default function SongEditor({ song, profile, onClose }) {
         )}
 
         {!timeline.length && (
-          <div className="text-sm italic py-6 text-center" style={{ color: '#4a4a4a' }}>
+          <div className="text-sm italic py-6 text-center" style={{ color: 'var(--color-ink-ghost)' }}>
             This song has no resolvable chords to edit.
           </div>
         )}
@@ -843,9 +843,9 @@ export default function SongEditor({ song, profile, onClose }) {
           under the cursor. Mirrors the Progression Explorer tooltip. */}
       {tooltip && (
         <div className="fixed z-50 rounded-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, background: '#1e1e1e', border: '1px solid #2a2a2a', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+          style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
           {tooltip.voicing.type && (
-            <div className="text-xs mb-1 text-center" style={{ color: '#5a5a5a' }}>{tooltip.voicing.type}</div>
+            <div className="text-xs mb-1 text-center" style={{ color: 'var(--color-ink-faint)' }}>{tooltip.voicing.type}</div>
           )}
           <FretboardDiagram chord={tooltip.voicing} showFingers />
         </div>
@@ -859,20 +859,20 @@ export default function SongEditor({ song, profile, onClose }) {
 function ManualChordRow({ pos, original, currentName, edited, chordNames, onPickName, onPickVoicing, onReset, onHoverVoicing, onLeaveVoicing }) {
   const voicings = lookupVoicings(currentName).slice().sort((a, b) => a.score - b.score);
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg p-2" style={{ background: '#0c0c0c', border: '1px solid #1e1e1e' }}>
-      <span className="text-[10px] w-8 shrink-0" style={{ color: '#4a4a4a' }}>#{pos + 1}</span>
+    <div className="flex flex-wrap items-center gap-2 rounded-lg p-2" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)' }}>
+      <span className="text-[10px] w-8 shrink-0" style={{ color: 'var(--color-ink-ghost)' }}>#{pos + 1}</span>
 
       {/* Chord name picker */}
       <select value={chordNames.includes(currentName) ? currentName : ''}
         onChange={(e) => onPickName(e.target.value)}
         className="text-xs rounded px-2 py-1"
-        style={{ background: '#1a1a1a', color: edited ? '#4ade80' : '#e6dcc8', border: '1px solid #2a2a2a' }}>
+        style={{ background: 'var(--color-surface-750)', color: edited ? 'var(--color-success)' : '#e6dcc8', border: '1px solid var(--color-surface-550)' }}>
         {!chordNames.includes(currentName) && <option value="">{currentName || '—'}</option>}
         {chordNames.map(n => <option key={n} value={n}>{n}</option>)}
       </select>
 
       {original && original !== currentName && (
-        <span className="text-[10px]" style={{ color: '#5a5a5a' }}>was {original}</span>
+        <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>was {original}</span>
       )}
 
       {/* Voicing chips for the chosen chord */}
@@ -882,17 +882,17 @@ function ManualChordRow({ pos, original, currentName, edited, chordNames, onPick
             onClick={() => onPickVoicing(v, currentName)}
             onMouseEnter={(e) => onHoverVoicing(e, v)} onMouseLeave={onLeaveVoicing}
             className="text-[10px] font-mono px-1.5 py-0.5 rounded"
-            style={{ background: '#161616', color: '#9a9a9a', border: '1px solid #262626' }}
+            style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-600)' }}
             title={`${v.type} — ${v.tab}`}>
             {v.tab}
           </button>
         ))}
-        {!voicings.length && <span className="text-[10px] italic" style={{ color: '#6a6a6a' }}>no shape on file</span>}
+        {!voicings.length && <span className="text-[10px] italic" style={{ color: 'var(--color-ink-subtle)' }}>no shape on file</span>}
       </div>
 
       <div className="flex-1" />
       {edited && (
-        <button onClick={onReset} className="text-[10px] px-2 py-0.5 rounded" style={{ background: '#1a1a1a', color: '#7a7a7a' }}>
+        <button onClick={onReset} className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
           reset
         </button>
       )}
@@ -916,8 +916,8 @@ function ChordCell({ name, text, marked, pendingStart, changed, onTap, onHover, 
         userSelect: 'none',
       }}>
       <span className="font-bold select-none leading-tight"
-        style={{ color: changed ? '#4ade80' : marked ? '#c9a96e' : '#818cf8' }}>{name || '·'}</span>
-      <span className="leading-tight" style={{ color: marked ? '#b8a88a' : '#6a6a6a' }}>{text || ' '}</span>
+        style={{ color: changed ? 'var(--color-success)' : marked ? 'var(--color-brand)' : 'var(--color-accent)' }}>{name || '·'}</span>
+      <span className="leading-tight" style={{ color: marked ? '#b8a88a' : 'var(--color-ink-subtle)' }}>{text || ' '}</span>
     </button>
   );
 }
@@ -927,14 +927,14 @@ function ChordCell({ name, text, marked, pendingStart, changed, onTap, onHover, 
 function Seg({ label, value, options, onPick }) {
   return (
     <span className="inline-flex items-center gap-1">
-      {label && <span style={{ color: '#5a5a5a' }}>{label}:</span>}
-      <span className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid #2a2a2a' }}>
+      {label && <span style={{ color: 'var(--color-ink-faint)' }}>{label}:</span>}
+      <span className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid var(--color-surface-550)' }}>
         {options.map(([val, lbl]) => (
           <button key={val} onClick={() => onPick(val)}
             className="px-2 py-0.5"
             style={value === val
-              ? { background: 'rgba(201,169,110,0.2)', color: '#c9a96e' }
-              : { background: '#161616', color: '#7a7a7a' }}>
+              ? { background: 'rgba(201,169,110,0.2)', color: 'var(--color-brand)' }
+              : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)' }}>
             {lbl}
           </button>
         ))}
@@ -946,10 +946,10 @@ function Seg({ label, value, options, onPick }) {
 function SelectStrip({ label, value, options, onPick }) {
   return (
     <span className="inline-flex items-center gap-1">
-      <span style={{ color: '#5a5a5a' }}>{label}:</span>
+      <span style={{ color: 'var(--color-ink-faint)' }}>{label}:</span>
       <select value={value} onChange={e => onPick(e.target.value)}
         className="rounded-md px-1.5 py-0.5"
-        style={{ background: '#161616', color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+        style={{ background: 'var(--color-surface-800)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-550)' }}>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
     </span>
