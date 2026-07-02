@@ -4,6 +4,44 @@ const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 let _ctx = null;
 let _timeouts = [];
 let _lastState = 'none';
+let _silentEl = null;   // looping silent <audio> — flips iOS into the "media"
+                        // audio category so Web Audio plays even with the
+                        // physical ringer/silent switch ON (see enableMediaPlayback).
+
+// A tiny silent WAV as a data-URI (44-byte header + a few silent frames). Looping
+// this through an HTML5 <audio> element convinces iOS to route audio through the
+// media/playback channel, which — unlike the Web Audio "ambient" channel — is NOT
+// muted by the hardware silent switch. Without this, on an iPhone with the ringer
+// switch on silent, synthesized chords are inaudible while <video> sound still plays.
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+/**
+ * Route Web Audio through iOS's media channel so it ignores the silent switch.
+ * MUST be called from inside a real user gesture (tap/click). Idempotent.
+ *
+ * iOS mutes the Web Audio API when the hardware ringer switch is set to silent,
+ * but leaves HTML media elements audible. Starting (and keeping) a looping silent
+ * <audio> element promotes the page's audio session to "playback", after which our
+ * synthesized sounds play in silent mode too.
+ */
+export function enableMediaPlayback() {
+  try {
+    if (!_silentEl) {
+      const el = new Audio(SILENT_WAV);
+      el.loop = true;
+      el.preload = 'auto';
+      el.setAttribute('playsinline', '');
+      el.muted = false;      // must be audible (silent content) to hold the session
+      el.volume = 0.0001;    // effectively silent, but a real, non-muted stream
+      _silentEl = el;
+    }
+    // play() must be kicked off during the gesture; ignore the promise rejection
+    // that occurs if it's ever called outside one.
+    const p = _silentEl.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch { /* ignore */ }
+}
 
 // Diagnostic: current AudioContext state + sampleRate, for on-screen debugging
 // of audio problems on devices we can't open a console on (iOS).
@@ -48,6 +86,8 @@ function getCtx() {
  */
 export async function unlockAudio() {
   const ctx = getCtx();
+  // Promote to the media audio session so playback survives the iOS silent switch.
+  enableMediaPlayback();
   // Prime with a silent buffer — required to unlock audio on iOS.
   try {
     const buf = ctx.createBuffer(1, 1, 22050);
