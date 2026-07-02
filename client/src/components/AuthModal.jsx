@@ -229,10 +229,10 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
   }
 
   const inputStyle = {
-    background: '#111', border: '1px solid #333', color: '#f0ede8',
+    background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)',
   };
   const goldBtn = {
-    background: '#c9a96e', color: '#0f0f0f',
+    background: 'var(--color-brand)', color: 'var(--color-surface-base)',
   };
 
   // As a landing-page gate (fullPage) there's no overlay or close button — the
@@ -245,18 +245,18 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
   return (
     <div
       className={wrapperClass}
-      style={fullPage ? { background: '#0f0f0f' } : undefined}
+      style={fullPage ? { background: 'var(--color-surface-base)' } : undefined}
       onClick={e => { if (!fullPage && e.target === e.currentTarget) onClose(); }}
     >
       <div
         className="relative w-full max-w-sm rounded-xl p-7"
-        style={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }}
+        style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)' }}
       >
         {!fullPage && (
           <button
             onClick={onClose}
             className="absolute right-6 top-6 text-xl leading-none"
-            style={{ color: '#888' }}
+            style={{ color: 'var(--color-ink-muted)' }}
             aria-label="Close"
           >×</button>
         )}
@@ -266,7 +266,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
           <button
             onClick={onBack}
             className="absolute left-6 top-6 text-xs"
-            style={{ color: '#888' }}
+            style={{ color: 'var(--color-ink-muted)' }}
           >← {tk(tr, 'back', 'Back')}</button>
         )}
 
@@ -279,17 +279,17 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                 type="button"
                 onClick={() => setShowLangMenu(v => !v)}
                 className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                style={{ color: '#aaa', border: '1px solid #2a2a2a', background: '#111' }}
+                style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)', background: 'var(--color-surface-900)' }}
               >
                 🌐 {LANGUAGES.find(l => l.code === lang)?.label || 'English'}
-                <span style={{ color: '#666' }}>▾</span>
+                <span style={{ color: 'var(--color-ink-subtle)' }}>▾</span>
               </button>
               {showLangMenu && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
                   <div
                     className="absolute left-1/2 -translate-x-1/2 mt-1 rounded-xl overflow-hidden z-50 max-h-72 overflow-y-auto"
-                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', minWidth: '150px' }}
+                    style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)', minWidth: '150px' }}
                   >
                     {LANGUAGES.map(l => (
                       <button
@@ -298,10 +298,10 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                         onClick={() => { onLangSelect(l.code); setShowLangMenu(false); }}
                         className="w-full text-left text-xs px-3 py-2 transition-colors"
                         style={{
-                          color: l.code === lang ? '#c9a96e' : '#aaa',
+                          color: l.code === lang ? 'var(--color-brand)' : 'var(--color-ink-muted)',
                           background: l.code === lang ? 'rgba(201,169,110,0.08)' : 'transparent',
                         }}
-                        onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = '#222'; }}
+                        onMouseEnter={e => { if (l.code !== lang) e.currentTarget.style.background = 'var(--color-surface-650)'; }}
                         onMouseLeave={e => { if (l.code !== lang) e.currentTarget.style.background = 'transparent'; }}
                       >
                         {l.label}
@@ -318,14 +318,14 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
           <>
             <h2
               className="mb-6 text-center text-base font-medium leading-snug"
-              style={{ color: '#f0ede8' }}
+              style={{ color: 'var(--color-ink)' }}
             >
               {tk(tr, 'enterEmailPrompt',
                 'Please enter your email to sign in or create a new account.')}
             </h2>
 
             <form onSubmit={goToAuthStep} className="flex flex-col gap-2">
-              <label className="text-xs" style={{ color: '#999' }}>
+              <label className="text-xs" style={{ color: 'var(--color-ink-muted)' }}>
                 {tk(tr, 'yourEmail', 'Your Email')}
               </label>
               <input
@@ -336,8 +336,8 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                 style={inputStyle}
               />
 
-              {error && <p className="text-sm" style={{ color: '#e87070' }}>{error}</p>}
-              {info && <p className="text-sm" style={{ color: '#9cc69c' }}>{info}</p>}
+              {error && <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+              {info && <p className="text-sm" style={{ color: 'var(--color-success)' }}>{info}</p>}
 
               <button
                 type="submit"
@@ -348,26 +348,26 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
               </button>
             </form>
 
-            <p className="mt-3 text-center text-xs" style={{ color: '#888' }}>
+            <p className="mt-3 text-center text-xs" style={{ color: 'var(--color-ink-muted)' }}>
               {tk(tr, 'newHere', 'New here?')}{' '}
-              <button type="button" onClick={goToRegisterStep} className="underline font-semibold" style={{ color: '#c9a96e' }}>
+              <button type="button" onClick={goToRegisterStep} className="underline font-semibold" style={{ color: 'var(--color-brand)' }}>
                 {tk(tr, 'createAccount', 'Create account')}
               </button>
             </p>
 
-            <p className="mt-1 text-center text-xs" style={{ color: '#888' }}>
+            <p className="mt-1 text-center text-xs" style={{ color: 'var(--color-ink-muted)' }}>
               {tk(tr, 'forgotEmailOrPassword', 'Forgot your')}{' '}
-              <button onClick={onForgotPassword} className="underline" style={{ color: '#c9a96e' }}>
+              <button onClick={onForgotPassword} className="underline" style={{ color: 'var(--color-brand)' }}>
                 {tk(tr, 'passwordWord', 'password?')}
               </button>
             </p>
 
             <div className="my-4 flex items-center gap-3">
-              <div className="h-px flex-1" style={{ background: '#333' }} />
-              <span className="text-[10px] tracking-widest" style={{ color: '#666' }}>
+              <div className="h-px flex-1" style={{ background: 'var(--color-surface-600)' }} />
+              <span className="text-[10px] tracking-widest" style={{ color: 'var(--color-ink-subtle)' }}>
                 {tk(tr, 'orUse', 'OR USE')}
               </span>
-              <div className="h-px flex-1" style={{ background: '#333' }} />
+              <div className="h-px flex-1" style={{ background: 'var(--color-surface-600)' }} />
             </div>
 
             <div className="flex flex-col gap-2">
@@ -379,7 +379,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                 <button
                   onClick={onGoogleClick}
                   className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium"
-                  style={{ background: '#222', border: '1px solid #333', color: '#f0ede8' }}
+                  style={{ background: 'var(--color-surface-650)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)' }}
                 >
                   <span style={{ fontWeight: 700 }}>G</span>
                   {tk(tr, 'continueWithGoogle', 'Google')}
@@ -388,7 +388,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
               <button
                 onClick={onFacebookClick}
                 className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium"
-                style={{ background: '#222', border: '1px solid #333', color: '#f0ede8' }}
+                style={{ background: 'var(--color-surface-650)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)' }}
               >
                 <span style={{ color: '#4267B2', fontWeight: 700 }}>f</span>
                 {tk(tr, 'continueWithFacebook', 'Facebook')}
@@ -396,17 +396,17 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
             </div>
 
             <div className="my-4 flex items-center gap-3">
-              <div className="h-px flex-1" style={{ background: '#333' }} />
-              <span className="text-[10px] tracking-widest" style={{ color: '#666' }}>
+              <div className="h-px flex-1" style={{ background: 'var(--color-surface-600)' }} />
+              <span className="text-[10px] tracking-widest" style={{ color: 'var(--color-ink-subtle)' }}>
                 {tk(tr, 'orUse', 'OR USE')}
               </span>
-              <div className="h-px flex-1" style={{ background: '#333' }} />
+              <div className="h-px flex-1" style={{ background: 'var(--color-surface-600)' }} />
             </div>
 
-            <p className="text-center text-xs" style={{ color: '#888' }}>
+            <p className="text-center text-xs" style={{ color: 'var(--color-ink-muted)' }}>
               {tk(tr, 'groupSubscriptionPrompt', 'Accessing a group subscription?')}
               <br />
-              <button onClick={onInstitutionClick} className="underline" style={{ color: '#c9a96e' }}>
+              <button onClick={onInstitutionClick} className="underline" style={{ color: 'var(--color-brand)' }}>
                 {tk(tr, 'signInThroughInstitution', 'Sign in')}
               </button>{' '}
               {tk(tr, 'throughYourInstitution', 'through your institution')}
@@ -416,16 +416,16 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
 
         {step === 'auth' && (
           <>
-            <h2 className="mb-1 text-center text-lg font-semibold" style={{ color: '#f0ede8' }}>
+            <h2 className="mb-1 text-center text-lg font-semibold" style={{ color: 'var(--color-ink)' }}>
               {mode === 'login'
                 ? tk(tr, 'welcomeBack', 'Welcome back')
                 : tk(tr, 'createYourAccount', 'Create your account')}
             </h2>
-            <p className="mb-5 text-center text-xs" style={{ color: '#888' }}>
+            <p className="mb-5 text-center text-xs" style={{ color: 'var(--color-ink-muted)' }}>
               {(mode === 'login'
                 ? tk(tr, 'enterPasswordFor', 'Enter your password for')
                 : tk(tr, 'choosePasswordFor', 'Choose a password for')) + ' '}
-              <span style={{ color: '#c9a96e' }}>{form.email}</span>
+              <span style={{ color: 'var(--color-brand)' }}>{form.email}</span>
             </p>
 
             <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
@@ -446,7 +446,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                 style={inputStyle}
               />
 
-              {error && <p className="text-sm" style={{ color: '#e87070' }}>{error}</p>}
+              {error && <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
               <button
                 type="submit" disabled={loading}
@@ -459,17 +459,17 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
 
             {mode === 'login' && (
               <p className="mt-3 text-center text-xs">
-                <button onClick={onForgotPassword} className="underline" style={{ color: '#888' }}>
+                <button onClick={onForgotPassword} className="underline" style={{ color: 'var(--color-ink-muted)' }}>
                   {tr.forgotPassword}
                 </button>
               </p>
             )}
 
-            <p className="mt-3 text-center text-xs" style={{ color: '#666' }}>
+            <p className="mt-3 text-center text-xs" style={{ color: 'var(--color-ink-subtle)' }}>
               {mode === 'login' ? tr.noAccount : tr.haveAccount}{' '}
               <button
                 onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
-                className="underline" style={{ color: '#c9a96e' }}
+                className="underline" style={{ color: 'var(--color-brand)' }}
               >
                 {mode === 'login' ? tr.signUp : tr.signIn}
               </button>
@@ -478,7 +478,7 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
             <p className="mt-4 text-center text-xs">
               <button
                 onClick={() => { setStep('email'); setError(''); setForm(f => ({ ...f, password: '' })); }}
-                className="underline" style={{ color: '#888' }}
+                className="underline" style={{ color: 'var(--color-ink-muted)' }}
               >
                 ← {tk(tr, 'back', 'Back')}
               </button>

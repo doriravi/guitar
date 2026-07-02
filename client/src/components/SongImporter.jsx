@@ -87,14 +87,14 @@ export default function SongImporter() {
 
   const editField = (k, v) => setParsed(p => ({ ...p, [k]: v }));
 
-  const input = { background: '#111', border: '1px solid #333', color: '#f0ede8', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
+  const input = { background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
 
   return (
     <div className="p-3 sm:p-5 max-w-3xl mx-auto">
-      <h2 className="text-xl font-bold mb-1" style={{ color: '#f0ede8' }}>
+      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--color-ink)' }}>
         {editingId ? 'Edit song' : 'Import a song'}
       </h2>
-      <p className="text-sm mb-4" style={{ color: '#5a5a5a' }}>
+      <p className="text-sm mb-4" style={{ color: 'var(--color-ink-faint)' }}>
         {editingId
           ? 'Edit the text below and Parse to re-read it, or change the fields in the preview, then Update.'
           : 'Paste a chord sheet (chords on their own line above each lyric line, like Ultimate Guitar). We turn it into a playable song with your hand-friendly chords and save it in this browser.'}
@@ -106,98 +106,98 @@ export default function SongImporter() {
         placeholder={`Song Title Chords by Artist\nKey: A\nCapo: 1st fret\n120 bpm\n\n[Verse]\n     A           D\nPaste the chord-over-lyric lines here...`}
         rows={10}
         className="w-full font-mono text-xs rounded-lg p-3 outline-none"
-        style={{ background: '#0d0d0d', border: '1px solid #2a2a2a', color: '#cfc8bd' }}
+        style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
       />
 
       <div className="flex items-center gap-3 mt-3">
         <button onClick={handleParse} disabled={!text.trim()}
           className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-          style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+          style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
           Parse
         </button>
         {editingId && (
           <button onClick={cancelEdit} className="px-3 py-2 rounded-lg text-sm"
-            style={{ color: '#888', border: '1px solid #2a2a2a' }}>
+            style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
             Cancel edit
           </button>
         )}
-        {savedMsg && <span className="text-xs" style={{ color: '#4ade80' }}>{savedMsg}</span>}
+        {savedMsg && <span className="text-xs" style={{ color: 'var(--color-success)' }}>{savedMsg}</span>}
       </div>
 
       {/* ── Parsed preview / edit ── */}
       {parsed && (
-        <div className="mt-5 rounded-xl p-4" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
-          <p className="text-xs uppercase tracking-widest font-semibold mb-3" style={{ color: '#5a5a5a' }}>Review &amp; edit</p>
+        <div className="mt-5 rounded-xl p-4" style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-700)' }}>
+          <p className="text-xs uppercase tracking-widest font-semibold mb-3" style={{ color: 'var(--color-ink-faint)' }}>Review &amp; edit</p>
 
           {warnings.length > 0 && (
-            <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: '#fbbf24' }}>
+            <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: 'var(--color-warning)' }}>
               {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
             </div>
           )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <label className="flex flex-col gap-1 col-span-2">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>Title</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>Title</span>
               <input style={input} value={parsed.title} onChange={e => editField('title', e.target.value)} />
             </label>
             <label className="flex flex-col gap-1 col-span-2">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>Artist</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>Artist</span>
               <input style={input} value={parsed.artist} onChange={e => editField('artist', e.target.value)} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>Key</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>Key</span>
               <input style={input} value={parsed.key} onChange={e => editField('key', e.target.value)} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>Scale</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>Scale</span>
               <select style={input} value={parsed.scaleType} onChange={e => editField('scaleType', e.target.value)}>
                 <option value="major">major</option>
                 <option value="minor">minor</option>
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>Capo</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>Capo</span>
               <input style={input} type="number" min="0" max="11" value={parsed.capo}
                 onChange={e => editField('capo', parseInt(e.target.value, 10) || 0)} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px]" style={{ color: '#5a5a5a' }}>BPM</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>BPM</span>
               <input style={input} type="number" min="40" max="240" value={parsed.bpm || ''}
                 onChange={e => editField('bpm', parseInt(e.target.value, 10) || undefined)} />
             </label>
           </div>
 
           <div className="flex flex-wrap gap-1.5 mb-3">
-            <span className="text-[10px] mr-1 self-center" style={{ color: '#5a5a5a' }}>Detected chords:</span>
+            <span className="text-[10px] mr-1 self-center" style={{ color: 'var(--color-ink-faint)' }}>Detected chords:</span>
             {(parsed.chords?.length)
               ? parsed.chords.map((c, i) => (
-                  <span key={i} className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#1a1a1a', color: '#c9a96e' }}>{c}</span>
+                  <span key={i} className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-brand)' }}>{c}</span>
                 ))
-              : <span className="text-[11px] italic" style={{ color: '#f87171' }}>none — check the format</span>}
+              : <span className="text-[11px] italic" style={{ color: 'var(--color-danger)' }}>none — check the format</span>}
           </div>
 
           {/* chord-over-lyric preview */}
-          <div className="rounded-lg p-3 font-mono text-xs max-h-60 overflow-y-auto" style={{ background: '#0d0d0d', border: '1px solid #1e1e1e' }}>
+          <div className="rounded-lg p-3 font-mono text-xs max-h-60 overflow-y-auto" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)' }}>
             {(parsed.lyricLines?.length)
               ? parsed.lyricLines.map((ln, i) => (
                   <div key={i} className="mb-1">
                     {ln.chordNames?.length > 0 && (
-                      <div className="font-bold" style={{ color: '#818cf8' }}>{ln.chordNames.join('  ')}</div>
+                      <div className="font-bold" style={{ color: 'var(--color-accent)' }}>{ln.chordNames.join('  ')}</div>
                     )}
-                    <div style={{ color: '#6a6a6a' }}>{ln.text || ' '}</div>
+                    <div style={{ color: 'var(--color-ink-subtle)' }}>{ln.text || ' '}</div>
                   </div>
                 ))
-              : <span className="italic" style={{ color: '#3a3a3a' }}>No lyric lines parsed.</span>}
+              : <span className="italic" style={{ color: 'var(--color-ink-ghost)' }}>No lyric lines parsed.</span>}
           </div>
 
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={cancelEdit}
-              className="px-4 py-2 rounded-lg text-sm" style={{ color: '#888', border: '1px solid #2a2a2a' }}>
+              className="px-4 py-2 rounded-lg text-sm" style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
               Discard
             </button>
             <button onClick={handleSave} disabled={!parsed.chords?.length}
               className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-              style={{ background: '#4ade80', color: '#0f0f0f' }}>
+              style={{ background: 'var(--color-success)', color: 'var(--color-surface-base)' }}>
               {editingId ? 'Update song' : 'Save song'}
             </button>
           </div>
@@ -207,29 +207,29 @@ export default function SongImporter() {
       {/* ── Saved songs ── */}
       {saved.length > 0 && (
         <div className="mt-6">
-          <p className="text-xs uppercase tracking-widest font-semibold mb-2" style={{ color: '#5a5a5a' }}>Your imported songs</p>
+          <p className="text-xs uppercase tracking-widest font-semibold mb-2" style={{ color: 'var(--color-ink-faint)' }}>Your imported songs</p>
           <div className="space-y-1.5">
             {saved.map(s => (
               <div key={s.id} className="flex items-center justify-between rounded-lg px-3 py-2"
-                style={{ background: editingId === s.id ? '#1c1c12' : '#141414',
-                  border: `1px solid ${editingId === s.id ? 'rgba(201,169,110,0.4)' : '#1e1e1e'}` }}>
+                style={{ background: editingId === s.id ? '#1c1c12' : 'var(--color-surface-850)',
+                  border: `1px solid ${editingId === s.id ? 'rgba(201,169,110,0.4)' : 'var(--color-surface-700)'}` }}>
                 <div className="min-w-0">
-                  <span className="text-sm font-semibold" style={{ color: '#d0cdc8' }}>{s.title}</span>
-                  <span className="text-xs" style={{ color: '#5a5a5a' }}> — {s.artist}</span>
-                  <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8' }}>
+                  <span className="text-sm font-semibold" style={{ color: 'var(--color-ink)' }}>{s.title}</span>
+                  <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}> — {s.artist}</span>
+                  <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
                     {keyLabel(s)}{s.capo ? ` · capo ${s.capo}` : ''}{s.bpm ? ` · ${s.bpm} BPM` : ''}
                   </span>
-                  {editingId === s.id && <span className="text-[10px] ml-2" style={{ color: '#c9a96e' }}>editing…</span>}
+                  {editingId === s.id && <span className="text-[10px] ml-2" style={{ color: 'var(--color-brand)' }}>editing…</span>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button onClick={() => handleEdit(s)}
                     className="text-xs px-2 py-1 rounded"
-                    style={{ color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }}>
+                    style={{ color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.25)' }}>
                     Edit
                   </button>
                   <button onClick={() => handleDelete(s.id)}
                     className="text-xs px-2 py-1 rounded"
-                    style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}>
+                    style={{ color: 'var(--color-danger)', border: '1px solid rgba(248,113,113,0.2)' }}>
                     Delete
                   </button>
                 </div>
@@ -242,7 +242,7 @@ export default function SongImporter() {
       {/* ── Full catalog (all built-in songs) ── */}
       <div className="mt-8">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: '#5a5a5a' }}>
+          <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-faint)' }}>
             All songs in the system ({ALL_BUILTIN_SONGS.length})
           </p>
           <input
@@ -250,32 +250,32 @@ export default function SongImporter() {
             onChange={e => setSearch(e.target.value)}
             placeholder="Search title or artist…"
             className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
-            style={{ background: '#111', border: '1px solid #2a2a2a', color: '#f0ede8', width: 200 }}
+            style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)', width: 200 }}
           />
         </div>
-        <div className="rounded-lg max-h-80 overflow-y-auto" style={{ border: '1px solid #1e1e1e' }}>
+        <div className="rounded-lg max-h-80 overflow-y-auto" style={{ border: '1px solid var(--color-surface-700)' }}>
           {catalog.length === 0 && (
-            <div className="px-3 py-3 text-xs italic" style={{ color: '#3a3a3a' }}>No songs match “{search}”.</div>
+            <div className="px-3 py-3 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>No songs match “{search}”.</div>
           )}
           {catalog.map((s, i) => (
             <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5"
-              style={{ borderBottom: '1px solid #161616' }}>
+              style={{ borderBottom: '1px solid var(--color-surface-800)' }}>
               <div className="min-w-0 truncate">
-                <span className="text-sm" style={{ color: '#cfc8bd' }}>{s.title}</span>
-                <span className="text-xs" style={{ color: '#5a5a5a' }}> — {s.artist}</span>
-                <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(56,189,248,0.08)', color: '#38bdf8' }}>
+                <span className="text-sm" style={{ color: 'var(--color-ink)' }}>{s.title}</span>
+                <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}> — {s.artist}</span>
+                <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(56,189,248,0.08)', color: 'var(--color-info)' }}>
                   {keyLabel(s)}
                 </span>
               </div>
               <button onClick={() => handleCopyBuiltin(s)}
                 className="text-[11px] px-2 py-1 rounded shrink-0"
-                style={{ color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)' }}>
+                style={{ color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.25)' }}>
                 Copy to my songs
               </button>
             </div>
           ))}
         </div>
-        <p className="text-[10px] mt-1.5" style={{ color: '#3a3a3a' }}>
+        <p className="text-[10px] mt-1.5" style={{ color: 'var(--color-ink-ghost)' }}>
           Built-in songs are read-only references. Copy one to your songs to edit its chords, key, or paste your own lyrics.
         </p>
       </div>
