@@ -16,15 +16,15 @@ const CENT_RANGE = 50; // ±50 cents shown on needle
 
 function centColor(cents) {
   const abs = Math.abs(cents);
-  if (abs <= 5)  return '#4ade80';
-  if (abs <= 15) return '#c9a96e';
-  if (abs <= 30) return '#fb923c';
-  return '#f87171';
+  if (abs <= 5)  return 'var(--color-success)';
+  if (abs <= 15) return 'var(--color-brand)';
+  if (abs <= 30) return 'var(--color-warning)';
+  return 'var(--color-danger)';
 }
 
 // ── Oscilloscope canvas ───────────────────────────────────────────────────────
 
-function drawOscilloscope(canvas, timeData, color = '#38bdf8', active = true) {
+function drawOscilloscope(canvas, timeData, color = 'var(--color-info)', active = true) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
@@ -84,7 +84,7 @@ function drawOscilloscope(canvas, timeData, color = '#38bdf8', active = true) {
 function TunerNeedle({ cents, active }) {
   // cents: number (-50..+50), active: bool
   const pct = active ? Math.max(-1, Math.min(1, cents / CENT_RANGE)) : 0;
-  const color = active ? centColor(cents) : '#2a2a2a';
+  const color = active ? centColor(cents) : 'var(--color-surface-550)';
 
   // Needle angle: -60° to +60°
   const angle = pct * 60;
@@ -116,7 +116,7 @@ function TunerNeedle({ cents, active }) {
             <line
               x1={cx + r1 * Math.cos(ra)} y1={cy + r1 * Math.sin(ra)}
               x2={cx + r2 * Math.cos(ra)} y2={cy + r2 * Math.sin(ra)}
-              stroke={t === 0 ? '#4ade80' : '#3a3a3a'}
+              stroke={t === 0 ? 'var(--color-success)' : 'var(--color-ink-ghost)'}
               strokeWidth={t === 0 ? 2 : 1}
             />
             {isMajor && t !== 0 && (
@@ -228,7 +228,7 @@ export default function OscilloscopeTuner({ lang }) {
       if (ts - lastDrawRef.current > 33) {
         lastDrawRef.current = ts;
         const canvas = canvasRef.current;
-        if (canvas) drawOscilloscope(canvas, timeRef.current, '#38bdf8', rms > 0.005);
+        if (canvas) drawOscilloscope(canvas, timeRef.current, 'var(--color-info)', rms > 0.005);
       }
 
       // Pitch detection — only when there's enough signal, throttled to ~12fps
@@ -260,7 +260,7 @@ export default function OscilloscopeTuner({ lang }) {
 
   const inTune = note && Math.abs(note.cents) <= 5;
   const volPct = Math.round(volume * 100);
-  const volColor = volume > 0.7 ? '#f87171' : volume > 0.25 ? '#4ade80' : '#2a2a2a';
+  const volColor = volume > 0.7 ? 'var(--color-danger)' : volume > 0.25 ? 'var(--color-success)' : 'var(--color-surface-550)';
 
   return (
     <div className="p-3 sm:p-5 space-y-4">
@@ -268,10 +268,10 @@ export default function OscilloscopeTuner({ lang }) {
       {/* Header + mic button */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base sm:text-lg font-bold mb-0.5" style={{ color: '#f0ede8' }}>
+          <h2 className="text-base sm:text-lg font-bold mb-0.5" style={{ color: 'var(--color-ink)' }}>
             {tr.tunerTitle}
           </h2>
-          <p className="text-xs" style={{ color: '#5a5a5a' }}>
+          <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             {tr.tunerDesc}
           </p>
         </div>
@@ -279,32 +279,32 @@ export default function OscilloscopeTuner({ lang }) {
         {!listening ? (
           <button onClick={startListening}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold shrink-0"
-            style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
             {tr.start}
           </button>
         ) : (
           <button onClick={stopListening}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold shrink-0"
-            style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
+            style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.25)' }}>
             <span className="animate-pulse">●</span> {tr.stop}
           </button>
         )}
       </div>
 
       {permDenied && (
-        <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
           {tr.micDenied}
         </p>
       )}
 
       {/* View toggle */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: '#161616' }}>
+      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-800)' }}>
         {[['both', tr.waveform + ' + ' + tr.chromaticTuner], ['scope', tr.waveform], ['tuner', tr.chromaticTuner]].map(([v, l]) => (
           <button key={v} onClick={() => setActiveView(v)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
             style={activeView === v
-              ? { background: '#1e1e1e', color: '#c9a96e', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
-              : { color: '#5a5a5a' }}>
+              ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
+              : { color: 'var(--color-ink-faint)' }}>
             {l}
           </button>
         ))}
@@ -313,12 +313,12 @@ export default function OscilloscopeTuner({ lang }) {
       {/* Volume bar */}
       {listening && (
         <div className="flex items-center gap-2">
-          <span className="text-xs w-6 shrink-0" style={{ color: '#3a3a3a' }}>Vol</span>
-          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#1e1e1e' }}>
+          <span className="text-xs w-6 shrink-0" style={{ color: 'var(--color-ink-ghost)' }}>Vol</span>
+          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-700)' }}>
             <div className="h-full rounded-full transition-all duration-75"
               style={{ width: `${volPct}%`, background: volColor }} />
           </div>
-          <span className="text-xs tabular-nums w-8 text-right shrink-0" style={{ color: '#3a3a3a' }}>{volPct}%</span>
+          <span className="text-xs tabular-nums w-8 text-right shrink-0" style={{ color: 'var(--color-ink-ghost)' }}>{volPct}%</span>
         </div>
       )}
 
@@ -326,10 +326,10 @@ export default function OscilloscopeTuner({ lang }) {
       {(activeView === 'both' || activeView === 'scope') && (
         <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #1a1a2a' }}>
           <div className="flex items-center justify-between px-3 py-2" style={{ background: '#0d0d1a', borderBottom: '1px solid #1a1a2a' }}>
-            <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>{tr.waveform}</span>
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-info)' }}>{tr.waveform}</span>
             {listening && (
               <span className="flex items-center gap-1.5 text-xs" style={{ color: '#2a2a4a' }}>
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#38bdf8' }} />
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--color-info)' }} />
                 {tr.live}
               </span>
             )}
@@ -353,8 +353,8 @@ export default function OscilloscopeTuner({ lang }) {
       {(activeView === 'both' || activeView === 'tuner') && (
         <div className="rounded-2xl overflow-hidden" style={{ background: '#111118', border: '1px solid #1e1e2e' }}>
           <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e1e2e' }}>
-            <span className="text-xs font-semibold" style={{ color: '#c9a96e' }}>{tr.chromaticTuner}</span>
-            <span className="text-xs" style={{ color: '#3a3a3a' }}>A4 = 440 Hz</span>
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-brand)' }}>{tr.chromaticTuner}</span>
+            <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>A4 = 440 Hz</span>
           </div>
 
           <div className="p-4">
@@ -364,26 +364,26 @@ export default function OscilloscopeTuner({ lang }) {
                 {note ? (
                   <>
                     <div className="text-6xl font-black leading-none mb-1 transition-all"
-                      style={{ color: inTune ? '#4ade80' : centColor(note.cents) }}>
+                      style={{ color: inTune ? 'var(--color-success)' : centColor(note.cents) }}>
                       {note.name}
                     </div>
-                    <div className="text-lg font-bold" style={{ color: '#3a3a3a' }}>
+                    <div className="text-lg font-bold" style={{ color: 'var(--color-ink-ghost)' }}>
                       {note.octave}
                     </div>
                   </>
                 ) : (
-                  <div className="text-5xl font-black leading-none" style={{ color: '#2a2a2a' }}>—</div>
+                  <div className="text-5xl font-black leading-none" style={{ color: 'var(--color-surface-550)' }}>—</div>
                 )}
               </div>
               {note && (
                 <div className="text-left pb-1">
-                  <div className="text-xs tabular-nums mb-0.5" style={{ color: '#5a5a5a' }}>
+                  <div className="text-xs tabular-nums mb-0.5" style={{ color: 'var(--color-ink-faint)' }}>
                     {note.hz.toFixed(1)} Hz
                   </div>
                   <div className="text-xs font-bold" style={{ color: centColor(note.cents) }}>
                     {note.cents === 0 ? '± 0¢' : note.cents > 0 ? `+${note.cents}¢` : `${note.cents}¢`}
                   </div>
-                  <div className="text-xs mt-0.5" style={{ color: inTune ? '#4ade80' : '#5a5a5a' }}>
+                  <div className="text-xs mt-0.5" style={{ color: inTune ? 'var(--color-success)' : 'var(--color-ink-faint)' }}>
                     {inTune ? tr.inTune : note.cents > 0 ? tr.tooSharp : tr.tooFlat}
                   </div>
                 </div>
@@ -396,7 +396,7 @@ export default function OscilloscopeTuner({ lang }) {
             </div>
 
             {/* Cents bar */}
-            <div className="relative h-3 rounded-full overflow-hidden mb-3" style={{ background: '#1a1a1a' }}>
+            <div className="relative h-3 rounded-full overflow-hidden mb-3" style={{ background: 'var(--color-surface-750)' }}>
               {/* Zones */}
               <div className="absolute inset-y-0 left-1/2 w-px" style={{ background: '#4ade8055', transform: 'translateX(-50%)' }} />
               {note && (
@@ -414,8 +414,8 @@ export default function OscilloscopeTuner({ lang }) {
             </div>
 
             {/* Open string reference */}
-            <div className="pt-3" style={{ borderTop: '1px solid #1a1a1a' }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
+            <div className="pt-3" style={{ borderTop: '1px solid var(--color-surface-750)' }}>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>
                 {tr.standardTuning}
               </p>
               <div className="flex gap-1.5 flex-wrap">
@@ -425,14 +425,14 @@ export default function OscilloscopeTuner({ lang }) {
                     <div key={s.name}
                       className="flex flex-col items-center px-2.5 py-1.5 rounded-lg transition-all"
                       style={{
-                        background: isNearest ? (inTune ? 'rgba(74,222,128,0.1)' : 'rgba(201,169,110,0.1)') : '#1a1a1a',
-                        border: `1px solid ${isNearest ? (inTune ? 'rgba(74,222,128,0.3)' : 'rgba(201,169,110,0.3)') : '#222'}`,
+                        background: isNearest ? (inTune ? 'rgba(74,222,128,0.1)' : 'rgba(201,169,110,0.1)') : 'var(--color-surface-750)',
+                        border: `1px solid ${isNearest ? (inTune ? 'rgba(74,222,128,0.3)' : 'rgba(201,169,110,0.3)') : 'var(--color-surface-650)'}`,
                       }}>
                       <span className="text-sm font-black leading-none"
-                        style={{ color: isNearest ? (inTune ? '#4ade80' : '#c9a96e') : '#3a3a3a' }}>
+                        style={{ color: isNearest ? (inTune ? 'var(--color-success)' : 'var(--color-brand)') : 'var(--color-ink-ghost)' }}>
                         {s.name.replace(/[0-9]/g, '')}
                       </span>
-                      <span className="text-xs tabular-nums" style={{ color: isNearest ? '#5a5a5a' : '#2a2a2a' }}>
+                      <span className="text-xs tabular-nums" style={{ color: isNearest ? 'var(--color-ink-faint)' : 'var(--color-surface-550)' }}>
                         {s.hz}
                       </span>
                     </div>
@@ -446,7 +446,7 @@ export default function OscilloscopeTuner({ lang }) {
 
       {/* Idle hint */}
       {!listening && (
-        <div className="text-center py-6" style={{ color: '#3a3a3a' }}>
+        <div className="text-center py-6" style={{ color: 'var(--color-ink-ghost)' }}>
           <p className="text-3xl mb-2">🎸</p>
           <p className="text-sm">{tr.pluckString}</p>
         </div>

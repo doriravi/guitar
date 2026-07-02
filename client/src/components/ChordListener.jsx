@@ -111,14 +111,14 @@ function noteSetFromHz(hzList) {
 
 function VolumeBar({ level }) {
   const pct   = Math.round(level * 100);
-  const color = level > 0.7 ? '#f87171' : level > 0.3 ? '#4ade80' : '#3a3a3a';
+  const color = level > 0.7 ? 'var(--color-danger)' : level > 0.3 ? 'var(--color-success)' : 'var(--color-ink-ghost)';
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs w-6" style={{ color: '#3a3a3a' }}>Vol</span>
-      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#222' }}>
+      <span className="text-xs w-6" style={{ color: 'var(--color-ink-ghost)' }}>Vol</span>
+      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-650)' }}>
         <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
       </div>
-      <span className="text-xs tabular-nums w-7 text-right" style={{ color: '#3a3a3a' }}>{pct}%</span>
+      <span className="text-xs tabular-nums w-7 text-right" style={{ color: 'var(--color-ink-ghost)' }}>{pct}%</span>
     </div>
   );
 }
@@ -137,14 +137,14 @@ function StringFeedback({ stringResults }) {
             border: `1.5px solid ${
               s.status === 'correct' ? 'rgba(34,197,94,0.3)' :
               s.status === 'wrong'   ? 'rgba(239,68,68,0.3)' :
-              s.status === 'missing' ? '#2a2a2a' : '#1e1e1e'}`,
+              s.status === 'missing' ? 'var(--color-surface-550)' : 'var(--color-surface-700)'}`,
             opacity: s.status === 'muted' ? 0.35 : 1,
           }}>
           <span className="text-xs font-bold mb-1" style={{ color: STRING_COLORS[i] }}>{STRING_LABELS[i]}</span>
-          {s.status === 'correct' && <span style={{ color: '#4ade80', fontSize: 14 }}>✓</span>}
-          {s.status === 'wrong'   && <span style={{ color: '#f87171', fontSize: 14 }}>✗</span>}
-          {s.status === 'missing' && <span style={{ color: '#5a5a5a', fontSize: 14 }}>–</span>}
-          {s.status === 'muted'   && <span style={{ color: '#3a3a3a', fontSize: 12 }}>×</span>}
+          {s.status === 'correct' && <span style={{ color: 'var(--color-success)', fontSize: 14 }}>✓</span>}
+          {s.status === 'wrong'   && <span style={{ color: 'var(--color-danger)', fontSize: 14 }}>✗</span>}
+          {s.status === 'missing' && <span style={{ color: 'var(--color-ink-faint)', fontSize: 14 }}>–</span>}
+          {s.status === 'muted'   && <span style={{ color: 'var(--color-ink-ghost)', fontSize: 12 }}>×</span>}
         </div>
       ))}
     </div>
@@ -153,22 +153,22 @@ function StringFeedback({ stringResults }) {
 
 // ── ConfigSlider ──────────────────────────────────────────────────────────────
 
-function ConfigSlider({ label, hint, value, min, max, step, format, onChange, color = '#c9a96e' }) {
+function ConfigSlider({ label, hint, value, min, max, step, format, onChange, color = 'var(--color-brand)' }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
-    <div className="rounded-xl p-3" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-semibold" style={{ color: '#d0cdc8' }}>{label}</span>
+        <span className="text-xs font-semibold" style={{ color: 'var(--color-ink)' }}>{label}</span>
         <span className="text-sm font-bold tabular-nums" style={{ color }}>{format(value)}</span>
       </div>
-      {hint && <p className="text-xs mb-2" style={{ color: '#4a4a4a' }}>{hint}</p>}
+      {hint && <p className="text-xs mb-2" style={{ color: 'var(--color-ink-ghost)' }}>{hint}</p>}
       <input
         type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(Number(e.target.value))}
         className="w-full"
-        style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)` }}
+        style={{ background: `linear-gradient(to right, ${color} ${pct}%, var(--color-surface-550) ${pct}%)` }}
       />
-      <div className="flex justify-between text-xs mt-1" style={{ color: '#2a2a2a' }}>
+      <div className="flex justify-between text-xs mt-1" style={{ color: 'var(--color-surface-550)' }}>
         <span>{format(min)}</span><span>{format(max)}</span>
       </div>
     </div>
@@ -296,26 +296,26 @@ function TuneMode({ cfg, setCfg }) {
     <div className="space-y-4">
 
       {/* Live preview card */}
-      <div className="rounded-xl p-4" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3">
           {!active ? (
             <button onClick={start}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+              style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
               🎙️ Start preview
             </button>
           ) : (
             <button onClick={stop}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+              style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
               <span className="animate-pulse">●</span> Stop
             </button>
           )}
-          {permDenied && <p className="text-xs" style={{ color: '#f87171' }}>Mic access denied.</p>}
+          {permDenied && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>Mic access denied.</p>}
           {active && <div className="flex-1"><VolumeBar level={volume} /></div>}
           <button onClick={reset}
             className="ml-auto text-xs px-3 py-1.5 rounded-lg"
-            style={{ border: '1px solid #2a2a2a', color: '#3a3a3a' }}>
+            style={{ border: '1px solid var(--color-surface-550)', color: 'var(--color-ink-ghost)' }}>
             Reset defaults
           </button>
         </div>
@@ -325,14 +325,14 @@ function TuneMode({ cfg, setCfg }) {
           <div className="space-y-3 mt-2">
 
             {/* ── Chord / fretboard monitor ── */}
-            <div className="rounded-xl overflow-hidden" style={{ background: '#111', border: `1.5px solid ${matched ? (matched.score >= 0.6 ? 'rgba(74,222,128,0.3)' : matched.score >= 0.4 ? 'rgba(201,169,110,0.35)' : 'rgba(251,146,60,0.3)') : '#1e1e1e'}`, transition: 'border-color 0.3s' }}>
+            <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-900)', border: `1.5px solid ${matched ? (matched.score >= 0.6 ? 'rgba(74,222,128,0.3)' : matched.score >= 0.4 ? 'rgba(201,169,110,0.35)' : 'rgba(251,146,60,0.3)') : 'var(--color-surface-700)'}`, transition: 'border-color 0.3s' }}>
               <div className="px-3 pt-3 pb-2 flex items-start gap-3">
                 {/* left: diagram or placeholder */}
                 <div className="shrink-0">
                   {matched ? (
                     <FretboardDiagram chord={matched.chord} />
                   ) : (
-                    <div className="flex items-center justify-center rounded-lg" style={{ width: 72, height: 90, background: '#1a1a1a', border: '1px solid #2a2a2a' }}>
+                    <div className="flex items-center justify-center rounded-lg" style={{ width: 72, height: 90, background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)' }}>
                       <span style={{ fontSize: 28, opacity: 0.25 }}>🎸</span>
                     </div>
                   )}
@@ -343,20 +343,20 @@ function TuneMode({ cfg, setCfg }) {
                   {matched ? (
                     <>
                       <div className="flex items-baseline gap-2 mb-0.5 flex-wrap">
-                        <span className="text-2xl font-black leading-none" style={{ color: '#f0ede8' }}>{matched.chord.name}</span>
-                        <span className="text-xs" style={{ color: '#5a5a5a' }}>{matched.chord.type}</span>
+                        <span className="text-2xl font-black leading-none" style={{ color: 'var(--color-ink)' }}>{matched.chord.name}</span>
+                        <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{matched.chord.type}</span>
                         <DifficultyBadge score={calcDifficulty(matched.chord.notes)} />
                       </div>
-                      <p className="text-xs font-mono mb-2" style={{ color: '#4a4a4a' }}>{matched.chord.tab}</p>
+                      <p className="text-xs font-mono mb-2" style={{ color: 'var(--color-ink-ghost)' }}>{matched.chord.tab}</p>
                       {/* score bar */}
                       <div className="flex items-center gap-2 mb-2">
-                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#2a2a2a' }}>
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
                           <div className="h-full rounded-full transition-all duration-200"
                             style={{ width: `${matched.score * 100}%`,
-                              background: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }} />
+                              background: matched.score >= 0.6 ? 'var(--color-success)' : matched.score >= 0.4 ? 'var(--color-brand)' : 'var(--color-warning)' }} />
                         </div>
                         <span className="text-xs tabular-nums font-bold w-9 text-right"
-                          style={{ color: matched.score >= 0.6 ? '#4ade80' : matched.score >= 0.4 ? '#c9a96e' : '#fb923c' }}>
+                          style={{ color: matched.score >= 0.6 ? 'var(--color-success)' : matched.score >= 0.4 ? 'var(--color-brand)' : 'var(--color-warning)' }}>
                           {Math.round(matched.score * 100)}%
                         </span>
                       </div>
@@ -365,9 +365,9 @@ function TuneMode({ cfg, setCfg }) {
                         {matched.chord.tab.split('').map((ch, s) => (
                           <span key={s} className="inline-flex flex-col items-center px-1 py-0.5 rounded text-[10px]"
                             style={{
-                              border: `1px solid ${ch === 'x' ? '#2a2a2a' : STRING_COLORS[s] + '55'}`,
-                              background: ch === 'x' ? '#141414' : STRING_COLORS[s] + '18',
-                              color: ch === 'x' ? '#3a3a3a' : STRING_COLORS[s],
+                              border: `1px solid ${ch === 'x' ? 'var(--color-surface-550)' : STRING_COLORS[s] + '55'}`,
+                              background: ch === 'x' ? 'var(--color-surface-850)' : STRING_COLORS[s] + '18',
+                              color: ch === 'x' ? 'var(--color-ink-ghost)' : STRING_COLORS[s],
                             }}>
                             <span className="font-bold leading-none">{STRING_LABELS[s]}</span>
                             <span className="leading-none mt-0.5">{ch === 'x' ? '×' : ch === '0' ? 'o' : ch}</span>
@@ -377,12 +377,12 @@ function TuneMode({ cfg, setCfg }) {
                     </>
                   ) : (
                     <div className="flex flex-col justify-center h-full">
-                      <p className="text-sm font-semibold mb-1" style={{ color: '#3a3a3a' }}>No chord detected</p>
-                      <p className="text-xs" style={{ color: '#2a2a2a' }}>
+                      <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-ink-ghost)' }}>No chord detected</p>
+                      <p className="text-xs" style={{ color: 'var(--color-surface-550)' }}>
                         {peaks.length ? `Match score below ${Math.round(cfg.minScore * 100)}% threshold` : 'No signal — play or sing louder'}
                       </p>
                       {notes.length > 0 && (
-                        <p className="text-xs mt-1" style={{ color: '#4a4a4a' }}>Notes heard: {notes.join(' · ')}</p>
+                        <p className="text-xs mt-1" style={{ color: 'var(--color-ink-ghost)' }}>Notes heard: {notes.join(' · ')}</p>
                       )}
                     </div>
                   )}
@@ -392,10 +392,10 @@ function TuneMode({ cfg, setCfg }) {
               {/* detected note classes row */}
               {notes.length > 0 && (
                 <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs" style={{ color: '#3a3a3a' }}>Notes:</span>
+                  <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>Notes:</span>
                   {notes.map(n => (
                     <span key={n} className="text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: '#1e1e1e', color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+                      style={{ background: 'var(--color-surface-700)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-550)' }}>
                       {n}
                     </span>
                   ))}
@@ -404,30 +404,30 @@ function TuneMode({ cfg, setCfg }) {
             </div>
 
             {/* ── Peaks panel ── */}
-            <div className="rounded-lg p-3" style={{ background: '#111', border: '1px solid #1e1e1e' }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
+            <div className="rounded-lg p-3" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>
                 Detected peaks ({peaks.length})
               </p>
               {peaks.length === 0 ? (
-                <p className="text-xs italic" style={{ color: '#2a2a2a' }}>no peaks — try playing or singing louder</p>
+                <p className="text-xs italic" style={{ color: 'var(--color-surface-550)' }}>no peaks — try playing or singing louder</p>
               ) : (
                 <div className="space-y-1.5">
                   {peaks.slice(0, 6).map((p, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <div className="w-16 h-1.5 rounded-full overflow-hidden shrink-0" style={{ background: '#2a2a2a' }}>
+                      <div className="w-16 h-1.5 rounded-full overflow-hidden shrink-0" style={{ background: 'var(--color-surface-550)' }}>
                         <div className="h-full rounded-full"
-                          style={{ width: `${Math.max(0, ((p.amplitude - cfg.ampThresh) / Math.abs(cfg.ampThresh)) * 100)}%`, background: '#c9a96e' }} />
+                          style={{ width: `${Math.max(0, ((p.amplitude - cfg.ampThresh) / Math.abs(cfg.ampThresh)) * 100)}%`, background: 'var(--color-brand)' }} />
                       </div>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: '#c9a96e', minWidth: 44 }}>
+                      <span className="text-xs font-bold tabular-nums" style={{ color: 'var(--color-brand)', minWidth: 44 }}>
                         {Math.round(p.hz)} Hz
                       </span>
                       {p.note && (
                         <span className="text-xs font-bold px-1.5 py-0.5 rounded"
-                          style={{ background: '#1e1e1e', color: '#f0ede8' }}>
+                          style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)' }}>
                           {p.note.name}{p.note.octave}
                         </span>
                       )}
-                      <span className="text-xs tabular-nums" style={{ color: '#3a3a3a' }}>
+                      <span className="text-xs tabular-nums" style={{ color: 'var(--color-ink-ghost)' }}>
                         {Math.round(p.amplitude)} dB
                       </span>
                     </div>
@@ -442,7 +442,7 @@ function TuneMode({ cfg, setCfg }) {
 
       {/* ── Parameter sliders ── */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#3a3a3a' }}>
+        <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--color-ink-ghost)' }}>
           Detection parameters
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -522,8 +522,8 @@ function TuneMode({ cfg, setCfg }) {
       </div>
 
       {/* Tips */}
-      <div className="rounded-xl px-4 py-3 text-xs space-y-1" style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.12)', color: '#7a7a7a' }}>
-        <p className="font-semibold" style={{ color: '#c9a96e' }}>Tips for singing / humming</p>
+      <div className="rounded-xl px-4 py-3 text-xs space-y-1" style={{ background: 'rgba(201,169,110,0.06)', border: '1px solid rgba(201,169,110,0.12)', color: 'var(--color-ink-subtle)' }}>
+        <p className="font-semibold" style={{ color: 'var(--color-brand)' }}>Tips for singing / humming</p>
         <p>• Raise <strong>Min Hz</strong> to ~100 Hz if the mic picks up low rumble.</p>
         <p>• Lower <strong>Amplitude threshold</strong> (e.g. −45 dB) if peaks are not showing.</p>
         <p>• Set <strong>Min match score</strong> to 20–30% for more lenient matching of voice.</p>
@@ -541,7 +541,7 @@ function TuneMode({ cfg, setCfg }) {
 function RecordingDot({ recording }) {
   return (
     <span className="inline-block w-2.5 h-2.5 rounded-full"
-      style={{ background: recording ? '#f87171' : '#3a3a3a', boxShadow: recording ? '0 0 8px #f87171' : 'none' }} />
+      style={{ background: recording ? 'var(--color-danger)' : 'var(--color-ink-ghost)', boxShadow: recording ? '0 0 8px #f87171' : 'none' }} />
   );
 }
 
@@ -551,18 +551,18 @@ function ChordCard({ entry, onPlay, onRemove, active }) {
 
   return (
     <div className="rounded-xl overflow-hidden transition-all"
-      style={{ border: `1.5px solid ${active ? '#c9a96e' : '#1e1e1e'}`, background: active ? 'rgba(201,169,110,0.06)' : '#161616' }}>
+      style={{ border: `1.5px solid ${active ? 'var(--color-brand)' : 'var(--color-surface-700)'}`, background: active ? 'rgba(201,169,110,0.06)' : 'var(--color-surface-800)' }}>
       <div className="flex items-center gap-2 px-3 py-2">
-        <span className="text-xs tabular-nums font-mono shrink-0" style={{ color: '#3a3a3a', minWidth: 32 }}>
+        <span className="text-xs tabular-nums font-mono shrink-0" style={{ color: 'var(--color-ink-ghost)', minWidth: 32 }}>
           {entry.ts}
         </span>
         <div className="flex-1 min-w-0">
-          <span className="font-bold text-sm" style={{ color: active ? '#c9a96e' : '#f0ede8' }}>
+          <span className="font-bold text-sm" style={{ color: active ? 'var(--color-brand)' : 'var(--color-ink)' }}>
             {chord ? chord.name : '?'}
           </span>
-          {chord && <span className="text-xs ml-1.5" style={{ color: '#4a4a4a' }}>{chord.type}</span>}
+          {chord && <span className="text-xs ml-1.5" style={{ color: 'var(--color-ink-ghost)' }}>{chord.type}</span>}
           {entry.score != null && (
-            <span className="text-xs ml-2 tabular-nums" style={{ color: entry.score >= 0.5 ? '#4ade80' : entry.score >= 0.3 ? '#c9a96e' : '#fb923c' }}>
+            <span className="text-xs ml-2 tabular-nums" style={{ color: entry.score >= 0.5 ? 'var(--color-success)' : entry.score >= 0.3 ? 'var(--color-brand)' : 'var(--color-warning)' }}>
               {Math.round(entry.score * 100)}%
             </span>
           )}
@@ -570,7 +570,7 @@ function ChordCard({ entry, onPlay, onRemove, active }) {
         <div className="hidden sm:flex gap-1 flex-wrap justify-end max-w-[120px]">
           {entry.notes.map(n => (
             <span key={n} className="text-[10px] px-1.5 py-0.5 rounded font-bold"
-              style={{ background: '#1e1e1e', color: '#5a5a5a' }}>{n}</span>
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}>{n}</span>
           ))}
         </div>
         {chord && <div className="shrink-0"><DifficultyBadge score={calcDifficulty(chord.notes)} /></div>}
@@ -578,24 +578,24 @@ function ChordCard({ entry, onPlay, onRemove, active }) {
           {chord && (
             <button onClick={() => setShowDiagram(v => !v)}
               className="w-7 h-7 rounded-lg flex items-center justify-center text-xs transition-all"
-              style={showDiagram ? { background: 'rgba(201,169,110,0.12)', color: '#c9a96e' } : { background: '#1e1e1e', color: '#5a5a5a' }}>
+              style={showDiagram ? { background: 'rgba(201,169,110,0.12)', color: 'var(--color-brand)' } : { background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}>
               🎸
             </button>
           )}
           <button onClick={() => onPlay(entry)}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-xs transition-all"
-            style={active ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' } : { background: '#1e1e1e', color: '#c9a96e' }}>
+            style={active ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)' } : { background: 'var(--color-surface-700)', color: 'var(--color-brand)' }}>
             {active ? '■' : '▶'}
           </button>
           <button onClick={() => onRemove(entry.id)}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-xs"
-            style={{ background: '#1e1e1e', color: '#3a3a3a' }}>✕</button>
+            style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)' }}>✕</button>
         </div>
       </div>
       {showDiagram && chord && (
-        <div className="px-3 pb-3 pt-1 flex gap-3 items-start" style={{ borderTop: '1px solid #1e1e1e' }}>
+        <div className="px-3 pb-3 pt-1 flex gap-3 items-start" style={{ borderTop: '1px solid var(--color-surface-700)' }}>
           <FretboardDiagram chord={chord} />
-          <div className="text-xs space-y-1 pt-1" style={{ color: '#4a4a4a' }}>
+          <div className="text-xs space-y-1 pt-1" style={{ color: 'var(--color-ink-ghost)' }}>
             <p className="font-mono">{chord.tab}</p>
             <p>Notes: {entry.notes.join(', ')}</p>
           </div>
@@ -609,23 +609,23 @@ function SavedSequences({ sequences, onLoad, onDelete }) {
   if (!sequences.length) return null;
   return (
     <div className="mt-4">
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>Saved sessions</p>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>Saved sessions</p>
       <div className="space-y-1.5">
         {sequences.map(seq => (
           <div key={seq.id} className="flex items-center gap-2 rounded-xl px-3 py-2"
-            style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
+            style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold truncate" style={{ color: '#f0ede8' }}>{seq.name}</p>
-              <p className="text-xs" style={{ color: '#3a3a3a' }}>{seq.entries.length} chords · {seq.date}</p>
+              <p className="text-xs font-semibold truncate" style={{ color: 'var(--color-ink)' }}>{seq.name}</p>
+              <p className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>{seq.entries.length} chords · {seq.date}</p>
             </div>
             <button onClick={() => onLoad(seq)}
               className="px-2.5 py-1 rounded-lg text-xs font-semibold"
-              style={{ background: 'rgba(201,169,110,0.1)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.2)' }}>
+              style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.2)' }}>
               Load
             </button>
             <button onClick={() => onDelete(seq.id)}
               className="w-7 h-7 rounded-lg flex items-center justify-center text-xs"
-              style={{ background: '#1e1e1e', color: '#3a3a3a' }}>✕</button>
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)' }}>✕</button>
           </div>
         ))}
       </div>
@@ -780,26 +780,26 @@ function RecorderMode({ cfg }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl p-4" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           {phase === 'idle' && (
             <button onClick={startRecording}
               className="flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold"
-              style={{ background: '#f87171', color: '#0f0f0f' }}>
+              style={{ background: 'var(--color-danger)', color: 'var(--color-surface-base)' }}>
               <RecordingDot recording={false} /> Record
             </button>
           )}
           {phase === 'recording' && (
             <button onClick={stopRecording}
               className="flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold"
-              style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+              style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
               <RecordingDot recording={true} /> Stop
             </button>
           )}
           {phase === 'done' && (
             <button onClick={() => { setPhase('idle'); setEntries([]); stopAudio(); setActiveId(null); }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #2a2a2a' }}>
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
               New recording
             </button>
           )}
@@ -807,12 +807,12 @@ function RecorderMode({ cfg }) {
           {phase === 'recording' && (
             <div className="flex-1 min-w-[120px]">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-mono" style={{ color: '#f87171' }}>{fmt(elapsed)}</span>
-                <span className="text-xs" style={{ color: '#3a3a3a' }}>{MAX_S}s max</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--color-danger)' }}>{fmt(elapsed)}</span>
+                <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>{MAX_S}s max</span>
               </div>
-              <div className="h-1 rounded-full overflow-hidden" style={{ background: '#2a2a2a' }}>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
                 <div className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${elPct}%`, background: '#f87171' }} />
+                  style={{ width: `${elPct}%`, background: 'var(--color-danger)' }} />
               </div>
             </div>
           )}
@@ -822,15 +822,15 @@ function RecorderMode({ cfg }) {
               <button onClick={handlePlayAll}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold"
                 style={activeId === 'all'
-                  ? { background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }
-                  : { background: 'rgba(201,169,110,0.1)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }}>
+                  ? { background: 'rgba(239,68,68,0.12)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.25)' }
+                  : { background: 'rgba(201,169,110,0.1)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.25)' }}>
                 {activeId === 'all' ? '■' : '▶'} Play all
               </button>
               <button onClick={() => setShowSave(v => !v)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold"
                 style={showSave
-                  ? { background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)' }
-                  : { background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #2a2a2a' }}>
+                  ? { background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.25)' }
+                  : { background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
                 💾 Save
               </button>
             </div>
@@ -838,34 +838,34 @@ function RecorderMode({ cfg }) {
         </div>
 
         {phase === 'recording' && <VolumeBar level={volume} />}
-        {permDenied && <p className="text-xs mt-2" style={{ color: '#f87171' }}>Microphone access denied.</p>}
+        {permDenied && <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>Microphone access denied.</p>}
 
         {showSave && (
-          <div className="flex gap-2 mt-3 pt-3" style={{ borderTop: '1px solid #1e1e1e' }}>
+          <div className="flex gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--color-surface-700)' }}>
             <input value={saveName} onChange={e => setSaveName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSave()}
               placeholder="Session name (optional)"
               className="flex-1 px-3 py-2 rounded-xl text-xs outline-none"
-              style={{ background: '#111', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+              style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
               autoFocus />
             <button onClick={handleSave}
               className="px-4 py-2 rounded-xl text-xs font-bold"
-              style={{ background: '#4ade80', color: '#0f0f0f' }}>Save</button>
+              style={{ background: 'var(--color-success)', color: 'var(--color-surface-base)' }}>Save</button>
           </div>
         )}
       </div>
 
       {phase === 'idle' && !entries.length && (
-        <div className="text-center py-10" style={{ color: '#3a3a3a' }}>
+        <div className="text-center py-10" style={{ color: 'var(--color-ink-ghost)' }}>
           <p className="text-4xl mb-3">🎤</p>
-          <p className="text-sm font-semibold mb-1" style={{ color: '#5a5a5a' }}>Sing or hum a melody</p>
+          <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-ink-faint)' }}>Sing or hum a melody</p>
           <p className="text-xs">Hit record, then sing — chords are sampled every {cfg.segmentMs / 1000}s.</p>
-          <p className="text-xs mt-1" style={{ color: '#2a2a2a' }}>Use the <strong style={{ color: '#c9a96e' }}>Tune</strong> tab to calibrate detection for your voice.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-surface-550)' }}>Use the <strong style={{ color: 'var(--color-brand)' }}>Tune</strong> tab to calibrate detection for your voice.</p>
         </div>
       )}
 
       {phase === 'recording' && entries.length === 0 && (
-        <div className="text-center py-8" style={{ color: '#3a3a3a' }}>
+        <div className="text-center py-8" style={{ color: 'var(--color-ink-ghost)' }}>
           <p className="text-3xl mb-2 animate-pulse">🎙️</p>
           <p className="text-sm">Listening… sing or hum steadily.</p>
         </div>
@@ -874,12 +874,12 @@ function RecorderMode({ cfg }) {
       {entries.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>
               {entries.length} segment{entries.length !== 1 ? 's' : ''}
             </p>
             <button onClick={() => { setEntries([]); stopAudio(); setActiveId(null); }}
               className="text-xs px-2 py-1 rounded-lg"
-              style={{ color: '#3a3a3a', border: '1px solid #1e1e1e' }}>
+              style={{ color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-700)' }}>
               Clear
             </button>
           </div>
@@ -970,31 +970,31 @@ function PracticeMode({ cfg, tr }) {
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      <div className="flex items-center gap-3 px-3 sm:px-4 py-3 rounded-xl" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
-        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>{tr.maxDiff}</span>
+      <div className="flex items-center gap-3 px-3 sm:px-4 py-3 rounded-xl" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--color-ink-faint)' }}>{tr.maxDiff}</span>
         <input type="range" min={1} max={10} step={1} value={maxDiff}
           onChange={e => setMaxDiff(Number(e.target.value))} className="flex-1"
-          style={{ background: `linear-gradient(to right, #c9a96e ${pctDiff}%, #2a2a2a ${pctDiff}%)` }} />
+          style={{ background: `linear-gradient(to right, var(--color-brand) ${pctDiff}%, var(--color-surface-550) ${pctDiff}%)` }} />
         <DifficultyBadge score={maxDiff} />
-        <span className="text-xs tabular-nums whitespace-nowrap" style={{ color: '#3a3a3a' }}>
+        <span className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-ink-ghost)' }}>
           {groups.reduce((n, g) => n + g.chords.length, 0)}
         </span>
       </div>
 
-      <div className="rounded-xl overflow-hidden" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="px-3 sm:px-4 pt-3 pb-2">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>{tr.targetChord}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>{tr.targetChord}</p>
           <div className="flex flex-wrap gap-y-2 gap-x-3">
             {groups.map(g => (
               <div key={g.label} className="flex flex-wrap gap-1 items-center">
-                <span className="text-xs mr-0.5" style={{ color: '#3a3a3a' }}>{g.label}:</span>
+                <span className="text-xs mr-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{g.label}:</span>
                 {g.chords.map(chord => (
                   <button key={chord.name + chord.type}
                     onClick={() => { setTargetChord(chord); setStringResults(null); setAutoDetected(null); }}
                     className="px-2 py-1 rounded-lg text-xs font-semibold transition-all"
                     style={targetChord === chord
-                      ? { background: '#c9a96e', color: '#0f0f0f' }
-                      : { background: '#141414', color: '#7a7a7a', border: '1px solid #2a2a2a' }}>
+                      ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
+                      : { background: 'var(--color-surface-850)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
                     {chord.name}
                   </button>
                 ))}
@@ -1002,18 +1002,18 @@ function PracticeMode({ cfg, tr }) {
             ))}
           </div>
         </div>
-        <div className="flex items-start gap-3 sm:gap-4 px-3 sm:px-4 py-3" style={{ borderTop: '1px solid #1e1e1e' }}>
+        <div className="flex items-start gap-3 sm:gap-4 px-3 sm:px-4 py-3" style={{ borderTop: '1px solid var(--color-surface-700)' }}>
           <div className="shrink-0"><FretboardDiagram chord={targetChord} /></div>
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-base sm:text-lg mb-0.5" style={{ color: '#f0ede8' }}>{targetChord.name}</p>
-            <p className="text-xs mb-2" style={{ color: '#5a5a5a' }}>{targetChord.type} · {targetChord.tab}</p>
+            <p className="font-bold text-base sm:text-lg mb-0.5" style={{ color: 'var(--color-ink)' }}>{targetChord.name}</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>{targetChord.type} · {targetChord.tab}</p>
             <div className="flex gap-1 flex-wrap">
               {targetChord.tab.split('').map((ch, s) => (
                 <span key={s} className="inline-flex flex-col items-center px-1.5 py-1 rounded text-xs"
                   style={{
-                    border: `1px solid ${ch === 'x' ? '#2a2a2a' : STRING_COLORS[s] + '55'}`,
-                    background: ch === 'x' ? '#141414' : STRING_COLORS[s] + '18',
-                    color: ch === 'x' ? '#3a3a3a' : STRING_COLORS[s],
+                    border: `1px solid ${ch === 'x' ? 'var(--color-surface-550)' : STRING_COLORS[s] + '55'}`,
+                    background: ch === 'x' ? 'var(--color-surface-850)' : STRING_COLORS[s] + '18',
+                    color: ch === 'x' ? 'var(--color-ink-ghost)' : STRING_COLORS[s],
                   }}>
                   <span className="font-bold leading-none">{STRING_LABELS[s]}</span>
                   <span className="leading-none mt-0.5">{ch === 'x' ? '×' : ch === '0' ? 'o' : ch}</span>
@@ -1028,17 +1028,17 @@ function PracticeMode({ cfg, tr }) {
         {!listening ? (
           <button onClick={startListening}
             className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
             {tr.startListening}
           </button>
         ) : (
           <button onClick={stopListening}
             className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
+            style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.25)' }}>
             <span className="animate-pulse">●</span> {tr.stop}
           </button>
         )}
-        {permissionDenied && <p className="text-xs" style={{ color: '#f87171' }}>{tr.micAccessDenied}</p>}
+        {permissionDenied && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{tr.micAccessDenied}</p>}
         {listening && <div className="flex-1"><VolumeBar level={volume} /></div>}
       </div>
 
@@ -1046,27 +1046,27 @@ function PracticeMode({ cfg, tr }) {
         <div className="space-y-3">
           {autoDetected && (
             <div className="flex items-center gap-3 rounded-xl px-3 sm:px-4 py-3"
-              style={{ background: autoDetected.chord === targetChord ? 'rgba(74,222,128,0.08)' : '#1a1a1a', border: `1px solid ${autoDetected.chord === targetChord ? 'rgba(74,222,128,0.25)' : '#222'}` }}>
+              style={{ background: autoDetected.chord === targetChord ? 'rgba(74,222,128,0.08)' : 'var(--color-surface-750)', border: `1px solid ${autoDetected.chord === targetChord ? 'rgba(74,222,128,0.25)' : 'var(--color-surface-650)'}` }}>
               <span className="text-xl">{autoDetected.chord === targetChord ? '🎯' : '🎵'}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: '#3a3a3a' }}>{tr.detected}</p>
-                <p className="font-bold text-base" style={{ color: autoDetected.chord === targetChord ? '#4ade80' : '#f0ede8' }}>
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{tr.detected}</p>
+                <p className="font-bold text-base" style={{ color: autoDetected.chord === targetChord ? 'var(--color-success)' : 'var(--color-ink)' }}>
                   {autoDetected.chord.name}
-                  <span className="text-xs font-normal ml-2" style={{ color: '#5a5a5a' }}>{autoDetected.chord.type}</span>
+                  <span className="text-xs font-normal ml-2" style={{ color: 'var(--color-ink-faint)' }}>{autoDetected.chord.type}</span>
                 </p>
               </div>
               {autoDetected.chord === targetChord
-                ? <span className="text-xs font-bold" style={{ color: '#4ade80' }}>{tr.correct}</span>
-                : <span className="text-xs" style={{ color: '#5a5a5a' }}>{tr.expected} <strong style={{ color: '#c9a96e' }}>{targetChord.name}</strong></span>}
+                ? <span className="text-xs font-bold" style={{ color: 'var(--color-success)' }}>{tr.correct}</span>
+                : <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{tr.expected} <strong style={{ color: 'var(--color-brand)' }}>{targetChord.name}</strong></span>}
             </div>
           )}
           {detectedNote && (
-            <div className="flex items-center gap-2 text-xs" style={{ color: '#5a5a5a' }}>
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
               <span>{tr.strongest}</span>
-              <span className="font-bold" style={{ color: '#f0ede8' }}>{detectedNote.name}{detectedNote.octave}</span>
+              <span className="font-bold" style={{ color: 'var(--color-ink)' }}>{detectedNote.name}{detectedNote.octave}</span>
               <span className="tabular-nums">{Math.round(detectedNote.hz)} Hz</span>
               {Math.abs(detectedNote.cents) > 5 && (
-                <span style={{ color: detectedNote.cents > 0 ? '#fb923c' : '#38bdf8' }}>
+                <span style={{ color: detectedNote.cents > 0 ? 'var(--color-warning)' : 'var(--color-info)' }}>
                   {detectedNote.cents > 0 ? `+${detectedNote.cents}¢` : `${detectedNote.cents}¢`}
                 </span>
               )}
@@ -1075,10 +1075,10 @@ function PracticeMode({ cfg, tr }) {
           {stringResults && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#3a3a3a' }}>{tr.stringAnalysis}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>{tr.stringAnalysis}</p>
                 {playCount > 0 && (
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                    style={allCorrect ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80' } : { background: '#1e1e1e', color: '#5a5a5a' }}>
+                    style={allCorrect ? { background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' } : { background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}>
                     {correctCount}/{playCount}
                   </span>
                 )}
@@ -1087,7 +1087,7 @@ function PracticeMode({ cfg, tr }) {
             </div>
           )}
           {!stringResults && volume < 0.05 && (
-            <div className="text-center py-8" style={{ color: '#3a3a3a' }}>
+            <div className="text-center py-8" style={{ color: 'var(--color-ink-ghost)' }}>
               <p className="text-3xl mb-2">🎸</p>
               <p className="text-sm">{tr.playGuitar}</p>
             </div>
@@ -1115,13 +1115,13 @@ export default function ChordListener({ lang }) {
 
   return (
     <div className="p-3 sm:p-5">
-      <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#161616' }}>
+      <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: 'var(--color-surface-800)' }}>
         {TABS.map(({ id, icon, label }) => (
           <button key={id} onClick={() => setTab(id)}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
             style={tab === id
-              ? { background: '#1e1e1e', color: '#c9a96e', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
-              : { color: '#5a5a5a' }}>
+              ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
+              : { color: 'var(--color-ink-faint)' }}>
             <span>{icon}</span><span>{label}</span>
           </button>
         ))}
