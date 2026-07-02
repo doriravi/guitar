@@ -1,0 +1,115 @@
+/* Start-here chord carousel — a true 3D ring. Cards are placed on a cylinder
+   with rotateY()+translateZ() inside a perspective scene; the ring rotates so the
+   active card faces front. Scoped to .sh-*. */
+
+.sh-carousel {
+  position: relative;
+  margin: 8px 0 4px;
+  padding: 0 8px;
+}
+
+/* The perspective scene. Height fits a card; perspective gives real depth. */
+.sh-stage {
+  position: relative;
+  height: 340px;
+  perspective: 1100px;
+  perspective-origin: 50% 45%;
+}
+
+/* The rotating ring. preserve-3d keeps children positioned in 3D. */
+.sh-ring {
+  position: absolute;
+  inset: 0;
+  margin: 0 auto;
+  width: 260px;                 /* card width */
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+/* Each card sits on the ring. Non-front cards are dimmed + slightly faded so the
+   front one clearly reads as active. */
+.sh-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 320px;
+  backface-visibility: hidden;
+  cursor: pointer;
+  transition: opacity 0.5s ease, filter 0.5s ease;
+  opacity: 0.45;
+  filter: brightness(0.7) saturate(0.85);
+}
+.sh-card.is-front {
+  opacity: 1;
+  filter: none;
+  cursor: default;
+}
+.sh-card .h-full { height: 100%; }
+
+/* A soft lift + glow on the active card. */
+.sh-card.is-front > div {
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8),
+              0 0 0 1px rgba(201, 169, 110, 0.25),
+              0 0 40px -12px rgba(201, 169, 110, 0.35);
+}
+
+/* Prev / next arrows. */
+.sh-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--color-brand);
+  background: var(--color-surface-750);
+  border: 1px solid var(--color-surface-600);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.sh-nav:hover { background: var(--color-surface-700); transform: translateY(-50%) scale(1.08); }
+.sh-nav:active { transform: translateY(-50%) scale(0.96); }
+.sh-prev { left: 0; }
+.sh-next { right: 0; }
+
+/* Dot indicators. */
+.sh-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-surface-600);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.sh-dot.is-active {
+  width: 22px;
+  background: var(--color-brand);
+}
+
+/* Reduced motion: keep the ring, drop the spin transition. */
+@media (prefers-reduced-motion: reduce) {
+  .sh-ring { transition: none; }
+  .sh-card { transition: none; }
+}
+
+/* Narrow screens: smaller ring so side cards don't overflow. */
+@media (max-width: 520px) {
+  .sh-stage { height: 320px; }
+  .sh-ring, .sh-card { width: 220px; }
+  .sh-card { height: 300px; }
+}
