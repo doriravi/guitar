@@ -171,19 +171,26 @@ export default function App() {
   }, []);
 
   // iOS Safari keeps audio muted until a sound is played during a real user
-  // gesture. Prime the AudioContext on the very first interaction so every
-  // later play button works without the user having to "warm up" audio.
+  // gesture, AND mutes Web Audio entirely when the hardware silent switch is on
+  // (unless we promote to the media audio session — see enableMediaPlayback).
+  // We prime on EVERY interaction (not just the first): iOS can drop the audio
+  // session when the tab is backgrounded or after the embedded video plays, so
+  // re-asserting it on each gesture keeps later play buttons audible. unlockAudio()
+  // is cheap/idempotent, so re-running it per tap is harmless.
   useEffect(() => {
-    const prime = () => { unlockAudio(); cleanup(); };
-    const cleanup = () => {
+    const prime = () => { unlockAudio(); };
+    window.addEventListener('touchend', prime, { passive: true });
+    window.addEventListener('pointerdown', prime);
+    window.addEventListener('click', prime);
+    // Re-assert the media session when returning to the tab (iOS suspends it).
+    const onVisible = () => { if (document.visibilityState === 'visible') unlockAudio(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
       window.removeEventListener('touchend', prime);
       window.removeEventListener('pointerdown', prime);
       window.removeEventListener('click', prime);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-    window.addEventListener('touchend', prime, { once: false, passive: true });
-    window.addEventListener('pointerdown', prime, { once: false });
-    window.addEventListener('click', prime, { once: false });
-    return cleanup;
   }, []);
 
   // Returns true if, after syncing, the user has a real (non-default) saved
