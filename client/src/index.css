@@ -2,10 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ────────────────────────────────────────────────────────────
+   Mirrors the color tokens in tailwind.config.js (see src/DESIGN_SYSTEM.md).
+   Use var(--...) for inline styles that can't use Tailwind utility classes. */
+:root {
+  /* Brand / primary accent */
+  --color-brand: #c9a96e;
+  --color-brand-hover: #b8913a;
+  --color-brand-soft: #8a7a5a;
+
+  /* Surface layers (dark → light) */
+  --color-surface-base: #0f0f0f;
+  --color-surface-900: #111111;
+  --color-surface-850: #141414;
+  --color-surface-800: #161616;
+  --color-surface-750: #1a1a1a;
+  --color-surface-700: #1e1e1e;
+  --color-surface-650: #222222;
+  --color-surface-600: #252525;
+  --color-surface-550: #2a2a2a;
+
+  /* Text tiers (bright → dim) */
+  --color-ink: #f0ede8;
+  --color-ink-muted: #9a9a9a;
+  --color-ink-subtle: #7a7a7a;
+  --color-ink-faint: #5a5a5a;
+  --color-ink-ghost: #3a3a3a;
+
+  /* Per-string colors (low-E … high-e) */
+  --color-string-e6: #a78bfa;
+  --color-string-a: #38bdf8;
+  --color-string-d: #34d399;
+  --color-string-g: #c9a96e;
+  --color-string-b: #fb923c;
+  --color-string-e1: #f87171;
+
+  /* Semantic status */
+  --color-success: #4ade80;
+  --color-info: #38bdf8;
+  --color-accent: #a78bfa;
+  --color-warning: #fb923c;
+  --color-danger: #f87171;
+}
+
 @layer base {
   body {
-    background-color: #0f0f0f;
-    color: #f0ede8;
+    background-color: var(--color-surface-base);
+    color: var(--color-ink);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: 'kern' 1, 'liga' 1;
@@ -24,8 +67,8 @@
 /* Scrollbars */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+::-webkit-scrollbar-thumb { background: var(--color-surface-550); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-ghost); }
 
 /* Range slider — larger thumb for touch */
 input[type='range'] {
@@ -42,7 +85,7 @@ input[type='range']::-webkit-slider-runnable-track {
 input[type='range']::-moz-range-track {
   height: 4px;
   border-radius: 9999px;
-  background: #2a2a2a;
+  background: var(--color-surface-550);
 }
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -50,7 +93,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #c9a96e;
+  background: var(--color-brand);
   border: none;
   cursor: pointer;
   margin-top: -9px;
@@ -66,14 +109,14 @@ input[type='range']::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #c9a96e;
+  background: var(--color-brand);
   border: none;
   cursor: pointer;
 }
 
 /* Table header */
 thead th {
-  background: #161616;
+  background: var(--color-surface-800);
   color: #6b6b6b;
   font-size: 0.7rem;
   font-weight: 600;

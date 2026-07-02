@@ -98,11 +98,12 @@ function pluck(hz, decay = 2.2) {
   });
 }
 
-function strum(frets) {
+function strum(frets, capo = 0) {
   const ctx = getCtx();
   frets.forEach((fret, s) => {
     if (fret === null) return;
-    const hz = OPEN_HZ[s] * 2 ** (fret / 12);
+    // A capo on fret `capo` raises every sounding note by `capo` semitones.
+    const hz = OPEN_HZ[s] * 2 ** ((fret + capo) / 12);
     const decay = 2.0 - s * 0.05;
     const now = ctx.currentTime + s * 0.018;
     const env = ctx.createGain();
@@ -124,27 +125,63 @@ function tabToFrets(tab) {
   return tab.split('').map(c => (c === 'x' ? null : parseInt(c, 10)));
 }
 
+// Reach difficulty for a beat's frets, accounting for a capo. A capo shifts the
+// played shape `capo` frets up the neck, where fret spacing is tighter, so the
+// same shape is physically a little easier — calcDifficulty captures that via
+// the shrinking fret-spacing model when we offset each fret by the capo.
+function beatDifficulty(frets, capo = 0) {
+  const notes = frets
+    .map((f, s) => (f === null ? null : { string: s, fret: f + capo }))
+    .filter(Boolean);
+  return notes.length >= 2 ? calcDifficulty(notes) : null;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 // ── Fretboard ─────────────────────────────────────────────────────────────────
 // Shared visual component used by all three modes.
 // dotStyle(s, f) → null | { bg, color, glow, label }
 
-function Fretboard({ dotStyle, onFretClick, onOpenClick }) {
+function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0 }) {
+  // Horizontal center of a fret column, as a CSS calc(). The left label+open
+  // area is a fixed 84px; the remaining width is split into FRET_COUNT columns.
+  const fretCenter = (fretNum) =>
+    `calc(84px + (100% - 84px) * ${(fretNum - 0.5) / FRET_COUNT})`;
+  const showCapo = capo > 0 && capo <= FRET_COUNT;
+
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: '#1a1010', border: '1px solid #2a1a1a' }}>
       {/* Fret number header */}
-      <div className="flex" style={{ borderBottom: '1px solid #2a2a2a' }}>
+      <div className="flex" style={{ borderBottom: '1px solid var(--color-surface-550)' }}>
         <div style={{ width: 44 }} className="shrink-0" />
         <div className="flex items-center justify-center text-xs font-semibold py-2 shrink-0"
-          style={{ width: 40, color: '#3a3a3a' }}>O</div>
+          style={{ width: 40, color: 'var(--color-ink-ghost)' }}>O</div>
         {Array.from({ length: FRET_COUNT }, (_, f) => (
           <div key={f} className="flex-1 flex items-center justify-center text-xs py-2"
-            style={{ minWidth: 0, color: MARKER_FRETS.includes(f+1) ? '#c9a96e' : '#2a2a2a', fontWeight: MARKER_FRETS.includes(f+1) ? 700 : 400 }}>
+            style={{ minWidth: 0, color: MARKER_FRETS.includes(f+1) ? 'var(--color-brand)' : 'var(--color-surface-550)', fontWeight: MARKER_FRETS.includes(f+1) ? 700 : 400 }}>
             {f+1}
           </div>
         ))}
       </div>
+
+      {/* Capo bar — a clamp across all strings at the capo fret. Wraps the string
+          rows so the absolute bar can span their full height. */}
+      <div className="relative">
+        {showCapo && (
+          <div className="absolute z-20 pointer-events-none flex items-center justify-center"
+            style={{
+              left: `calc(${fretCenter(capo)} - 7px)`,
+              top: 0, bottom: 0, width: 14,
+              background: 'linear-gradient(to bottom, #4b3a24, #34d399aa, #4b3a24)',
+              borderRadius: 6,
+              boxShadow: '0 0 10px rgba(52,211,153,0.5), inset 0 0 3px rgba(0,0,0,0.6)',
+              border: '1px solid #2a2a2a',
+            }}>
+            <span className="text-[9px] font-black" style={{ color: '#0f0f0f', writingMode: 'vertical-rl', letterSpacing: 1 }}>
+              CAPO {capo}
+            </span>
+          </div>
+        )}
 
       {/* Strings */}
       {[0,1,2,3,4,5].map(s => {
@@ -168,7 +205,7 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick }) {
                 className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
                 style={openDot
                   ? { background: openDot.bg, color: openDot.color, boxShadow: openDot.glow }
-                  : { background: '#1e1e1e', color: '#3a3a3a', border: '1px solid #2a2a2a' }}>
+                  : { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-550)' }}>
                 {openDot?.label ?? NOTE_NAMES[(OPEN_MIDI[s]) % 12]}
               </button>
             </div>
@@ -208,6 +245,7 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick }) {
           </div>
         );
       })}
+      </div>
 
       {/* Bottom position markers */}
       <div className="flex" style={{ borderTop: '1px solid #1e1010' }}>
@@ -808,13 +846,14 @@ function diatonicNumber(midi) {
 }
 
 // Convert a beat's frets into notated note descriptors for the given key.
-function beatToStaffNotes(frets, key) {
+// `capo` raises every sounding note by that many semitones.
+function beatToStaffNotes(frets, key, capo = 0) {
   const sigLetters = new Set(keySignatureLetters(key));
   const notes = [];
   for (let s = 0; s < 6; s++) {
     const f = frets[s];
     if (f === null) continue;
-    const midi = OPEN_MIDI[s] + f + 12; // +12: notate an octave up (treble 8vb)
+    const midi = OPEN_MIDI[s] + f + capo + 12; // +capo: capo shift; +12: notate an octave up (treble 8vb)
     const pc = midi % 12;
     const [letter, accidental] = spellPitch(pc, key);
     // The key signature already alters these letters, so only draw an explicit
@@ -833,7 +872,7 @@ function beatToStaffNotes(frets, key) {
   return notes.sort((a, b) => a.dia - b.dia);
 }
 
-function NotationSheet({ beats, activeIdx, musicKey, tr }) {
+function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
   const key = keyByName(musicKey);
 
   // Staff geometry. One space = STEP px between adjacent diatonic positions is
@@ -912,7 +951,7 @@ function NotationSheet({ beats, activeIdx, musicKey, tr }) {
         {/* Beats */}
         {beats.map((beat, bi) => {
           const cx = NOTES_X0 + bi * COL_W + COL_W / 2;
-          const staffNotes = beatToStaffNotes(beat.frets, key);
+          const staffNotes = beatToStaffNotes(beat.frets, key, capo);
           const isActive = bi === activeIdx;
           return (
             <g key={beat.id ?? bi}>
@@ -1040,36 +1079,36 @@ function ExpertPicker({ beats, onInsert, musicKey, diffMax, want = 'chords', tr 
     return (
       <button
         onClick={() => { setOpen(true); ask(); }}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3"
-        style={{ background: '#1a1a1a', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }}>
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3 bg-surface-750 text-info"
+        style={{ border: '1px solid rgba(56,189,248,0.3)' }}>
         {tr.askExpert}
       </button>
     );
   }
 
   return (
-    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+    <div className="rounded-xl p-3 mb-3 bg-surface-800 border border-surface-550">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#38bdf8' }}>
+        <span className="text-xs font-semibold uppercase tracking-wide text-info">
           🎓 {tr.expertSuggestions}
         </span>
         <div className="flex items-center gap-2">
           <button onClick={ask} disabled={loading}
-            className="text-xs font-semibold" style={{ color: loading ? '#3a3a3a' : '#38bdf8' }}>
+            className={`text-xs font-semibold ${loading ? 'text-ink-ghost' : 'text-info'}`}>
             {loading ? tr.expertThinking : '↻'}
           </button>
-          <button onClick={() => setOpen(false)} className="text-xs" style={{ color: '#5a5a5a' }}>
+          <button onClick={() => setOpen(false)} className="text-xs text-ink-faint">
             {tr.close}
           </button>
         </div>
       </div>
 
       {loading && (
-        <p className="text-xs text-center py-4" style={{ color: '#5a5a5a' }}>{tr.expertThinking}</p>
+        <p className="text-xs text-center py-4 text-ink-faint">{tr.expertThinking}</p>
       )}
 
       {error && !loading && (
-        <p className="text-xs text-center py-4" style={{ color: '#5a5a5a' }}>{tr.expertUnavailable}</p>
+        <p className="text-xs text-center py-4 text-ink-faint">{tr.expertUnavailable}</p>
       )}
 
       {suggestions && !loading && (
@@ -1080,22 +1119,21 @@ function ExpertPicker({ beats, onInsert, musicKey, diffMax, want = 'chords', tr 
               .filter(Boolean);
             const diff = notes.length ? calcDifficulty(notes) : null;
             return (
-              <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-2"
-                style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+              <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-surface-750 border border-surface-650">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold" style={{ color: '#f0ede8' }}>{s.label || '—'}</span>
-                    <span className="font-mono text-[10px]" style={{ color: '#5a5a5a' }}>{s.tab}</span>
+                    <span className="text-xs font-bold text-ink">{s.label || '—'}</span>
+                    <span className="font-mono text-[10px] text-ink-faint">{s.tab}</span>
                     {diff != null && <DifficultyBadge score={diff} />}
                   </div>
                   {s.reason && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: '#6a6a6a' }}>{s.reason}</p>
+                    <p className="text-[10px] mt-0.5 truncate text-ink-subtle">{s.reason}</p>
                   )}
                 </div>
                 <button
                   onClick={() => insertOne(s)}
-                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
-                  style={{ background: 'rgba(56,189,248,0.14)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }}>
+                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-info"
+                  style={{ background: 'rgba(56,189,248,0.14)', border: '1px solid rgba(56,189,248,0.3)' }}>
                   {tr.add}
                 </button>
               </div>
@@ -1135,20 +1173,20 @@ function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3"
-        style={{ background: '#1a1a1a', color: '#34d399', border: '1px solid rgba(52,211,153,0.25)' }}>
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-3 bg-surface-750 text-success"
+        style={{ border: '1px solid rgba(52,211,153,0.25)' }}>
         {tr.addProgression}
       </button>
     );
   }
 
   return (
-    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+    <div className="rounded-xl p-3 mb-3 bg-surface-800 border border-surface-550">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#34d399' }}>
-          {tr.progressionInKey} <span style={{ color: '#c9a96e' }}>{musicKey}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-success">
+          {tr.progressionInKey} <span className="text-brand">{musicKey}</span>
         </span>
-        <button onClick={() => setOpen(false)} className="text-xs" style={{ color: '#5a5a5a' }}>
+        <button onClick={() => setOpen(false)} className="text-xs text-ink-faint">
           {tr.close}
         </button>
       </div>
@@ -1157,11 +1195,10 @@ function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
       <select
         value={progName}
         onChange={e => setProgName(e.target.value)}
-        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2 appearance-none"
-        style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2 appearance-none bg-surface-750 text-ink border border-surface-550"
       >
         {MAJOR_PROGRESSIONS.map(p => (
-          <option key={p.name} value={p.name} style={{ background: '#1a1a1a' }}>
+          <option key={p.name} value={p.name} style={{ background: 'var(--color-surface-750)' }}>
             {p.name}  ·  {p.genre}
           </option>
         ))}
@@ -1172,16 +1209,16 @@ function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
         {resolved.map((r, i) => (
           <div key={i} className="flex flex-col items-center rounded-lg px-2.5 py-1.5"
             style={{
-              background: r.voicing ? '#1e1e1e' : '#161010',
-              border: `1px solid ${r.voicing ? '#2a2a2a' : 'rgba(248,113,113,0.3)'}`,
+              background: r.voicing ? 'var(--color-surface-700)' : '#161010',
+              border: `1px solid ${r.voicing ? 'var(--color-surface-550)' : 'rgba(248,113,113,0.3)'}`,
               minWidth: 54,
             }}>
-            <span className="text-[9px]" style={{ color: '#5a5a5a' }}>{r.roman}</span>
-            <span className="text-xs font-bold" style={{ color: r.voicing ? '#f0ede8' : '#f87171' }}>
+            <span className="text-[9px] text-ink-faint">{r.roman}</span>
+            <span className={`text-xs font-bold ${r.voicing ? 'text-ink' : 'text-danger'}`}>
               {r.chordName ?? '—'}
             </span>
             {r.voicing && (
-              <span className="font-mono text-[9px]" style={{ color: '#3a3a3a' }}>{r.voicing.tab}</span>
+              <span className="font-mono text-[9px] text-ink-ghost">{r.voicing.tab}</span>
             )}
           </div>
         ))}
@@ -1190,10 +1227,7 @@ function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
       <button
         onClick={handleInsert}
         disabled={!canInsert}
-        className="w-full px-3 py-2 rounded-lg text-xs font-bold transition-all"
-        style={canInsert
-          ? { background: '#34d399', color: '#0f0f0f' }
-          : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+        className={`w-full px-3 py-2 rounded-lg text-xs font-bold transition-all ${canInsert ? 'bg-success text-surface-base' : 'bg-surface-750 text-ink-ghost cursor-not-allowed'}`}>
         {tr.insertProgression}
       </button>
     </div>
@@ -1229,32 +1263,31 @@ function ChordPicker({ onApply, diffMax, musicKey, tr }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-        style={{ background: '#1a1a1a', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-surface-750 text-accent"
+        style={{ border: '1px solid rgba(167,139,250,0.25)' }}>
         {tr.addChord}
       </button>
     );
   }
 
   return (
-    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+    <div className="rounded-xl p-3 mb-3 bg-surface-800 border border-surface-550">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>{tr.addChordToBeat}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-accent">{tr.addChordToBeat}</span>
         <button onClick={() => { setOpen(false); setSelectedName(''); setSearch(''); }}
-          className="text-xs" style={{ color: '#5a5a5a' }}>{tr.close}</button>
+          className="text-xs text-ink-faint">{tr.close}</button>
       </div>
 
       <input
         value={search} onChange={e => { setSearch(e.target.value); setSelectedName(''); }}
         placeholder={tr.searchChordShort}
-        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2"
-        style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+        className="w-full px-3 py-2 rounded-lg text-xs outline-none mb-2 bg-surface-750 text-ink border border-surface-550"
         autoFocus
       />
 
-      <p className="text-[10px] mb-1.5 flex items-center gap-1.5" style={{ color: '#3a3a3a' }}>
-        <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#c9a96e' }} />
-        {tr.inKeyOf} <span style={{ color: '#c9a96e' }}>{musicKey}</span>
+      <p className="text-[10px] mb-1.5 flex items-center gap-1.5 text-ink-ghost">
+        <span className="inline-block w-2 h-2 rounded-full bg-brand" />
+        {tr.inKeyOf} <span className="text-brand">{musicKey}</span>
       </p>
 
       <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto mb-2">
@@ -1263,12 +1296,10 @@ function ChordPicker({ onApply, diffMax, musicKey, tr }) {
           const selected = selectedName === name;
           return (
             <button key={name} onClick={() => setSelectedName(name)}
-              className="px-2 py-0.5 rounded-md text-xs font-semibold transition-all"
-              style={selected
-                ? { background: '#a78bfa', color: '#0f0f0f' }
-                : inKey
-                  ? { background: 'rgba(201,169,110,0.14)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.4)' }
-                  : { background: '#1e1e1e', color: '#7a7a7a', border: '1px solid #252525' }}>
+              className={`px-2 py-0.5 rounded-md text-xs font-semibold transition-all ${selected ? 'bg-accent text-surface-base' : inKey ? 'text-brand' : 'bg-surface-700 text-ink-subtle border border-surface-600'}`}
+              style={!selected && inKey
+                ? { background: 'rgba(201,169,110,0.14)', border: '1px solid rgba(201,169,110,0.4)' }
+                : undefined}>
               {name}
             </button>
           );
@@ -1277,17 +1308,17 @@ function ChordPicker({ onApply, diffMax, musicKey, tr }) {
 
       {voicings.length > 0 && (
         <div>
-          <p className="text-[10px] mb-1.5" style={{ color: '#3a3a3a' }}>{tr.pickVoicing}</p>
+          <p className="text-[10px] mb-1.5 text-ink-ghost">{tr.pickVoicing}</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {voicings.map((v, i) => (
               <button
                 key={i}
                 onClick={() => { onApply(v); setOpen(false); setSelectedName(''); setSearch(''); }}
-                className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all flex flex-col items-center gap-0.5"
-                style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', color: '#a78bfa', minWidth: 70 }}>
-                <span className="font-bold" style={{ color: '#f0ede8' }}>{v.name}</span>
-                <span style={{ color: '#5a5a5a' }}>{v.type}</span>
-                <span className="font-mono text-[10px]" style={{ color: '#3a3a3a' }}>{v.tab}</span>
+                className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all flex flex-col items-center gap-0.5 bg-surface-700 border border-surface-550 text-accent"
+                style={{ minWidth: 70 }}>
+                <span className="font-bold text-ink">{v.name}</span>
+                <span className="text-ink-faint">{v.type}</span>
+                <span className="font-mono text-[10px] text-ink-ghost">{v.tab}</span>
               </button>
             ))}
           </div>
@@ -1303,33 +1334,30 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
     <div
       className="rounded-xl p-2 flex flex-col gap-1.5 cursor-pointer transition-all shrink-0"
       style={{
-        background: isActive ? 'rgba(201,169,110,0.12)' : isEditing ? 'rgba(56,189,248,0.08)' : '#1a1a1a',
-        border: `1.5px solid ${isActive ? '#c9a96e' : isEditing ? '#38bdf8' : '#222'}`,
+        background: isActive ? 'rgba(201,169,110,0.12)' : isEditing ? 'rgba(56,189,248,0.08)' : 'var(--color-surface-750)',
+        border: `1.5px solid ${isActive ? 'var(--color-brand)' : isEditing ? 'var(--color-info)' : 'var(--color-surface-650)'}`,
         minWidth: 82,
         maxWidth: 82,
       }}
       onClick={onSelect}
     >
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[10px] font-bold tabular-nums" style={{ color: isActive ? '#c9a96e' : '#5a5a5a' }}>
+        <span className={`text-[10px] font-bold tabular-nums ${isActive ? 'text-brand' : 'text-ink-faint'}`}>
           {index + 1}
         </span>
         <div className="flex gap-0.5">
           <button
-            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all"
-            style={{ background: '#111', color: '#4a4a4a' }}
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all bg-surface-900 text-ink-ghost"
             onClick={e => { e.stopPropagation(); onMove(-1); }}
             disabled={index === 0}
           >‹</button>
           <button
-            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all"
-            style={{ background: '#111', color: '#4a4a4a' }}
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all bg-surface-900 text-ink-ghost"
             onClick={e => { e.stopPropagation(); onMove(1); }}
             disabled={index === total - 1}
           >›</button>
           <button
-            className="w-5 h-5 rounded flex items-center justify-center text-[10px]"
-            style={{ background: '#111', color: '#f87171' }}
+            className="w-5 h-5 rounded flex items-center justify-center text-[10px] bg-surface-900 text-danger"
             onClick={e => { e.stopPropagation(); onDelete(); }}
           >✕</button>
         </div>
@@ -1344,7 +1372,7 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
               <span className="text-[8px] font-bold w-3" style={{ color: STRING_COLORS[s] }}>
                 {STRING_NAMES[s]}
               </span>
-              <div className="flex-1 h-2 rounded-full relative" style={{ background: '#111' }}>
+              <div className="flex-1 h-2 rounded-full relative bg-surface-900">
                 {f !== null && (
                   <div
                     className="absolute top-0 bottom-0 rounded-full"
@@ -1355,7 +1383,7 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
                   />
                 )}
               </div>
-              <span className="text-[8px] font-mono w-4 text-right" style={{ color: f === null ? '#2a2a2a' : '#7a7a7a' }}>
+              <span className={`text-[8px] font-mono w-4 text-right ${f === null ? 'text-surface-550' : 'text-ink-subtle'}`}>
                 {f === null ? '–' : f === 0 ? 'O' : f}
               </span>
             </div>
@@ -1364,18 +1392,18 @@ function BeatCard({ beat, index, isActive, isEditing, onSelect, onDelete, onMove
       </div>
 
       {beat.chordLabel && (
-        <div className="text-[9px] text-center font-bold rounded px-1 py-0.5 truncate"
-          style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>
+        <div className="text-[9px] text-center font-bold rounded px-1 py-0.5 truncate text-accent"
+          style={{ background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.2)' }}>
           {beat.chordLabel}
         </div>
       )}
       {isEditing && (
-        <div className="text-[9px] text-center font-semibold rounded px-1 py-0.5" style={{ background: '#38bdf820', color: '#38bdf8' }}>
+        <div className="text-[9px] text-center font-semibold rounded px-1 py-0.5 text-info" style={{ background: '#38bdf820' }}>
           editing
         </div>
       )}
       {!hasNotes && !isEditing && !beat.chordLabel && (
-        <div className="text-[9px] text-center" style={{ color: '#2a2a2a' }}>empty</div>
+        <div className="text-[9px] text-center text-surface-550">empty</div>
       )}
     </div>
   );
@@ -1391,7 +1419,7 @@ function saveSongs(songs) {
   try { localStorage.setItem(SONGS_KEY, JSON.stringify(songs)); } catch {}
 }
 
-function SongManager({ beats, bpm, loop, onLoad, onClose }) {
+function SongManager({ beats, bpm, loop, capo, onLoad, onClose }) {
   const [songs, setSongs] = useState(loadSongs);
   const [nameInput, setNameInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1399,7 +1427,7 @@ function SongManager({ beats, bpm, loop, onLoad, onClose }) {
   const handleSave = () => {
     const name = nameInput.trim();
     if (!name) return;
-    const song = { name, bpm, loop, beats: beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null })), savedAt: Date.now() };
+    const song = { name, bpm, loop, capo: capo ?? 0, beats: beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null })), savedAt: Date.now() };
     const updated = [...songs.filter(s => s.name !== name), song];
     saveSongs(updated);
     setSongs(updated);
@@ -1419,10 +1447,10 @@ function SongManager({ beats, bpm, loop, onLoad, onClose }) {
   };
 
   return (
-    <div className="rounded-xl p-3 mb-3" style={{ background: '#161616', border: '1px solid #2a2a2a' }}>
+    <div className="rounded-xl p-3 mb-3 bg-surface-800 border border-surface-550">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#c9a96e' }}>Songs</span>
-        <button onClick={onClose} className="text-xs" style={{ color: '#5a5a5a' }}>✕ Close</button>
+        <span className="text-xs font-semibold uppercase tracking-wide text-brand">Songs</span>
+        <button onClick={onClose} className="text-xs text-ink-faint">✕ Close</button>
       </div>
 
       {/* Save current as */}
@@ -1432,54 +1460,48 @@ function SongManager({ beats, bpm, loop, onLoad, onClose }) {
           onChange={e => setNameInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSave()}
           placeholder="Song name…"
-          className="flex-1 px-3 py-1.5 rounded-lg text-xs outline-none"
-          style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+          className="flex-1 px-3 py-1.5 rounded-lg text-xs outline-none bg-surface-750 text-ink border border-surface-550"
         />
         <button
           onClick={handleSave}
           disabled={!nameInput.trim()}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-          style={nameInput.trim()
-            ? { background: '#c9a96e', color: '#0f0f0f' }
-            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${nameInput.trim() ? 'bg-brand text-surface-base' : 'bg-surface-750 text-ink-ghost cursor-not-allowed'}`}>
           Save
         </button>
       </div>
 
       {/* Saved songs list */}
       {songs.length === 0 ? (
-        <p className="text-xs text-center py-3" style={{ color: '#3a3a3a' }}>No saved songs yet</p>
+        <p className="text-xs text-center py-3 text-ink-ghost">No saved songs yet</p>
       ) : (
         <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
           {[...songs].reverse().map(s => (
             <div key={s.name}
-              className="flex items-center gap-2 rounded-lg px-2.5 py-2"
-              style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-surface-750 border border-surface-650">
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold truncate" style={{ color: '#f0ede8' }}>{s.name}</p>
-                <p className="text-[10px]" style={{ color: '#3a3a3a' }}>
+                <p className="text-xs font-semibold truncate text-ink">{s.name}</p>
+                <p className="text-[10px] text-ink-ghost">
                   {s.beats.length} beat{s.beats.length !== 1 ? 's' : ''} · {s.bpm} BPM
                   {s.loop ? ' · loop' : ''}
                 </p>
               </div>
               <button
                 onClick={() => handleLoad(s)}
-                className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
-                style={{ background: 'rgba(201,169,110,0.12)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.2)' }}>
+                className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-brand"
+                style={{ background: 'rgba(201,169,110,0.12)', border: '1px solid rgba(201,169,110,0.2)' }}>
                 Load
               </button>
               {confirmDelete === s.name ? (
                 <button
                   onClick={() => handleDelete(s.name)}
-                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold"
-                  style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}>
+                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-danger"
+                  style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.25)' }}>
                   Confirm
                 </button>
               ) : (
                 <button
                   onClick={() => setConfirmDelete(s.name)}
-                  className="shrink-0 px-2 py-1 rounded-md text-xs"
-                  style={{ color: '#4a4a4a' }}>
+                  className="shrink-0 px-2 py-1 rounded-md text-xs text-ink-ghost">
                   ✕
                 </button>
               )}
@@ -1500,6 +1522,9 @@ function MusicEditorMode({ diffMax, tr }) {
   const [loop, setLoop] = useState(false);
   const [showSongs, setShowSongs] = useState(false);
   const [musicKey, setMusicKey] = useState('C');
+  const [capo, setCapo] = useState(0); // capo fret (0 = none); raises pitch, eases reach
+  const capoRef = useRef(capo);
+  capoRef.current = capo;
   const nextId = useRef(1);
   const playTimer = useRef(null);
   const bpmRef = useRef(bpm);
@@ -1540,7 +1565,7 @@ function MusicEditorMode({ diffMax, tr }) {
   };
 
   const handleFret = useCallback((s, f) => {
-    pluck(OPEN_HZ[s] * 2 ** (f / 12));
+    pluck(OPEN_HZ[s] * 2 ** ((f + capo) / 12));
     setBeats(prev => {
       const next = prev.map((b, i) => {
         if (i !== editIdx) return b;
@@ -1550,10 +1575,10 @@ function MusicEditorMode({ diffMax, tr }) {
       });
       return next;
     });
-  }, [editIdx]);
+  }, [editIdx, capo]);
 
   const handleOpen = useCallback((s) => {
-    pluck(OPEN_HZ[s], 2.6);
+    pluck(OPEN_HZ[s] * 2 ** (capo / 12), 2.6);
     setBeats(prev => {
       const next = prev.map((b, i) => {
         if (i !== editIdx) return b;
@@ -1563,7 +1588,7 @@ function MusicEditorMode({ diffMax, tr }) {
       });
       return next;
     });
-  }, [editIdx]);
+  }, [editIdx, capo]);
 
   const dotStyle = useCallback((s, f) => {
     const sel = editBeat?.frets[s];
@@ -1592,7 +1617,7 @@ function MusicEditorMode({ diffMax, tr }) {
         if (loopRef.current) { i = 0; } else { setIsPlaying(false); setPlayIdx(null); return; }
       }
       setPlayIdx(i);
-      strum(currentBeats[i].frets);
+      strum(currentBeats[i].frets, capoRef.current);
       i++;
       playTimer.current = setTimeout(tick, msPerBeat);
     };
@@ -1608,6 +1633,7 @@ function MusicEditorMode({ diffMax, tr }) {
     setBeats(loaded);
     setBpm(song.bpm);
     setLoop(song.loop ?? false);
+    setCapo(song.capo ?? 0);
     setEditIdx(0);
     setPlayIdx(null);
     setIsPlaying(false);
@@ -1616,11 +1642,11 @@ function MusicEditorMode({ diffMax, tr }) {
 
   const applyChord = useCallback((voicing) => {
     const frets = tabToFrets(voicing.tab);
-    strum(frets);
+    strum(frets, capo);
     setBeats(prev => prev.map((b, i) =>
       i === editIdx ? { ...b, frets, chordLabel: `${voicing.name} ${voicing.type}` } : b
     ));
-  }, [editIdx]);
+  }, [editIdx, capo]);
 
   // Insert a whole progression (list of voicings) as new beats at the cursor.
   const insertProgression = useCallback((voicings) => {
@@ -1636,8 +1662,8 @@ function MusicEditorMode({ diffMax, tr }) {
       return next;
     });
     setEditIdx(editIdx + newBeats.length);
-    strum(newBeats[0].frets);
-  }, [editIdx]);
+    strum(newBeats[0].frets, capo);
+  }, [editIdx, capo]);
 
   const pct = ((bpm - 40) / (200 - 40)) * 100;
 
@@ -1647,68 +1673,77 @@ function MusicEditorMode({ diffMax, tr }) {
     <div>
       {/* Key selector */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
           {tr.key}
         </span>
         <div className="flex flex-wrap gap-1">
           {KEYS.map(k => (
             <button key={k.name} onClick={() => setMusicKey(k.name)}
-              className="px-2 py-0.5 rounded-md text-xs font-bold transition-all"
-              style={musicKey === k.name
-                ? { background: '#c9a96e', color: '#0f0f0f' }
-                : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+              className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all border ${musicKey === k.name ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
               {k.name}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Capo selector */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          🎸 {tr.capo}
+        </span>
+        <div className="flex flex-wrap gap-1">
+          {[0,1,2,3,4,5,6,7].map(n => (
+            <button key={n} onClick={() => setCapo(n)}
+              className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all border ${capo === n ? 'bg-success text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
+              {n === 0 ? tr.capoOff : n}
+            </button>
+          ))}
+        </div>
+        {capo > 0 && (
+          <span className="text-[10px] text-success">
+            {(tr.capoOn || 'Capo on fret {n} · +{n} semitones').replace(/\{n\}/g, capo)}
+          </span>
+        )}
+      </div>
+
       {/* Music notation sheet */}
-      <NotationSheet beats={beats} activeIdx={sheetActiveIdx} musicKey={musicKey} tr={tr} />
+      <NotationSheet beats={beats} activeIdx={sheetActiveIdx} musicKey={musicKey} capo={capo} tr={tr} />
 
       {/* Transport controls */}
-      <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
-        style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-xl bg-surface-750 border border-surface-650">
         <button
           onClick={playAll}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
-          style={isPlaying
-            ? { background: '#f87171', color: '#0f0f0f' }
-            : { background: '#c9a96e', color: '#0f0f0f' }}>
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all text-surface-base ${isPlaying ? 'bg-danger' : 'bg-brand'}`}>
           {isPlaying ? '■ Stop' : '▶ Play'}
         </button>
 
         <button
           onClick={() => setLoop(l => !l)}
-          className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-          style={loop
-            ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }
-            : { background: '#141414', color: '#5a5a5a', border: '1px solid #222' }}>
+          className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${loop ? 'text-brand' : 'bg-surface-850 text-ink-faint border-surface-650'}`}
+          style={loop ? { background: 'rgba(201,169,110,0.15)', borderColor: 'rgba(201,169,110,0.3)' } : undefined}>
           ↻ Loop
         </button>
 
         <button
           onClick={() => setShowSongs(s => !s)}
-          className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-          style={showSongs
-            ? { background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)' }
-            : { background: '#141414', color: '#5a5a5a', border: '1px solid #222' }}>
+          className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${showSongs ? 'text-brand' : 'bg-surface-850 text-ink-faint border-surface-650'}`}
+          style={showSongs ? { background: 'rgba(201,169,110,0.15)', borderColor: 'rgba(201,169,110,0.3)' } : undefined}>
           💾 Songs
         </button>
 
         {/* BPM slider */}
         <div className="flex items-center gap-2 flex-1 min-w-[120px]">
-          <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>BPM</span>
+          <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap text-ink-faint">BPM</span>
           <input
             type="range" min={40} max={200} value={bpm}
             onChange={e => setBpm(Number(e.target.value))}
             className="flex-1"
-            style={{ background: `linear-gradient(to right, #c9a96e ${pct}%, #2a2a2a ${pct}%)` }}
+            style={{ background: `linear-gradient(to right, var(--color-brand) ${pct}%, var(--color-surface-550) ${pct}%)` }}
           />
-          <span className="text-sm font-bold tabular-nums w-8 text-right" style={{ color: '#c9a96e' }}>{bpm}</span>
+          <span className="text-sm font-bold tabular-nums w-8 text-right text-brand">{bpm}</span>
         </div>
 
-        <span className="text-xs tabular-nums" style={{ color: '#3a3a3a' }}>
+        <span className="text-xs tabular-nums text-ink-ghost">
           {beats.length} beat{beats.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -1723,7 +1758,7 @@ function MusicEditorMode({ diffMax, tr }) {
             total={beats.length}
             isActive={playIdx === i}
             isEditing={editIdx === i && !isPlaying}
-            onSelect={() => { setEditIdx(i); if (isPlaying) return; strum(beat.frets); }}
+            onSelect={() => { setEditIdx(i); if (isPlaying) return; strum(beat.frets, capo); }}
             onDelete={() => deleteBeat(i)}
             onMove={dir => moveBeat(i, dir)}
           />
@@ -1732,8 +1767,8 @@ function MusicEditorMode({ diffMax, tr }) {
         {/* Add beat button */}
         <button
           onClick={addBeat}
-          className="shrink-0 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
-          style={{ minWidth: 50, minHeight: 80, background: '#141414', border: '1px dashed #2a2a2a', color: '#3a3a3a' }}>
+          className="shrink-0 rounded-xl flex flex-col items-center justify-center gap-1 transition-all bg-surface-850 text-ink-ghost"
+          style={{ minWidth: 50, minHeight: 80, border: '1px dashed var(--color-surface-550)' }}>
           <span className="text-xl leading-none">+</span>
           <span className="text-[9px]">beat</span>
         </button>
@@ -1745,6 +1780,7 @@ function MusicEditorMode({ diffMax, tr }) {
           beats={beats}
           bpm={bpm}
           loop={loop}
+          capo={capo}
           onLoad={loadSong}
           onClose={() => setShowSongs(false)}
         />
@@ -1762,35 +1798,38 @@ function MusicEditorMode({ diffMax, tr }) {
       {/* Fretboard editor */}
       <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold" style={{ color: '#38bdf8' }}>
+          <span className="text-xs font-semibold text-info">
             Editing beat {editIdx + 1}
             {editBeat?.chordLabel && (
-              <span className="ml-1.5 font-normal" style={{ color: '#a78bfa' }}>· {editBeat.chordLabel}</span>
+              <span className="ml-1.5 font-normal text-accent">· {editBeat.chordLabel}</span>
             )}
           </span>
-          <span className="text-xs" style={{ color: '#3a3a3a' }}>— tap frets to modify</span>
+          {(() => {
+            const d = editBeat ? beatDifficulty(editBeat.frets, capo) : null;
+            return d != null ? <DifficultyBadge score={d} /> : null;
+          })()}
+          <span className="text-xs text-ink-ghost">— tap frets to modify</span>
         </div>
         <div className="flex gap-2">
           <button
             onClick={clearBeat}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-            style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-750 text-ink-subtle border border-surface-650">
             Clear beat
           </button>
           <button
-            onClick={() => strum(editBeat?.frets ?? EMPTY_BEAT())}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-            style={{ background: '#1a1a1a', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.25)' }}>
+            onClick={() => strum(editBeat?.frets ?? EMPTY_BEAT(), capo)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-750 text-brand"
+            style={{ border: '1px solid rgba(201,169,110,0.25)' }}>
             🎸 Strum
           </button>
         </div>
       </div>
 
-      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
+      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} capo={capo} />
 
       {/* Playback indicator */}
       {isPlaying && playIdx !== null && (
-        <div className="mt-3 text-center text-xs font-semibold" style={{ color: '#c9a96e' }}>
+        <div className="mt-3 text-center text-xs font-semibold text-brand">
           ♪ Playing beat {playIdx + 1} of {beats.length}
         </div>
       )}
@@ -1810,10 +1849,9 @@ function DiffSlider({ diffMax, setDiffMax, tr }) {
   const recPct = ((recommended - 1) / 9) * 100;
 
   return (
-    <div className="px-3 py-2.5 rounded-xl mb-3"
-      style={{ background: '#161616', border: '1px solid #1e1e1e' }}>
+    <div className="px-3 py-2.5 rounded-xl mb-3 bg-surface-800 border border-surface-700">
       <div className="flex items-center gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>
+        <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap text-ink-faint">
           {tr.maxDifficulty}
         </span>
         <div className="relative flex-1">
@@ -1821,7 +1859,7 @@ function DiffSlider({ diffMax, setDiffMax, tr }) {
             type="range" min={1} max={10} value={diffMax}
             onChange={e => setDiffMax(Number(e.target.value))}
             className="w-full block"
-            style={{ background: `linear-gradient(to right, ${color} ${pct}%, #2a2a2a ${pct}%)` }}
+            style={{ background: `linear-gradient(to right, ${color} ${pct}%, var(--color-surface-550) ${pct}%)` }}
           />
           {/* Recommended-for-your-hand marker */}
           <button
@@ -1831,8 +1869,8 @@ function DiffSlider({ diffMax, setDiffMax, tr }) {
             className="absolute -top-1 w-3 h-3 rounded-full pointer-events-auto"
             style={{
               left: `calc(${recPct}% - 6px)`,
-              background: '#a78bfa',
-              border: '2px solid #161616',
+              background: 'var(--color-accent)',
+              border: '2px solid var(--color-surface-800)',
               boxShadow: '0 0 6px rgba(167,139,250,0.7)',
             }}
           />
@@ -1842,9 +1880,9 @@ function DiffSlider({ diffMax, setDiffMax, tr }) {
         </span>
       </div>
       <div className="flex items-center gap-1.5 mt-1.5 pl-0.5">
-        <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#a78bfa' }} />
-        <span className="text-[10px]" style={{ color: '#6a6a6a' }}>
-          {tr.recommendedForHand} · <span style={{ color: '#a78bfa', fontWeight: 600 }}>{recommended}</span>
+        <span className="inline-block w-2 h-2 rounded-full bg-accent" />
+        <span className="text-[10px] text-ink-subtle">
+          {tr.recommendedForHand} · <span className="text-accent font-semibold">{recommended}</span>
         </span>
       </div>
     </div>
