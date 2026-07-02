@@ -107,31 +107,29 @@ export default function AdvisorWidget({ activeTab, composition }) {
         right: 20, bottom: 20,
         width: 'min(380px, calc(100vw - 40px))',
         height: 'min(560px, calc(100vh - 100px))',
-        background: '#141414',
-        border: '1px solid #2a2a2a',
+        background: 'var(--color-surface-850)',
+        border: '1px solid var(--color-surface-550)',
         boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3"
-        style={{ background: 'linear-gradient(135deg, rgba(167,139,250,0.18), rgba(56,189,248,0.18))', borderBottom: '1px solid #2a2a2a' }}>
+        style={{ background: 'linear-gradient(135deg, rgba(167,139,250,0.18), rgba(56,189,248,0.18))', borderBottom: '1px solid var(--color-surface-550)' }}>
         <div className="flex items-center gap-2">
           <span style={{ fontSize: 18 }}>🎓</span>
           <div>
-            <p className="text-sm font-bold" style={{ color: '#f0ede8' }}>{tr.advisorTitle}</p>
-            <p className="text-[10px]" style={{ color: '#8a8a8a' }}>{tr.advisorSubtitle}</p>
+            <p className="text-sm font-bold text-ink">{tr.advisorTitle}</p>
+            <p className="text-[10px] text-ink-muted">{tr.advisorSubtitle}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
             <button onClick={() => { setMessages([]); setUnavailable(false); }}
               title={tr.advisorClear}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-xs"
-              style={{ color: '#8a8a8a' }}>↺</button>
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-xs text-ink-muted">↺</button>
           )}
           <button onClick={() => setOpen(false)} aria-label={tr.close}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
-            style={{ color: '#8a8a8a' }}>✕</button>
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-sm text-ink-muted">✕</button>
         </div>
       </div>
 
@@ -139,13 +137,12 @@ export default function AdvisorWidget({ activeTab, composition }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2.5">
         {messages.length === 0 && !loading && (
           <div className="text-center px-3 py-6">
-            <p className="text-sm font-semibold mb-1" style={{ color: '#c9a96e' }}>{tr.advisorGreeting}</p>
-            <p className="text-xs mb-3" style={{ color: '#6a6a6a' }}>{tr.advisorHint}</p>
+            <p className="text-sm font-semibold mb-1 text-brand">{tr.advisorGreeting}</p>
+            <p className="text-xs mb-3 text-ink-subtle">{tr.advisorHint}</p>
             <div className="flex flex-col gap-1.5">
               {advisorPrompts(tr).map((p, i) => (
                 <button key={i} onClick={() => { setInput(p); inputRef.current?.focus(); }}
-                  className="text-left text-xs px-3 py-2 rounded-lg transition-all"
-                  style={{ background: '#1a1a1a', color: '#b0b0b0', border: '1px solid #252525' }}>
+                  className="text-left text-xs px-3 py-2 rounded-lg transition-all bg-surface-750 text-ink-muted border border-surface-600">
                   {p}
                 </button>
               ))}
@@ -157,28 +154,28 @@ export default function AdvisorWidget({ activeTab, composition }) {
           <div key={i}
             className="max-w-[85%] px-3 py-2 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap"
             style={m.role === 'user'
-              ? { alignSelf: 'flex-end', background: '#38bdf8', color: '#0f0f0f', borderBottomRightRadius: 4 }
-              : { alignSelf: 'flex-start', background: '#1e1e1e', color: '#e8e8e8', border: '1px solid #2a2a2a', borderBottomLeftRadius: 4 }}>
+              ? { alignSelf: 'flex-end', background: 'var(--color-info)', color: 'var(--color-surface-base)', borderBottomRightRadius: 4 }
+              : { alignSelf: 'flex-start', background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)', borderBottomLeftRadius: 4 }}>
             {m.content}
           </div>
         ))}
 
         {loading && (
-          <div className="max-w-[85%] px-3 py-2 rounded-2xl text-xs"
-            style={{ alignSelf: 'flex-start', background: '#1e1e1e', color: '#8a8a8a', border: '1px solid #2a2a2a' }}>
+          <div className="max-w-[85%] px-3 py-2 rounded-2xl text-xs text-ink-muted"
+            style={{ alignSelf: 'flex-start', background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)' }}>
             {tr.advisorThinking}
           </div>
         )}
 
         {unavailable && !loading && (
-          <div className="text-[11px] text-center py-2" style={{ color: '#6a6a6a' }}>
+          <div className="text-[11px] text-center py-2 text-ink-subtle">
             {tr.advisorUnavailable}
           </div>
         )}
       </div>
 
       {/* Input */}
-      <div className="p-2.5 flex items-end gap-2" style={{ borderTop: '1px solid #2a2a2a' }}>
+      <div className="p-2.5 flex items-end gap-2" style={{ borderTop: '1px solid var(--color-surface-550)' }}>
         <textarea
           ref={inputRef}
           value={input}
@@ -186,16 +183,13 @@ export default function AdvisorWidget({ activeTab, composition }) {
           onKeyDown={onKeyDown}
           rows={1}
           placeholder={tr.advisorPlaceholder}
-          className="flex-1 resize-none px-3 py-2 rounded-xl text-xs outline-none"
-          style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8', maxHeight: 96 }}
+          className="flex-1 resize-none px-3 py-2 rounded-xl text-xs outline-none bg-surface-750 text-ink border border-surface-550"
+          style={{ maxHeight: 96 }}
         />
         <button
           onClick={send}
           disabled={!input.trim() || loading}
-          className="shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all"
-          style={input.trim() && !loading
-            ? { background: '#a78bfa', color: '#0f0f0f' }
-            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+          className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all ${input.trim() && !loading ? 'bg-accent text-surface-base' : 'bg-surface-750 text-ink-ghost cursor-not-allowed'}`}>
           {tr.advisorSend}
         </button>
       </div>
