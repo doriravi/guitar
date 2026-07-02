@@ -21,31 +21,31 @@ export default function TripletTable({ lang }) {
 
   return (
     <div className="p-3 sm:p-5">
-      <div className="flex flex-wrap items-center gap-3 sm:gap-5 mb-4 sm:mb-5 px-3 sm:px-4 py-3 rounded-xl" style={{ background: '#1a1a1a', border: '1px solid #1e1e1e' }}>
+      <div className="flex flex-wrap items-center gap-3 sm:gap-5 mb-4 sm:mb-5 px-3 sm:px-4 py-3 rounded-xl bg-surface-750 border border-surface-700">
         <div className="flex items-center gap-3 flex-1 min-w-[140px]">
-          <label className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: '#5a5a5a' }}>{tr.maxFret}</label>
+          <label className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap text-ink-faint">{tr.maxFret}</label>
           <input
             type="range" min={2} max={10} value={maxFret}
             onChange={e => setMaxFret(Number(e.target.value))}
             className="flex-1"
-            style={{ background: `linear-gradient(to right, #c9a96e ${pct}%, #2a2a2a ${pct}%)` }}
+            style={{ background: `linear-gradient(to right, var(--color-brand) ${pct}%, var(--color-surface-550) ${pct}%)` }}
           />
-          <span className="text-sm font-bold w-5 text-right tabular-nums" style={{ color: '#c9a96e' }}>{maxFret}</span>
+          <span className="text-sm font-bold w-5 text-right tabular-nums text-brand">{maxFret}</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.sort}</label>
-          <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: '#111' }}>
+          <label className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{tr.sort}</label>
+          <div className="flex gap-1 p-0.5 rounded-lg bg-surface-900">
             {[['score', tr.easiest], ['score_desc', tr.hardest]].map(([val, label]) => (
               <button
                 key={val}
                 onClick={() => setSortBy(val)}
                 className="px-3 py-1.5 text-xs font-semibold rounded-md transition-all"
                 style={sortBy === val ? {
-                  background: '#252525',
-                  color: '#c9a96e',
+                  background: 'var(--color-surface-600)',
+                  color: 'var(--color-brand)',
                   boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
-                } : { color: '#5a5a5a' }}
+                } : { color: 'var(--color-ink-faint)' }}
               >
                 {label}
               </button>
@@ -53,17 +53,17 @@ export default function TripletTable({ lang }) {
           </div>
         </div>
 
-        <span className="text-xs tabular-nums ml-auto" style={{ color: '#3a3a3a' }}>
+        <span className="text-xs tabular-nums ml-auto text-ink-ghost">
           {rows.length.toLocaleString()} {tr.strings && ''}{/* count */}
         </span>
       </div>
 
-      <div className="overflow-auto max-h-[65vh] rounded-xl" style={{ border: '1px solid #1e1e1e' }}>
+      <div className="overflow-auto max-h-[65vh] rounded-xl border border-surface-700">
         <table className="text-sm w-full border-collapse">
           <thead className="sticky top-0 z-10">
             <tr>
               {[tr.strings, tr.frets, tr.fretSpan, tr.stringSpan, tr.difficulty].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left" style={{ borderBottom: '1px solid #1e1e1e' }}>{h}</th>
+                <th key={h} className="px-4 py-2.5 text-left border-b border-surface-700">{h}</th>
               ))}
             </tr>
           </thead>
@@ -71,17 +71,16 @@ export default function TripletTable({ lang }) {
             {rows.map((r, i) => (
               <tr
                 key={i}
-                className="transition-colors"
-                style={{ borderBottom: '1px solid #1a1a1a' }}
-                onMouseEnter={e => e.currentTarget.style.background = '#1a1a1a'}
+                className="transition-colors border-b border-surface-750"
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-surface-750)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
-                <td className="px-4 py-2 font-mono text-xs font-semibold" style={{ color: '#c9a96e' }}>
+                <td className="px-4 py-2 font-mono text-xs font-semibold text-brand">
                   {r.strings.map(s => STRING_NAMES[s]).join(' – ')}
                 </td>
-                <td className="px-4 py-2 font-mono text-xs" style={{ color: '#6a6a6a' }}>{r.frets.join(' – ')}</td>
-                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.fretSpan}</td>
-                <td className="px-4 py-2 text-xs" style={{ color: '#4a4a4a' }}>{r.stringSpan}</td>
+                <td className="px-4 py-2 font-mono text-xs text-ink-subtle">{r.frets.join(' – ')}</td>
+                <td className="px-4 py-2 text-xs text-ink-ghost">{r.fretSpan}</td>
+                <td className="px-4 py-2 text-xs text-ink-ghost">{r.stringSpan}</td>
                 <td className="px-4 py-2"><DifficultyBadge score={r.score} /></td>
               </tr>
             ))}
