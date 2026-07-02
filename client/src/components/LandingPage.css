@@ -6,17 +6,29 @@
 .lp-embed-root {
   position: fixed;
   inset: 0;
-  background: #0b0a08;
+  /* A warm, subtly-lit backdrop so the drifting elements behind the frame read. */
+  background:
+    radial-gradient(120% 90% at 15% 0%, rgba(201, 169, 110, 0.10), transparent 60%),
+    radial-gradient(120% 90% at 100% 100%, rgba(167, 139, 250, 0.08), transparent 55%),
+    #0b0a08;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
+/* The explainer is now an inset, rounded "main frame" centered on the backdrop,
+   leaving a margin all around where the background music elements are visible. */
 .lp-embed-frame {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
+  position: relative;
+  z-index: 2;                 /* above the background FX layer (z-index:1) */
+  width: min(1100px, 92vw);
+  height: min(680px, 86vh);
+  border: 1px solid rgba(201, 169, 110, 0.18);
+  border-radius: 20px;
   display: block;
+  background: #0b0a08;
+  box-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(0,0,0,0.4);
 }
 
 /* Overlay controls — top-right, above the iframe. */
@@ -49,8 +61,113 @@
   box-shadow: 0 10px 28px -8px rgba(94, 234, 212, 0.85);
 }
 .lp-embed-cta:active { transform: translateY(0); }
+/* Give the CTA a little life: a gentle bob + a sheen sweeping across it. */
+.lp-embed-cta { animation: lp-cta-bob 2.8s ease-in-out infinite; overflow: hidden; position: relative; }
+.lp-embed-cta::after {
+  content: '';
+  position: absolute; top: 0; left: -60%;
+  width: 45%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.6), transparent);
+  transform: skewX(-20deg);
+  animation: lp-cta-sheen 3.2s ease-in-out infinite;
+}
+.lp-embed-cta:hover { animation-play-state: paused; }
+
+/* Ambient particle field — a patch in the TOP-LEFT, directly under the
+   "FretFit · guitar that fits you" branding. Backmost layer, behind the music FX
+   and frame; never intercepts clicks or covers the framed content. Soft-masked
+   at the right and bottom edges so it fades out instead of ending abruptly. */
+.lp-particles {
+  position: absolute;
+  top: 44px;               /* just below the header line */
+  left: 0;
+  width: min(460px, 46vw); /* only the branding's column */
+  height: 200px;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+  -webkit-mask-image:
+    linear-gradient(to right, #000 60%, transparent),
+    linear-gradient(to bottom, #000 65%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, #000 60%, transparent),
+    linear-gradient(to bottom, #000 65%, transparent);
+  mask-composite: intersect;
+}
+
+/* ── Background music FX layer (flying guitars + floating notes) ─────────────
+   Sits BEHIND the framed explainer (z-index:1) and fills the whole viewport, so
+   elements drift across the backdrop and through the margin around the frame.
+   Non-interactive. */
+.lp-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 1;              /* behind the frame (z-index:2) */
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Realistic SVG guitars fly across the full viewport, spinning and drifting,
+   with a subtle strum-wobble layered on. Bigger than before. */
+.lp-guitar {
+  position: absolute;
+  left: -18vw;
+  display: block;
+  will-change: transform;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.55));
+  opacity: 0.9;
+  animation-name: lp-fly, lp-wobble;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  animation-duration: var(--fly-dur, 14s), 1.3s;   /* fly = per-item; wobble fixed */
+}
+
+/* SVG notes rise from below, swaying side to side and fading as they go. */
+.lp-note-fx {
+  position: absolute;
+  bottom: -12vh;
+  display: block;
+  opacity: 0;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 0 10px rgba(201, 169, 110, 0.5));
+  animation-name: lp-rise;
+  animation-timing-function: ease-in;
+  animation-iteration-count: infinite;
+}
+
+@keyframes lp-fly {
+  0%   { transform: translate(0, 0) rotate(var(--spin, 0deg)); }
+  100% { transform: translate(140vw, var(--drift, 0px)) rotate(calc(var(--spin, 0deg) + 360deg)); }
+}
+@keyframes lp-wobble {
+  0%, 100% { margin-top: -9px; }
+  50%      { margin-top: 9px; }
+}
+@keyframes lp-rise {
+  0%   { transform: translate(0, 0); opacity: 0; }
+  10%  { opacity: 0.9; }
+  50%  { transform: translate(var(--sway, 0px), -55vh); opacity: 0.9; }
+  90%  { opacity: 0; }
+  100% { transform: translate(calc(var(--sway, 0px) * -1), -110vh); opacity: 0; }
+}
+@keyframes lp-cta-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+@keyframes lp-cta-sheen {
+  0%   { left: -60%; }
+  60%, 100% { left: 130%; }
+}
 
 @media (max-width: 520px) {
   .lp-embed-controls { top: 10px; right: 10px; gap: 7px; }
   .lp-embed-cta { font-size: 13px; padding: 8px 16px; }
+}
+
+/* Respect reduced-motion: keep it calm — hide flyers, stop CTA motion. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-fx { display: none; }
+  .lp-embed-cta { animation: none; }
+  .lp-embed-cta::after { display: none; }
 }

@@ -1,4 +1,5 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
+import './StartHere.css';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import { personalDifficulty, abilityLabel, DEFAULT_PROFILE } from '../lib/handProfile';
@@ -38,6 +39,8 @@ export default function StartHere({ lang, onGoToHand }) {
   const handProfile = useHandProfile();
   const [playing, setPlaying] = useState(null); // chord name currently sounding
   const [audioDbg, setAudioDbg] = useState(null); // temp: on-screen audio diagnostics
+  const [active, setActive] = useState(0);        // front-facing card in the 3D carousel
+  const [paused, setPaused] = useState(false);    // pause auto-rotate on hover
 
   const usingDefault = isDefaultProfile(handProfile);
   const ability = abilityLabel(handProfile);
@@ -57,6 +60,15 @@ export default function StartHere({ lang, onGoToHand }) {
       .sort((a, b) => a.personalScore - b.personalScore)
       .slice(0, HOW_MANY);
   }, [handProfile]);
+
+  // Auto-rotate the 3D carousel. Pauses while a chord is playing (so you can hear
+  // the one in front) and on hover, so it never spins away from what you're doing.
+  useEffect(() => {
+    const n = shortlist.length;
+    if (n <= 1 || paused || playing) return;
+    const id = setInterval(() => setActive(a => (a + 1) % n), 2600);
+    return () => clearInterval(id);
+  }, [shortlist.length, paused, playing]);
 
   const playChord = useCallback((chord) => {
     if (playing === chord.name) { stopAudio(); setPlaying(null); return; }
@@ -114,36 +126,83 @@ export default function StartHere({ lang, onGoToHand }) {
         </p>
       )}
 
-      {/* Chord cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {shortlist.map((chord, i) => {
-          const isPlaying = playing === chord.name;
-          return (
-            <div key={chord.name} className="rounded-2xl p-4 flex flex-col items-center bg-surface-800 border border-surface-700">
-              <div className="flex items-center justify-between w-full mb-2">
-                <span className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center bg-surface-600 text-ink-subtle">{i + 1}</span>
-                <DifficultyBadge score={chord.personalScore} />
-              </div>
-
-              <div className="text-2xl font-bold mb-2 text-brand">{chord.name}</div>
-
-              <FretboardDiagram chord={chord} showFingers />
-
-              <div className="font-mono text-xs mt-2 mb-3 text-center" style={{ color: 'var(--color-ink-faint)' }}>
-                {fingerHint(chord.notes)}
-              </div>
-
-              <button
-                onClick={() => playChord(chord)}
-                className={`w-full text-sm font-semibold py-2 rounded-lg transition-all ${isPlaying ? 'text-danger' : 'bg-surface-600 text-brand'}`}
-                style={isPlaying ? { background: 'rgba(239,68,68,0.15)' } : undefined}
+      {/* Chord cards — true 3D carousel. Cards sit on a ring in 3D space; the
+          ring rotates so the active card faces front. Prev/next + dots navigate. */}
+      {(() => {
+        const n = shortlist.length;
+        const anglePer = 360 / Math.max(n, 1);
+        const radius = 300; // px — ring depth; tuned so neighbours peek at the sides
+        const go = (dir) => setActive(a => (a + dir + n) % n);
+        return (
+          <div
+            className="sh-carousel"
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
+          >
+            <div className="sh-stage">
+              <div
+                className="sh-ring"
+                style={{ transform: `translateZ(-${radius}px) rotateY(${-active * anglePer}deg)` }}
               >
-                {isPlaying ? `■ ${tr.startHereStop || 'Stop'}` : `▶ ${tr.startHerePlay || 'Hear it'}`}
-              </button>
+                {shortlist.map((chord, i) => {
+                  const isPlaying = playing === chord.name;
+                  // Shortest angular distance from the front slot → drives depth styling.
+                  let rel = ((i - active) % n + n) % n;
+                  if (rel > n / 2) rel -= n;
+                  const isFront = rel === 0;
+                  return (
+                    <div
+                      key={chord.name}
+                      className={`sh-card ${isFront ? 'is-front' : ''}`}
+                      style={{ transform: `rotateY(${i * anglePer}deg) translateZ(${radius}px)` }}
+                      onClick={() => !isFront && setActive(i)}
+                      aria-hidden={!isFront}
+                    >
+                      <div className="rounded-2xl p-4 flex flex-col items-center bg-surface-800 border border-surface-700 h-full">
+                        <div className="flex items-center justify-between w-full mb-2">
+                          <span className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center bg-surface-600 text-ink-subtle">{i + 1}</span>
+                          <DifficultyBadge score={chord.personalScore} />
+                        </div>
+
+                        <div className="text-2xl font-bold mb-2 text-brand">{chord.name}</div>
+
+                        <FretboardDiagram chord={chord} showFingers />
+
+                        <div className="font-mono text-xs mt-2 mb-3 text-center" style={{ color: 'var(--color-ink-faint)' }}>
+                          {fingerHint(chord.notes)}
+                        </div>
+
+                        <button
+                          onClick={(e) => { e.stopPropagation(); playChord(chord); }}
+                          disabled={!isFront}
+                          className={`w-full text-sm font-semibold py-2 rounded-lg transition-all ${isPlaying ? 'text-danger' : 'bg-surface-600 text-brand'}`}
+                          style={isPlaying ? { background: 'rgba(239,68,68,0.15)' } : undefined}
+                        >
+                          {isPlaying ? `■ ${tr.startHereStop || 'Stop'}` : `▶ ${tr.startHerePlay || 'Hear it'}`}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          );
-        })}
-      </div>
+
+            {/* Controls */}
+            <button className="sh-nav sh-prev" onClick={() => go(-1)} aria-label="Previous chord">‹</button>
+            <button className="sh-nav sh-next" onClick={() => go(1)} aria-label="Next chord">›</button>
+            <div className="sh-dots">
+              {shortlist.map((c, i) => (
+                <button
+                  key={c.name}
+                  className={`sh-dot ${i === active ? 'is-active' : ''}`}
+                  onClick={() => setActive(i)}
+                  aria-label={`Show ${c.name}`}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <p className="text-xs mt-5 text-center text-ink-ghost">
         {tr.startHereFooter ||
