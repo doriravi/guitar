@@ -322,20 +322,18 @@ function PlayMode({ tr }) {
     <div>
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <button onClick={handleStrum} disabled={activeCount === 0}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all"
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeCount > 0 ? 'text-surface-base' : 'bg-surface-750 text-ink-ghost cursor-not-allowed'}`}
           style={activeCount > 0
-            ? { background: strumming ? '#b8913a' : '#c9a96e', color: '#0f0f0f', transform: strumming ? 'scale(0.97)' : 'scale(1)' }
-            : { background: '#1a1a1a', color: '#3a3a3a', cursor: 'not-allowed' }}>
+            ? { background: strumming ? 'var(--color-brand-hover)' : 'var(--color-brand)', transform: strumming ? 'scale(0.97)' : 'scale(1)' }
+            : undefined}>
           🎸 Strum {activeCount > 0 && <span className="text-xs font-normal opacity-70">({activeCount})</span>}
         </button>
         <button onClick={() => { setSelected([0,0,0,0,0,0]); strum([0,0,0,0,0,0]); }}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-surface-750 text-ink-subtle border border-surface-650">
           {tr.allOpen}
         </button>
         <button onClick={() => setSelected([null,null,null,null,null,null])}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-          style={{ background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-surface-750 text-ink-subtle border border-surface-650">
           {tr.muteAll}
         </button>
       </div>
@@ -344,7 +342,7 @@ function PlayMode({ tr }) {
 
       {activeCount > 0 && (
         <div className="mt-3 flex flex-wrap gap-2 items-center">
-          <span className="text-xs" style={{ color: '#3a3a3a' }}>{tr.playing}</span>
+          <span className="text-xs text-ink-ghost">{tr.playing}</span>
           {[0,1,2,3,4,5].map(s => {
             const f = selected[s];
             if (f === null) return null;
@@ -430,14 +428,11 @@ function ScaleMode({ tr }) {
       {/* Controls */}
       <div className="flex flex-wrap gap-2 mb-4 items-end">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.root}</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{tr.root}</label>
           <div className="flex flex-wrap gap-1">
             {ROOTS.map(r => (
               <button key={r} onClick={() => setRoot(r)}
-                className="px-2 py-1 rounded-lg text-xs font-bold transition-all"
-                style={root === r
-                  ? { background: '#c9a96e', color: '#0f0f0f' }
-                  : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all border ${root === r ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
                 {r}
               </button>
             ))}
@@ -447,14 +442,11 @@ function ScaleMode({ tr }) {
 
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="flex flex-col gap-1 flex-1">
-          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>{tr.scale}</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{tr.scale}</label>
           <div className="flex flex-wrap gap-1">
             {Object.keys(SCALE_TYPES).map(sn => (
               <button key={sn} onClick={() => setScaleName(sn)}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-                style={scaleName === sn
-                  ? { background: '#c9a96e', color: '#0f0f0f' }
-                  : { background: '#1a1a1a', color: '#5a5a5a', border: '1px solid #222' }}>
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${scaleName === sn ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
                 {sn}
               </button>
             ))}
@@ -463,27 +455,25 @@ function ScaleMode({ tr }) {
       </div>
 
       {/* Scale info + play button */}
-      <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2.5 rounded-xl"
-        style={{ background: '#1a1a1a', border: '1px solid #222' }}>
+      <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2.5 rounded-xl bg-surface-750 border border-surface-650">
         <div>
-          <p className="text-xs font-bold mb-1" style={{ color: '#c9a96e' }}>
+          <p className="text-xs font-bold mb-1 text-brand">
             {root} {scaleName}
           </p>
-          <p className="text-xs font-mono" style={{ color: '#5a5a5a' }}>
+          <p className="text-xs font-mono text-ink-faint">
             {scaleNotes.join('  ·  ')}
           </p>
         </div>
         <button onClick={playScale}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold"
-          style={{ background: '#252525', color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-600 text-brand border border-surface-550">
           ▶ Play
         </button>
       </div>
 
       {/* Legend */}
-      <div className="flex gap-3 text-xs mb-3" style={{ color: '#3a3a3a' }}>
+      <div className="flex gap-3 text-xs mb-3 text-ink-ghost">
         <span className="flex items-center gap-1.5">
-          <span className="w-4 h-4 rounded-full inline-block" style={{ background: '#c9a96e' }} />
+          <span className="w-4 h-4 rounded-full inline-block bg-brand" />
           {tr.rootNote}
         </span>
         <span className="flex items-center gap-1.5">
@@ -547,14 +537,12 @@ function ChordDiagram({ chord, isActive, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-xl p-2 transition-all flex flex-col items-center gap-1"
-      style={{
-        background: isActive ? 'rgba(201,169,110,0.1)' : '#141414',
-        border: `1px solid ${isActive ? 'rgba(201,169,110,0.4)' : '#222'}`,
-        minWidth: 100,
-      }}
+      className={`rounded-xl p-2 transition-all flex flex-col items-center gap-1 border ${isActive ? '' : 'bg-surface-850 border-surface-650'}`}
+      style={isActive
+        ? { background: 'rgba(201,169,110,0.1)', borderColor: 'rgba(201,169,110,0.4)', minWidth: 100 }
+        : { minWidth: 100 }}
     >
-      <p className="text-xs font-semibold" style={{ color: isActive ? '#c9a96e' : '#7a7a7a' }}>
+      <p className={`text-xs font-semibold ${isActive ? 'text-brand' : 'text-ink-subtle'}`}>
         {chord.type}
       </p>
       <svg width={W} height={H} style={{ overflow: 'visible' }}>
@@ -669,16 +657,12 @@ function ChordFinderMode({ diffMax, tr }) {
         <input
           value={search} onChange={e => setSearch(e.target.value)}
           placeholder={tr.searchChord}
-          className="w-full px-3 py-2 rounded-xl text-sm outline-none mb-3"
-          style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f0ede8' }}
+          className="w-full px-3 py-2 rounded-xl text-sm outline-none mb-3 bg-surface-750 text-ink border border-surface-550"
         />
         <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
           {filtered.map(name => (
             <button key={name} onClick={() => selectChord(name)}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-              style={selectedName === name
-                ? { background: '#c9a96e', color: '#0f0f0f' }
-                : { background: '#1a1a1a', color: '#7a7a7a', border: '1px solid #222' }}>
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${selectedName === name ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-subtle border-surface-650'}`}>
               {name}
             </button>
           ))}
@@ -688,7 +672,7 @@ function ChordFinderMode({ diffMax, tr }) {
       {/* Voicings */}
       {voicings.length > 0 && (
         <div className="mb-4">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: '#3a3a3a' }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2 text-ink-ghost">
             {selectedName} — {voicings.length} voicing{voicings.length > 1 ? 's' : ''} · tap to show on fretboard
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -700,7 +684,7 @@ function ChordFinderMode({ diffMax, tr }) {
       )}
 
       {voicings.length === 0 && selectedName && (
-        <div className="mb-4 text-sm text-center py-6" style={{ color: '#3a3a3a' }}>
+        <div className="mb-4 text-sm text-center py-6 text-ink-ghost">
           No voicings for "{selectedName}" within difficulty ≤ {diffMax}
         </div>
       )}
@@ -708,15 +692,15 @@ function ChordFinderMode({ diffMax, tr }) {
       {/* Fretboard — shows selected voicing */}
       {activeVoicing ? (
         <>
-          <p className="text-xs mb-2" style={{ color: '#3a3a3a' }}>
-            Showing: <span style={{ color: '#c9a96e' }}>{activeVoicing.name} ({activeVoicing.type})</span>
-            &nbsp;· Tab: <span className="font-mono" style={{ color: '#5a5a5a' }}>{activeVoicing.tab}</span>
+          <p className="text-xs mb-2 text-ink-ghost">
+            Showing: <span className="text-brand">{activeVoicing.name} ({activeVoicing.type})</span>
+            &nbsp;· Tab: <span className="font-mono text-ink-faint">{activeVoicing.tab}</span>
           </p>
           <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
         </>
       ) : (
-        <div className="rounded-2xl flex items-center justify-center text-sm"
-          style={{ background: '#141414', border: '1px dashed #2a2a2a', height: 120, color: '#3a3a3a' }}>
+        <div className="rounded-2xl flex items-center justify-center text-sm bg-surface-850 text-ink-ghost"
+          style={{ border: '1px dashed var(--color-surface-550)', height: 120 }}>
           Select a voicing above to see it on the fretboard
         </div>
       )}

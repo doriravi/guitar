@@ -119,7 +119,7 @@ export default function TabTranscriber() {
       </p>
 
       {/* Source toggle: upload a file or paste a YouTube link */}
-      <div className="flex gap-1 mb-3 p-1 rounded-lg w-max" style={{ background: '#161616' }}
+      <div className="flex gap-1 mb-3 p-1 rounded-lg w-max bg-surface-800"
         data-explain="This switch chooses where the audio comes from: a file from your device, or a YouTube link. Pick one, then add your audio below.">
         {[
           { id: 'file',    label: tr.tabAudioSourceFile || 'Upload file' },
@@ -133,8 +133,8 @@ export default function TabTranscriber() {
             onClick={() => { setSource(opt.id); setError(null); }}
             className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
             style={source === opt.id
-              ? { background: '#1e1e1e', color: '#c9a96e' }
-              : { color: '#5a5a5a' }}
+              ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)' }
+              : { color: 'var(--color-ink-faint)' }}
           >
             {opt.label}
           </button>
@@ -159,7 +159,7 @@ export default function TabTranscriber() {
             onChange={(e) => { setYoutubeUrl(e.target.value); setResult(null); setError(null); }}
             placeholder={tr.tabAudioYoutubePlaceholder || 'https://www.youtube.com/watch?v=…'}
             className="text-sm rounded-md px-3 py-2 flex-1 min-w-[260px] outline-none"
-            style={{ background: '#111', border: `1px solid ${youtubeUrl && !urlValid ? '#7f1d1d' : '#333'}`, color: '#f0ede8' }}
+            style={{ background: 'var(--color-surface-900)', border: `1px solid ${youtubeUrl && !urlValid ? '#7f1d1d' : 'var(--color-surface-600)'}`, color: 'var(--color-ink)' }}
           />
         )}
         <button
@@ -173,12 +173,12 @@ export default function TabTranscriber() {
       </div>
 
       {source === 'youtube' && youtubeUrl && !urlValid && (
-        <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+        <p className="text-xs mb-2 text-danger">
           {tr.tabAudioYoutubeInvalid || 'Enter a valid YouTube link (youtube.com/watch?v=… or youtu.be/…).'}
         </p>
       )}
       {source === 'youtube' && (
-        <p className="text-xs mb-2" style={{ color: '#5a5a5a' }}>
+        <p className="text-xs mb-2 text-ink-faint">
           {tr.tabAudioYoutubeNote || 'We transcribe roughly the first minute of the video.'}
         </p>
       )}
@@ -190,7 +190,7 @@ export default function TabTranscriber() {
       )}
 
       {error && (
-        <div className="my-4 p-3 rounded-md text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
+        <div className="my-4 p-3 rounded-md text-sm text-danger" style={{ background: 'rgba(239,68,68,0.1)' }}>
           {error}
         </div>
       )}
@@ -203,8 +203,8 @@ export default function TabTranscriber() {
               disabled={!result.events?.length}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-40"
               style={isPlaying
-                ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
-                : { background: '#c9a96e', color: '#0f0f0f' }}
+                ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)' }
+                : { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
             >
               <span className="text-base leading-none">{isPlaying ? '■' : '▶'}</span>
               {isPlaying ? (tr.tabAudioStop || 'Stop') : (tr.tabAudioPlay || 'Play transcription')}
