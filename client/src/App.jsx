@@ -269,41 +269,38 @@ export default function App() {
   // truth for the header.
   function renderHeader() {
     return (
-      <header style={{ borderBottom: '1px solid #1e1e1e' }}>
+      <header className="border-b border-surface-700">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
           <span className="text-xl sm:text-2xl">🎸</span>
           <div className="flex-1">
-            <h1 className="text-sm sm:text-base font-bold tracking-tight leading-none" style={{ color: '#f0ede8' }}>
+            <h1 className="text-sm sm:text-base font-bold tracking-tight leading-none text-ink">
               Guitar Reach
             </h1>
-            <p className="text-xs mt-0.5 hidden sm:block" style={{ color: '#5a5a5a' }}>
+            <p className="text-xs mt-0.5 hidden sm:block text-ink-faint">
               {tr.appSubtitle}
             </p>
           </div>
           {currentUser ? (
             <div className="flex items-center gap-2">
               <button onClick={() => setShowSettings(true)}
-                className="text-xs hidden sm:block" style={{ color: '#888' }}>
+                className="text-xs hidden sm:block text-ink-muted">
                 {currentUser.email}
-                {!currentUser.emailVerified && <span style={{ color: '#fb923c' }}> ⚠</span>}
+                {!currentUser.emailVerified && <span className="text-warning"> ⚠</span>}
               </button>
               <button onClick={() => setShowSettings(true)}
                 data-explain="The Settings button opens your account — change your name, email, password, language, or delete your account."
-                className="text-xs px-2 py-1 rounded"
-                style={{ color: '#c9a96e', border: '1px solid #2a2a2a' }}>
+                className="text-xs px-2 py-1 rounded text-brand border border-surface-550">
                 {tr.settings}
               </button>
               <button onClick={handleLogout}
                 data-explain="The Sign out button logs you out of your account and returns you to the welcome screen."
-                className="text-xs px-2 py-1 rounded"
-                style={{ color: '#888', border: '1px solid #2a2a2a' }}>
+                className="text-xs px-2 py-1 rounded text-ink-muted border border-surface-550">
                 {tr.signOut}
               </button>
             </div>
           ) : (
             <button onClick={() => setShowAuth(true)}
-              className="text-xs px-3 py-1.5 rounded-lg font-semibold"
-              style={{ background: '#c9a96e', color: '#0f0f0f' }}>
+              className="text-xs px-3 py-1.5 rounded-lg font-semibold bg-brand text-surface-base">
               {tr.signIn}
             </button>
           )}
@@ -317,7 +314,7 @@ export default function App() {
   if (authChecking) {
     return (
       <LangContext.Provider value={lang}>
-        <div className="min-h-screen flex items-center justify-center" style={{ background: '#0f0f0f', color: '#888' }}>
+        <div className="min-h-screen flex items-center justify-center bg-surface-base text-ink-muted">
           <span className="text-sm">{tr.pleaseWait}</span>
         </div>
       </LangContext.Provider>
@@ -338,7 +335,7 @@ export default function App() {
                 value={lang}
                 onChange={e => handleLangSelect(e.target.value)}
                 aria-label="Language"
-                style={{ background: '#15151a', color: '#8a8a93', border: '1px solid #26262c',
+                style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-600)',
                   borderRadius: 9, padding: '7px 10px', fontSize: 13 }}
               >
                 {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
@@ -350,7 +347,7 @@ export default function App() {
     }
     return (
       <LangContext.Provider value={lang}>
-        <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+        <div className="min-h-screen bg-surface-base">
           {showResetModal ? (
             <ResetPassword
               token={resetToken}
@@ -398,13 +395,13 @@ export default function App() {
       <LangContext.Provider value={lang}>
       <AIFingerContext.Provider value={aiFingers}>
       <HandProfileContext.Provider value={handProfile}>
-        <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+        <div className="min-h-screen bg-surface-base">
           {showSettings && currentUser && (
             <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
               <div className="min-h-screen flex items-start justify-center py-10 px-4">
-                <div className="w-full max-w-lg rounded-2xl relative" style={{ background: '#0f0f0f', border: '1px solid #2a2a2a' }}>
+                <div className="w-full max-w-lg rounded-2xl relative bg-surface-base border border-surface-550">
                   <button onClick={() => setShowSettings(false)}
-                    className="absolute top-4 right-4 text-xl leading-none" style={{ color: '#888' }}>×</button>
+                    className="absolute top-4 right-4 text-xl leading-none text-ink-muted">×</button>
                   <AccountSettings
                     currentUser={currentUser}
                     onUpdated={updated => setCurrentUser(updated)}
@@ -425,7 +422,7 @@ export default function App() {
               {tr.measureFirstPrompt ||
                 'First, measure your hand so we can personalize difficulty scores. This takes about a minute.'}
             </div>
-            <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
+            <div className="rounded-2xl overflow-hidden bg-surface-850 border border-surface-700">
               <HandProfileSetup
                 profile={handProfile}
                 onSave={handleSaveProfile}
@@ -447,7 +444,7 @@ export default function App() {
     <LangContext.Provider value={lang}>
     <AIFingerContext.Provider value={aiFingers}>
     <HandProfileContext.Provider value={handProfile}>
-      <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+      <div className="min-h-screen bg-surface-base">
 
         {showAuth && !showForgot && (
           <AuthModal
@@ -481,7 +478,7 @@ export default function App() {
         {showSettings && currentUser && (
           <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
             <div className="min-h-screen flex items-start justify-center py-10 px-4">
-              <div className="w-full max-w-lg rounded-2xl relative" style={{ background: '#0f0f0f', border: '1px solid #2a2a2a' }}>
+              <div className="w-full max-w-lg rounded-2xl relative bg-surface-base border border-surface-550">
                 <button onClick={() => setShowSettings(false)}
                   className="absolute top-4 right-4 text-xl leading-none" style={{ color: '#888' }}>×</button>
                 <AccountSettings
@@ -506,12 +503,12 @@ export default function App() {
           data-explain="Opens the side menu with extra tools, like the Tuner."
           className="fixed top-3 left-3 z-30 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
           style={{
-            background: '#161616', border: '1px solid #262626',
-            color: SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? '#c9a96e' : '#9a9a9a',
+            background: 'var(--color-surface-800)', border: '1px solid var(--color-surface-600)',
+            color: SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? 'var(--color-brand)' : 'var(--color-ink-muted)',
             boxShadow: '0 1px 6px rgba(0,0,0,0.4)',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = '#d0d0d0'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? '#c9a96e' : '#9a9a9a'; }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-ink)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = SIDE_TABS_ACTIVE(getTabs(tr), activeTab) ? 'var(--color-brand)' : 'var(--color-ink-muted)'; }}
         >
           <span className="text-base leading-none">☰</span>
           <span className="hidden sm:inline">{tr.menu || 'Menu'}</span>
@@ -534,7 +531,7 @@ export default function App() {
 
           {/* Tab bar — main tabs inline; tabs flagged `side` live in the side menu,
               opened by the ☰ button. The active side tab stays highlighted here too. */}
-          <div className="flex items-stretch gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl" style={{ background: '#161616' }}
+          <div className="flex items-stretch gap-0.5 sm:gap-1 mb-3 sm:mb-5 p-1 rounded-xl bg-surface-800"
             data-explain="This is the tab bar. Each tab opens a different tool — your hand profile, chord tables, song progressions, and more. The menu button at the top-left of the screen opens extra tools like the tuner.">
             {getTabs(tr).filter(t => !t.side).map(tab => (
               <button
@@ -543,10 +540,10 @@ export default function App() {
                 onClick={() => setActiveTab(tab.id)}
                 className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-0 sm:gap-2 px-1 sm:px-3 py-2 sm:py-2.5 rounded-lg text-xs font-semibold transition-all"
                 style={activeTab === tab.id ? {
-                  background: '#1e1e1e', color: '#c9a96e', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-                } : { color: '#5a5a5a' }}
-                onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#a0a0a0'; }}
-                onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#5a5a5a'; }}
+                  background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                } : { color: 'var(--color-ink-faint)' }}
+                onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--color-ink-muted)'; }}
+                onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--color-ink-faint)'; }}
               >
                 <span className="text-base sm:text-sm leading-none">{tab.icon}</span>
                 <span className="text-[10px] sm:text-xs mt-0.5 sm:mt-0 leading-tight">{tab.label}</span>
@@ -561,14 +558,14 @@ export default function App() {
               <aside
                 onClick={e => e.stopPropagation()}
                 className="absolute top-0 left-0 h-full w-64 max-w-[80vw] p-4 flex flex-col gap-1"
-                style={{ background: '#161616', borderRight: '1px solid #262626', boxShadow: '2px 0 24px rgba(0,0,0,0.5)' }}
+                style={{ background: 'var(--color-surface-800)', borderRight: '1px solid var(--color-surface-600)', boxShadow: '2px 0 24px rgba(0,0,0,0.5)' }}
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5a5a5a' }}>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
                     {tr.menu || 'Menu'}
                   </span>
                   <button onClick={() => setSideMenuOpen(false)} aria-label="Close"
-                    className="text-lg leading-none px-1" style={{ color: '#5a5a5a' }}>×</button>
+                    className="text-lg leading-none px-1 text-ink-faint">×</button>
                 </div>
                 {getTabs(tr).filter(t => t.side).map(tab => (
                   <button
@@ -577,10 +574,10 @@ export default function App() {
                     onClick={() => { setActiveTab(tab.id); setSideMenuOpen(false); }}
                     className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all text-left"
                     style={activeTab === tab.id
-                      ? { background: '#1e1e1e', color: '#c9a96e' }
-                      : { color: '#9a9a9a' }}
-                    onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#d0d0d0'; }}
-                    onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#9a9a9a'; }}
+                      ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)' }
+                      : { color: 'var(--color-ink-muted)' }}
+                    onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--color-ink)'; }}
+                    onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--color-ink-muted)'; }}
                   >
                     <span className="text-base leading-none">{tab.icon}</span>
                     <span>{tab.label}</span>
@@ -591,7 +588,7 @@ export default function App() {
           )}
 
           {/* Content */}
-          <div className="rounded-2xl overflow-hidden" style={{ background: '#141414', border: '1px solid #1e1e1e' }}>
+          <div className="rounded-2xl overflow-hidden bg-surface-850 border border-surface-700">
             {activeTab === 'start'        && <StartHere lang={lang} onGoToHand={() => setActiveTab('hand')} />}
             {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} onSaveAIFingers={handleSaveAIFingers} saveError={saveError} lang={lang} />}
             {activeTab === 'strings'      && <GuitarStrings lang={lang} mode="editor" />}
