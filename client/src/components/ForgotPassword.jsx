@@ -33,7 +33,8 @@ export default function ForgotPassword({ onClose, onSwitchToLogin, lang }) {
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             <p className="text-xs text-ink-subtle">{tr.resetEmailPrompt}</p>
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value.trim().toLowerCase())}
+              inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="email"
               placeholder={tr.email}
               className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-surface-900 text-ink border border-surface-600" />
             <button type="submit" disabled={loading} className="w-full rounded-lg py-2 text-sm font-semibold bg-brand text-surface-base"

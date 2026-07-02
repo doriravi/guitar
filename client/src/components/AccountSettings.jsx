@@ -112,7 +112,9 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
             <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder={tr.yourName} />
           </Field>
           <Field label={tr.email}>
-            <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder={tr.email} />
+            <input style={inputStyle} type="email"
+              inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="email"
+              value={email} onChange={e => setEmail(e.target.value.trim().toLowerCase())} placeholder={tr.email} />
           </Field>
           <div className="mt-4 pt-4 border-t border-surface-650">
             <p className="text-xs mb-3 text-ink-faint">{tr.leaveBlankPassword}</p>
