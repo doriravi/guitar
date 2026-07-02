@@ -97,7 +97,12 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
   }, [step, providers.google]);
 
   function handleChange(e) {
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+    // Normalize email as it's typed: mobile keyboards auto-capitalize and can add
+    // stray whitespace, which fails the backend's @Email check (→ 400). Trim +
+    // lowercase the email field so login/register work the same on phone and desktop.
+    const { name, value } = e.target;
+    const v = name === 'email' ? value.trim().toLowerCase() : value;
+    setForm(f => ({ ...f, [name]: v }));
   }
 
   function emailValid(v) {
@@ -158,6 +163,15 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
   async function handleOAuth(provider, token) {
     setError('');
     setInfo('');
+    // Guard: if the provider SDK returned without a credential (common on mobile
+    // when the Client ID / authorized origin is misconfigured, or the popup was
+    // dismissed), don't fire a doomed request that the server rejects as a 400
+    // "token must not be blank" — show a clear, actionable message instead.
+    if (!token) {
+      setError(tk(tr, 'oauthNoToken',
+        'Sign-in didn’t complete. Please try again, or use email sign-in.'));
+      return;
+    }
     setLoading(true);
     try {
       const user = provider === 'google'
@@ -330,6 +344,8 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
               </label>
               <input
                 name="email" type="email" autoFocus
+                inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                autoComplete="email"
                 placeholder={tk(tr, 'emailPlaceholder', 'email@address.com')}
                 value={form.email} onChange={handleChange} required
                 className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
