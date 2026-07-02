@@ -740,17 +740,17 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   ];
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: '#1a1a1a', border: '1px solid #222' }}>
-      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #222' }}>
+    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-2">
           <span className="text-base">📷</span>
-          <span className="text-sm font-semibold" style={{ color: '#f0ede8' }}>{tr.cameraMeasurement}</span>
+          <span className="text-sm font-semibold" style={{ color: 'var(--color-ink)' }}>{tr.cameraMeasurement}</span>
         </div>
         {(phase === 'ready' || phase === 'measuring' || phase === 'recording' || phase === 'card') && (
           <button
             onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); }}
             className="text-xs px-3 py-1 rounded-lg"
-            style={{ color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+            style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
             {tr.cancel}
           </button>
@@ -759,13 +759,13 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
       {phase === 'idle' && (
         <div className="p-5 text-center">
-          <p className="text-sm mb-1" style={{ color: '#7a7a7a' }}>{tr.cameraInstruction}</p>
-          <p className="text-xs mb-4" style={{ color: '#4a4a4a' }}>{tr.cameraDesc}</p>
+          <p className="text-sm mb-1" style={{ color: 'var(--color-ink-subtle)' }}>{tr.cameraInstruction}</p>
+          <p className="text-xs mb-4" style={{ color: 'var(--color-ink-ghost)' }}>{tr.cameraDesc}</p>
 
           {/* Step-by-step guide */}
           <div className="text-left rounded-xl p-4 mb-4 space-y-2.5"
-            style={{ background: '#141414', border: '1px solid #222' }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#5a5a5a' }}>
+            style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-650)' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--color-ink-faint)' }}>
               {tr.guideTitle || 'How to measure'}
             </p>
             {[
@@ -777,11 +777,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             ].map((step, i) => (
               <div key={i} className="flex items-start gap-2.5">
                 <span className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold mt-0.5"
-                  style={{ background: '#252525', color: '#c9a96e' }}>{i + 1}</span>
-                <span className="text-xs leading-snug" style={{ color: '#8a8a8a' }}>{step}</span>
+                  style={{ background: 'var(--color-surface-600)', color: 'var(--color-brand)' }}>{i + 1}</span>
+                <span className="text-xs leading-snug" style={{ color: 'var(--color-ink-muted)' }}>{step}</span>
               </div>
             ))}
-            <p className="text-[11px] pt-1.5 mt-1.5" style={{ color: '#4a4a4a', borderTop: '1px solid #1e1e1e' }}>
+            <p className="text-[11px] pt-1.5 mt-1.5" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)' }}>
               💡 {tr.guideTip || 'Good lighting and a plain background help detection. Stretch only as far as feels comfortable — never force it.'}
             </p>
           </div>
@@ -792,19 +792,19 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             className="flex items-center gap-2.5 w-full text-left rounded-xl px-4 py-3 mb-4 transition-all"
             style={cardMode
               ? { background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)' }
-              : { background: '#141414', border: '1px solid #222' }}
+              : { background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-650)' }}
           >
             <span className="text-base shrink-0">💳</span>
             <span className="flex-1 min-w-0">
-              <span className="block text-xs font-semibold" style={{ color: cardMode ? '#38bdf8' : '#8a8a8a' }}>
+              <span className="block text-xs font-semibold" style={{ color: cardMode ? 'var(--color-info)' : 'var(--color-ink-muted)' }}>
                 {tr.cardToggle || 'Use a bank card for accuracy'}
               </span>
-              <span className="block text-[11px] mt-0.5" style={{ color: '#5a5a5a' }}>
+              <span className="block text-[11px] mt-0.5" style={{ color: 'var(--color-ink-faint)' }}>
                 {tr.cardToggleDesc || 'Hold any credit/ID card flat against your hand. Calibrates true scale.'}
               </span>
             </span>
             <span className="shrink-0 w-9 h-5 rounded-full relative transition-all"
-              style={{ background: cardMode ? '#38bdf8' : '#2a2a2a' }}>
+              style={{ background: cardMode ? 'var(--color-info)' : 'var(--color-surface-550)' }}>
               <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
                 style={{ left: cardMode ? '18px' : '2px' }} />
             </span>
@@ -813,7 +813,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           <button
             onClick={startCamera}
             className="px-5 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ background: '#c9a96e', color: '#0f0f0f' }}
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
           >
             {tr.openCamera}
           </button>
@@ -823,8 +823,8 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
       {phase === 'loading' && (
         <div className="p-5 flex items-center justify-center gap-3">
           <div className="w-4 h-4 rounded-full border-2 animate-spin"
-            style={{ borderColor: '#c9a96e', borderTopColor: 'transparent' }} />
-          <span className="text-sm" style={{ color: '#5a5a5a' }}>{tr.loadingModel}</span>
+            style={{ borderColor: 'var(--color-brand)', borderTopColor: 'transparent' }} />
+          <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>{tr.loadingModel}</span>
         </div>
       )}
 
@@ -844,13 +844,13 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             />
             <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-                style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? '#4ade80' : '#f87171' }}>
-                <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? '#4ade80' : '#f87171' }} />
+                style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? 'var(--color-success)' : 'var(--color-danger)' }} />
                 {handVisible ? tr.handDetected : tr.noHandDetected}
               </div>
               {handVisible && (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-                  style={{ background: 'rgba(0,0,0,0.75)', color: frameFit.ok ? '#4ade80' : '#c9a96e' }}>
+                  style={{ background: 'rgba(0,0,0,0.75)', color: frameFit.ok ? 'var(--color-success)' : 'var(--color-brand)' }}>
                   <span>{frameFit.ok ? '✅' : '🎯'}</span>
                   {frameFit.ok
                     ? (tr.frameGoodBadge || 'Hand in frame')
@@ -860,7 +860,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                 </div>
               )}
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-                style={{ background: 'rgba(0,0,0,0.75)', color: rulerActive ? '#c9a96e' : '#7a7a7a' }}>
+                style={{ background: 'rgba(0,0,0,0.75)', color: rulerActive ? 'var(--color-brand)' : 'var(--color-ink-subtle)' }}>
                 <span>📏</span>
                 {rulerActive ? (tr.rulerLive || 'cm ruler live') : (tr.rulerHint || 'Show your hand to scale the ruler')}
               </div>
@@ -868,15 +868,15 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-8xl font-black"
-                  style={{ color: '#c9a96e', textShadow: '0 0 40px rgba(201,169,110,0.9)' }}>
+                  style={{ color: 'var(--color-brand)', textShadow: '0 0 40px rgba(201,169,110,0.9)' }}>
                   {countdown}
                 </span>
               </div>
             )}
             {phase === 'recording' && (
               <div className="absolute top-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold"
-                style={{ background: 'rgba(0,0,0,0.75)', color: '#f87171' }}>
-                <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#f87171' }} />
+                style={{ background: 'rgba(0,0,0,0.75)', color: 'var(--color-danger)' }}>
+                <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--color-danger)' }} />
                 {tr.stretchNow || 'Stretch as wide as comfortable…'}
               </div>
             )}
@@ -892,10 +892,10 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                 return (
                   <div key={key} className="flex items-center gap-2" title={label}>
                     <span className="text-[10px] w-16 shrink-0" style={{ color }}>{label}</span>
-                    <div className="relative h-2 flex-1 rounded-full overflow-hidden" style={{ background: '#2a2a2a' }}>
+                    <div className="relative h-2 flex-1 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
                       <div className="absolute left-0 top-0 h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
                     </div>
-                    <span className="text-[10px] tabular-nums w-12 text-right" style={{ color: '#7a7a7a' }}>{val.toFixed(1)} cm</span>
+                    <span className="text-[10px] tabular-nums w-12 text-right" style={{ color: 'var(--color-ink-subtle)' }}>{val.toFixed(1)} cm</span>
                   </div>
                 );
               })}
@@ -903,7 +903,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           )}
 
           <div className="p-4 flex items-center justify-between gap-4">
-            <p className="text-xs" style={{ color: (phase === 'ready' && handVisible && !frameFit.ok) ? '#c9a96e' : '#5a5a5a' }}>
+            <p className="text-xs" style={{ color: (phase === 'ready' && handVisible && !frameFit.ok) ? 'var(--color-brand)' : 'var(--color-ink-faint)' }}>
               {phase === 'recording'
                 ? (tr.keepStretching || 'Keep stretching — capturing your max…')
                 : (phase === 'ready' && handVisible && !frameFit.ok)
@@ -919,8 +919,8 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
               disabled={!handVisible || !frameFit.ok || phase === 'measuring' || phase === 'recording'}
               className="px-5 py-2 rounded-xl text-sm font-semibold shrink-0 transition-all"
               style={handVisible && frameFit.ok && phase === 'ready'
-                ? { background: '#c9a96e', color: '#0f0f0f' }
-                : { background: '#1e1e1e', color: '#3a3a3a', cursor: 'not-allowed' }}
+                ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
+                : { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)', cursor: 'not-allowed' }}
             >
               {phase === 'measuring' || phase === 'recording' ? tr.capturing : tr.measure}
             </button>
@@ -931,14 +931,14 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
       {phase === 'card' && (
         <div>
           <div className="px-4 pt-4 pb-2">
-            <p className="text-sm font-semibold mb-1" style={{ color: '#38bdf8' }}>
+            <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-info)' }}>
               {tr.cardTapTitle || 'Tap the card’s 4 corners'}
             </p>
-            <p className="text-xs" style={{ color: '#7a7a7a' }}>
+            <p className="text-xs" style={{ color: 'var(--color-ink-subtle)' }}>
               {(tr.cardTapNext || 'Tap the {corner} corner').replace('{corner}', CARD_CORNER_LABELS[cardCorners.length] || '')}
-              {' '}<span style={{ color: '#4a4a4a' }}>({cardCorners.length}/4)</span>
+              {' '}<span style={{ color: 'var(--color-ink-ghost)' }}>({cardCorners.length}/4)</span>
             </p>
-            {statusMsg && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{statusMsg}</p>}
+            {statusMsg && <p className="text-xs mt-1" style={{ color: 'var(--color-danger)' }}>{statusMsg}</p>}
           </div>
           <div className="relative bg-black mx-4 rounded-lg overflow-hidden" style={{ cursor: 'crosshair' }}
             onClick={handleCardTap}>
@@ -958,18 +958,18 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             </svg>
             {cardCorners.map((c, i) => (
               <div key={i} className="absolute w-3 h-3 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center"
-                style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, background: '#38bdf8', border: '2px solid #fff' }} />
+                style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, background: 'var(--color-info)', border: '2px solid #fff' }} />
             ))}
           </div>
           <div className="p-4 flex items-center justify-between gap-3">
             <button
               onClick={() => { setCardCorners([]); setStatus(''); }}
               className="text-xs px-3 py-2 rounded-lg"
-              style={{ color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+              style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
             >
               {tr.cardReset || 'Reset corners'}
             </button>
-            <p className="text-[11px] flex-1 text-right" style={{ color: '#4a4a4a' }}>
+            <p className="text-[11px] flex-1 text-right" style={{ color: 'var(--color-ink-ghost)' }}>
               {tr.cardTapHint || 'Tap in order: top-left → top-right → bottom-right → bottom-left.'}
             </p>
           </div>
@@ -980,32 +980,32 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         <div className="p-5">
           <div className="flex items-center gap-2 mb-4">
             <span>✅</span>
-            <span className="text-sm font-semibold" style={{ color: '#4ade80' }}>{tr.measurementComplete}</span>
+            <span className="text-sm font-semibold" style={{ color: 'var(--color-success)' }}>{tr.measurementComplete}</span>
           </div>
           <div className="space-y-2 mb-4">
             {GAP_LABELS.map(({ key, label, color }) => (
               <div key={key} className="flex items-center justify-between px-3 py-2 rounded-lg"
-                style={{ background: '#141414' }}>
-                <span className="text-xs font-medium" style={{ color: '#7a7a7a' }}>{label}</span>
+                style={{ background: 'var(--color-surface-850)' }}>
+                <span className="text-xs font-medium" style={{ color: 'var(--color-ink-subtle)' }}>{label}</span>
                 <span className="text-sm font-bold tabular-nums" style={{ color }}>
                   {captured[key].toFixed(1)} cm
                 </span>
               </div>
             ))}
           </div>
-          <p className="text-xs mb-4" style={{ color: '#3a3a3a' }}>{tr.fineTune}</p>
+          <p className="text-xs mb-4" style={{ color: 'var(--color-ink-ghost)' }}>{tr.fineTune}</p>
           <div className="flex gap-2">
             <button
               onClick={() => onMeasured(captured)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: '#c9a96e', color: '#0f0f0f' }}
+              style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
             >
               {tr.applyMeasurements}
             </button>
             <button
               onClick={retry}
               className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
             >
               {tr.retake}
             </button>
@@ -1015,11 +1015,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
       {phase === 'error' && (
         <div className="p-5 text-center">
-          <p className="text-sm mb-3" style={{ color: '#f87171' }}>⚠ {statusMsg}</p>
+          <p className="text-sm mb-3" style={{ color: 'var(--color-danger)' }}>⚠ {statusMsg}</p>
           <button
             onClick={retry}
             className="px-5 py-2 rounded-xl text-sm font-semibold"
-            style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}
+            style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
             {tr.tryAgain}
           </button>
