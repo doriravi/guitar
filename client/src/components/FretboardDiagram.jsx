@@ -2,8 +2,13 @@
 // 'x' = muted, '0' = open, digit = fret number.
 // When `showFingers` is set and the chord has note data, each fretted dot is
 // labelled with the suggested finger (1=index … 4=pinky) from optimalFingering.
+// `marks` ({ [stringIndex]: 'missing' | 'weak' }) paints per-string diagnosis
+// onto the diagram — used by the Play-Along practice report: red = the note
+// didn't sound (muted), amber = it rang weak (buzzing / half-pressed).
 
 import { optimalFingering } from '../lib/fretboard';
+
+const MARK_COLOR = { missing: '#ef4444', weak: '#f59e0b' };
 
 const CELL_W = 18;   // px between strings
 const CELL_H = 17;   // px between frets
@@ -13,8 +18,9 @@ const NUM_FRETS = 4;
 
 const STRING_LABELS = ['E', 'A', 'D', 'G', 'B', 'e'];
 
-export default function FretboardDiagram({ chord, showFingers = false }) {
+export default function FretboardDiagram({ chord, showFingers = false, marks = null }) {
   const tabArr = chord.tab.split(''); // always 6 chars
+  const markFor = (s) => (marks && marks[s] ? MARK_COLOR[marks[s]] : null);
 
   // Suggested finger per string (1-4), keyed by string index, when requested
   // and note data is available. Barre notes share finger 1.
@@ -91,9 +97,16 @@ export default function FretboardDiagram({ chord, showFingers = false }) {
             );
           }
           if (val === '0') {
+            const mc = markFor(s);
             return (
-              <circle key={s} cx={sx(s)} cy={MARGIN_Y - 12} r={5}
-                      fill="none" stroke="#888" strokeWidth="1.5" />
+              <g key={s}>
+                <circle cx={sx(s)} cy={MARGIN_Y - 12} r={5}
+                        fill="none" stroke={mc || '#888'} strokeWidth={mc ? 2.2 : 1.5} />
+                {mc && marks[s] === 'missing' && (
+                  <line x1={sx(s) - 4} y1={MARGIN_Y - 8} x2={sx(s) + 4} y2={MARGIN_Y - 16}
+                        stroke={mc} strokeWidth="1.8" />
+                )}
+              </g>
             );
           }
           return null;
@@ -108,9 +121,11 @@ export default function FretboardDiagram({ chord, showFingers = false }) {
           const cx = sx(s);
           const cy = fy(relFret) + CELL_H / 2;
           const finger = fingerByString[s];
+          const mc = markFor(s);
           return (
             <g key={s}>
-              <circle cx={cx} cy={cy} r={CELL_H * 0.36} fill="#888" />
+              {mc && <circle cx={cx} cy={cy} r={CELL_H * 0.36 + 2.5} fill="none" stroke={mc} strokeWidth="1.6" opacity="0.55" />}
+              <circle cx={cx} cy={cy} r={CELL_H * 0.36} fill={mc || '#888'} />
               {finger != null && (
                 <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
                       fontSize="9" fontWeight="bold" fill="#fff">{finger}</text>

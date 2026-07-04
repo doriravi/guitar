@@ -41,6 +41,21 @@ const SNAP_LAG = 0.10;           // s — analyser latency compensation
 const FFT_MS = 100;              // detection cadence (≈ one full 4096-FFT frame)
 const SILENCE_PAUSE_MS = 8000;   // sustained silence → auto-pause
 
+// Level system: a fixed 20-stage ladder from 10% to 200% of the song's tempo
+// in +10% steps (level N = N×10% speed). The difficulty pill picks the
+// STARTING level; the game then climbs one level per RAMP_EVERY_SEC of actual
+// playing until level MAX_LEVEL (double tempo).
+const RAMP_EVERY_SEC = 120;
+const MAX_LEVEL = 20;
+const speedForLevel = (level) => level / 10;
+const levelForSpeed = (speed) => Math.min(MAX_LEVEL, Math.max(1, Math.round(speed * 10)));
+const DIFFICULTIES = [
+  { id: 'easy',     label: '🐢 Easy',     speed: 0.3 },
+  { id: 'medium',   label: '🚶 Medium',   speed: 0.5 },
+  { id: 'hard',     label: '🏃 Hard',     speed: 0.8 },
+  { id: 'original', label: '🎸 Original', speed: 1   },
+];
+
 const QUALITY_COLOR = {
   perfect: 'var(--color-success)',
   good: 'var(--color-brand)',
@@ -67,9 +82,12 @@ export default function PracticeGame({ cfg }) {
   const [customSongs, setCustomSongs] = useState([]);
   const [catalogSongs, setCatalogSongs] = useState([]);
   const [search, setSearch] = useState('');
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(DIFFICULTIES[0].speed);   // default: level 1 = 10%
   const [drumsOn, setDrumsOn] = useState(false);
-  const [metronomeOn, setMetronomeOn] = useState(false);
+  const [metronomeOn, setMetronomeOn] = useState(true);
+  const [rampMsg, setRampMsg] = useState(null);   // transient toast: { level, pct }
+  const [levelUp, setLevelUp] = useState(null);   // giant 5s "Good luck!" interlude: { level, pct }
+  const [level, setLevel] = useState(1);          // current game level (1..MAX_LEVEL)
   const [histTick, setHistTick] = useState(0);    // bump to refresh history-derived chips
 
   // ── Game state (one React update per resolved window) ──
@@ -90,6 +108,13 @@ export default function PracticeGame({ cfg }) {
   const cursorRef = useRef(0);                    // window receiving snapshots
   const nextToScoreRef = useRef(0);
   const silenceSinceRef = useRef(null);
+  const metroStopRef = useRef(null);              // stop handle for the in-play metronome
+  const playedSecRef = useRef(0);                 // actual playing time toward the next level
+  const lastTsRef = useRef(null);                 // previous rAF timestamp for playedSec accumulation
+  const levelUpTimerRef = useRef(null);           // 5s "Good luck!" interlude timer
+  const levelRef = useRef(1);                     // current level, mirrored for the rAF loop
+  const levelClockRef = useRef(null);             // stopwatch <span> — written per frame, no re-render
+  const startSpeedRef = useRef(1);                // the difficulty's tempo at run start (before ramping)
   const phaseRef = useRef(phase); phaseRef.current = phase;
 
   const laneTrackRef = useRef(null);
@@ -102,6 +127,8 @@ export default function PracticeGame({ cfg }) {
   // (song, speed), so the loop reaches them through refs refreshed each render.
   const pauseRef = useRef(null);
   const finishRef = useRef(null);
+  const resumeRef = useRef(null);
+  const speedUpRef = useRef(null);
   const speedRef = useRef(speed); speedRef.current = speed;
 
   // ── Load song sources ──
@@ -160,6 +187,7 @@ export default function PracticeGame({ cfg }) {
   // ── Cleanup on unmount ──
   useEffect(() => () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (levelUpTimerRef.current) clearTimeout(levelUpTimerRef.current);
     mic.current.close();
     stopAudio();
   }, [mic]);
@@ -197,6 +225,24 @@ export default function PracticeGame({ cfg }) {
     }
     if (countWrapRef.current && countWrapRef.current.style.display !== 'none') {
       countWrapRef.current.style.display = 'none';
+    }
+
+    // Level clock: accumulate actual playing time (count-in and pauses excluded);
+    // every RAMP_EVERY_SEC climb one level, up to MAX_LEVEL (= double tempo).
+    if (lastTsRef.current != null) playedSecRef.current += Math.min(0.1, (ts - lastTsRef.current) / 1000);
+    lastTsRef.current = ts;
+    if (levelClockRef.current) {
+      if (levelRef.current >= MAX_LEVEL) {
+        levelClockRef.current.textContent = 'MAX';
+      } else {
+        const rem = Math.max(0, RAMP_EVERY_SEC - playedSecRef.current);
+        levelClockRef.current.textContent = `${Math.floor(rem / 60)}:${String(Math.floor(rem % 60)).padStart(2, '0')}`;
+      }
+    }
+    if (playedSecRef.current >= RAMP_EVERY_SEC && levelRef.current < MAX_LEVEL) {
+      playedSecRef.current = 0;
+      speedUpRef.current?.();
+      return;   // speedUp rebuilds the timeline and restarts this loop
     }
 
     // Detection tick (~100 ms).
@@ -266,6 +312,12 @@ export default function PracticeGame({ cfg }) {
     nextToScoreRef.current = 0;
     lastFFTRef.current = 0;
     silenceSinceRef.current = null;
+    playedSecRef.current = 0;
+    lastTsRef.current = null;
+    startSpeedRef.current = speed;
+    levelRef.current = levelForSpeed(speed);
+    setLevel(levelRef.current);
+    setRampMsg(null);
     setGameBoth(initialGameState());
     setSummary(null);
     setSong(item.song);
@@ -286,7 +338,9 @@ export default function PracticeGame({ cfg }) {
     }
     if (metronomeOn) {
       const totalBeats = tl.windows.length * tl.meta.beatsPerChord;
-      playMetronome(totalBeats, tl.meta.spb, { startAt: t0Ref.current });
+      metroStopRef.current = playMetronome(totalBeats, tl.meta.spb, {
+        startInSec: t0Ref.current - mic.current.audioCtx.currentTime,
+      });
     }
     setPhase('playing');
     rafRef.current = requestAnimationFrame(loop);
@@ -296,6 +350,10 @@ export default function PracticeGame({ cfg }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     stopAudio();
+    metroStopRef.current = null;   // stopAudio silenced it; drop the stale handle
+    lastTsRef.current = null;      // paused time must not count toward the speed ramp
+    if (levelUpTimerRef.current) { clearTimeout(levelUpTimerRef.current); levelUpTimerRef.current = null; }
+    setLevelUp(null);
     setPauseReason(reason);
     setPhase('paused');
   };
@@ -309,6 +367,7 @@ export default function PracticeGame({ cfg }) {
     scorersRef.current[i] = windowScorer(tl.windows[i], cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null);
     cursorRef.current = i;
     silenceSinceRef.current = null;
+    lastTsRef.current = null;
     const micNow = mic.current.audioCtx.currentTime;
     const countSec = 4 * tl.meta.spb;
     if (drumsOn) {
@@ -324,17 +383,40 @@ export default function PracticeGame({ cfg }) {
     }
     if (metronomeOn) {
       const remainingBeats = (tl.windows.length - i) * tl.meta.beatsPerChord;
-      playMetronome(remainingBeats, tl.meta.spb, { startAt: t0Ref.current + tl.windows[i].startSec });
+      metroStopRef.current = playMetronome(remainingBeats, tl.meta.spb, {
+        startInSec: t0Ref.current + tl.windows[i].startSec - mic.current.audioCtx.currentTime,
+      });
     }
     setPauseReason(null);
     setPhase('playing');
     rafRef.current = requestAnimationFrame(loop);
   };
 
+  // Toggle the metronome click at any time — including mid-song. Turning it on
+  // during play joins in on the next beat, keeping the bar accent aligned.
+  const toggleMetronome = () => {
+    const next = !metronomeOn;
+    setMetronomeOn(next);
+    if (phase !== 'playing' || !timelineRef.current) return;
+    if (!next) { metroStopRef.current?.(); metroStopRef.current = null; return; }
+    const tl = timelineRef.current;
+    const songSec = mic.current.audioCtx.currentTime - t0Ref.current;
+    const nextBeat = Math.max(0, Math.ceil(songSec / tl.meta.spb + 0.02));
+    const totalBeats = tl.windows.length * tl.meta.beatsPerChord;
+    if (nextBeat >= totalBeats) return;
+    metroStopRef.current = playMetronome(totalBeats - nextBeat, tl.meta.spb, {
+      startInSec: t0Ref.current + nextBeat * tl.meta.spb - mic.current.audioCtx.currentTime,
+      accentPhase: nextBeat % 4,
+    });
+  };
+
   const finish = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     stopAudio();
+    metroStopRef.current = null;
+    if (levelUpTimerRef.current) { clearTimeout(levelUpTimerRef.current); levelUpTimerRef.current = null; }
+    setLevelUp(null);
     mic.current.close();
 
     const tl = timelineRef.current;
@@ -352,7 +434,7 @@ export default function PracticeGame({ cfg }) {
       record = {
         songKey: key,
         title: song?.title || '', artist: song?.artist || '',
-        bpm: tl.meta.bpmBase, speed,
+        bpm: tl.meta.bpmBase, speed, startSpeed: startSpeedRef.current, level: levelRef.current,
         endedAt: new Date().toISOString(),
         completed,
         score: g.score, maxCombo: g.maxCombo,
@@ -377,13 +459,50 @@ export default function PracticeGame({ cfg }) {
     setPhase('done');
   };
 
+  // Level up: rebuild the timeline at the next level's tempo, keep all
+  // already-scored windows, hold the game behind a giant 5-second "Good luck!"
+  // interlude, then resume (with its own count-in) at the new tempo from the
+  // first unscored window.
+  const speedUp = () => {
+    if (!timelineRef.current || phaseRef.current !== 'playing' || !song) return;
+    if (levelRef.current >= MAX_LEVEL) return;
+    const nextLevel = levelRef.current + 1;
+    const next = speedForLevel(nextLevel);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    stopAudio();
+    metroStopRef.current = null;
+    const tl = buildPlayTimeline(song, { speed: next, profile, limitToReach });
+    timelineRef.current = tl;
+    for (let j = nextToScoreRef.current; j < tl.windows.length; j++) {
+      scorersRef.current[j] = windowScorer(tl.windows[j], cfgRef.current, j > 0 ? tl.windows[j - 1].pcs : null);
+    }
+    levelRef.current = nextLevel;
+    setLevel(nextLevel);
+    setSpeed(next);
+    speedRef.current = next;
+    const msg = { level: nextLevel, pct: Math.round(next * 100) };
+    setLevelUp(msg);
+    levelUpTimerRef.current = setTimeout(() => {
+      levelUpTimerRef.current = null;
+      setLevelUp(null);
+      setRampMsg(msg);
+      setTimeout(() => setRampMsg(null), 4000);
+      resumeRef.current?.();
+    }, 5000);
+  };
+
   pauseRef.current = pause;
   finishRef.current = finish;
+  resumeRef.current = resume;
+  speedUpRef.current = speedUp;
 
   const quitToSelect = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     stopAudio();
+    if (levelUpTimerRef.current) { clearTimeout(levelUpTimerRef.current); levelUpTimerRef.current = null; }
+    setLevelUp(null);
     mic.current.close();
     setPhase('select');
   };
@@ -408,7 +527,27 @@ export default function PracticeGame({ cfg }) {
         @keyframes pgShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
         @keyframes pgFloat { 0%{opacity:1; transform:translateY(0)} 100%{opacity:0; transform:translateY(-24px)} }
         @keyframes pgPulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+        @keyframes pgLuckFloat { 0%{transform:translateY(14px) scale(0.92); opacity:0} 12%{transform:translateY(0) scale(1); opacity:1} 100%{transform:translateY(-10px) scale(1.02); opacity:1} }
       `}</style>
+
+      {/* ══ LEVEL-UP INTERLUDE — giant 5s "Good luck!" while the game holds ══ */}
+      {levelUp != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(8,8,6,0.85)', backdropFilter: 'blur(5px)' }}>
+          <div className="text-center px-6" style={{ animation: 'pgLuckFloat 5s ease-out forwards' }}>
+            <p className="text-2xl sm:text-3xl font-bold mb-3" style={{ color: 'var(--color-success)' }}>
+              ⏫ Level {levelUp.level} — {levelUp.pct}% speed
+            </p>
+            <p className="text-6xl sm:text-8xl font-black leading-tight"
+              style={{ color: 'var(--color-brand)', textShadow: '0 0 60px rgba(201,169,110,0.45)', animation: 'pgPulse 1.4s ease-in-out infinite' }}>
+              Good luck! 🍀
+            </p>
+            <p className="text-sm mt-4" style={{ color: 'var(--color-ink-muted)' }}>
+              Take a breath — the count-in starts in a moment…
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ══ SONG SELECT ══ */}
       {phase === 'select' && (
@@ -417,31 +556,26 @@ export default function PracticeGame({ cfg }) {
             <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
               <p className="text-sm font-bold" style={{ color: 'var(--color-ink)' }}>🎮 Play-Along</p>
               <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Speed</span>
-                  <input
-                    type="range" min={50} max={150} step={5}
-                    value={Math.round(speed * 100)}
-                    onChange={e => setSpeed(Number(e.target.value) / 100)}
-                    className="w-28 cursor-pointer"
-                    style={{ accentColor: 'var(--color-brand)' }}
-                  />
-                  <span className="text-xs font-bold tabular-nums w-14" style={{ color: 'var(--color-brand)' }}>
-                    {Math.round(speed * 100)}%
-                    {speed !== 1 && (
-                      <span className="ml-1 font-normal text-[10px]" style={{ color: speed > 1 ? 'var(--color-success)' : 'var(--color-ink-ghost)' }}>
-                        ×{(0.6 + 0.4 * speed).toFixed(2)}
-                      </span>
-                    )}
-                  </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-widest font-semibold mr-0.5" style={{ color: 'var(--color-ink-ghost)' }}>Difficulty</span>
+                  {DIFFICULTIES.map(d => (
+                    <button key={d.id} onClick={() => setSpeed(d.speed)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg font-semibold"
+                      title={`Starts at level ${levelForSpeed(d.speed)} of ${MAX_LEVEL} (${Math.round(d.speed * 100)}% tempo); +10% every 2 minutes, up to 200%`}
+                      style={speed === d.speed
+                        ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                        : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                      {d.label} <span className="font-normal opacity-70">{Math.round(d.speed * 100)}%</span>
+                    </button>
+                  ))}
                 </div>
-                <button onClick={() => setMetronomeOn(v => !v)}
+                <button onClick={toggleMetronome}
                   className="text-xs px-3 py-1.5 rounded-lg font-semibold"
-                  title="Audible metronome click while you play"
+                  title="Audible metronome click while you play (safe through speakers)"
                   style={metronomeOn
                     ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
                     : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
-                  🎵 Click
+                  🎵 Metronome
                 </button>
                 <button onClick={() => setDrumsOn(v => !v)}
                   className="text-xs px-3 py-1.5 rounded-lg font-semibold"
@@ -455,7 +589,9 @@ export default function PracticeGame({ cfg }) {
             </div>
             <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
               Chords scroll in time — play each one on your guitar and the mic scores how well you match.
-              {' '}Faster speed earns a higher score multiplier (up to ×1.20 at 150%).
+              {' '}The ladder has <strong>{MAX_LEVEL} levels</strong> from 10% to 200% tempo (+10% each). You start at
+              {' '}<strong>level {levelForSpeed(speed)}</strong> ({Math.round(speed * 100)}%); every 2 minutes of playing climbs one level,
+              {' '}ending at <strong>level {MAX_LEVEL} — double tempo</strong>. Faster levels earn a bigger score multiplier.
               {drumsOn && <span style={{ color: 'var(--color-warning)' }}> Headphones recommended with drums on.</span>}
             </p>
             {permDenied && <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>Microphone access denied — the game needs the mic to hear you play.</p>}
@@ -542,8 +678,21 @@ export default function PracticeGame({ cfg }) {
                   ×{(0.6 + 0.4 * speed).toFixed(2)}
                 </span>
               )}
-              {metronomeOn && <span className="ml-1">🎵</span>}
             </span>
+            {rampMsg && (
+              <span className="text-xs px-2 py-1 rounded-lg font-bold"
+                style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--color-success)', animation: 'pgPop 0.5s ease' }}>
+                ⏫ Level {rampMsg.level} — {rampMsg.pct}%
+              </span>
+            )}
+            <button onClick={toggleMetronome}
+              className="text-xs font-semibold px-2.5 py-2 rounded-lg"
+              title={metronomeOn ? 'Metronome on — click to mute' : 'Metronome off — click to hear the beat'}
+              style={metronomeOn
+                ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-550)' }}>
+              🎵
+            </button>
             <button onClick={finish}
               className="text-xs font-semibold px-3 py-2 rounded-lg"
               style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--color-danger)' }}>
@@ -569,6 +718,14 @@ export default function PracticeGame({ cfg }) {
               <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Accuracy</span>
               <span className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{game.resolved ? `${Math.round(acc)}%` : '—'}</span>
             </div>
+            <div>
+              <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>
+                Level {level}/{MAX_LEVEL} · {Math.round(speed * 100)}%
+              </span>
+              <span className="text-lg font-black tabular-nums" style={{ color: level >= MAX_LEVEL ? 'var(--color-brand)' : 'var(--color-ink)' }}>
+                ⏱ <span ref={levelClockRef}>2:00</span>
+              </span>
+            </div>
             {ghostDelta != null && (
               <div>
                 <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>vs last run</span>
@@ -586,6 +743,29 @@ export default function PracticeGame({ cfg }) {
                 <div ref={volRef} className="h-full rounded-full" style={{ width: '0%', background: 'var(--color-success)' }} />
               </div>
             </div>
+          </div>
+
+          {/* Level ladder — one cell per stage with its tempo percentage */}
+          <div className="flex gap-0.5">
+            {Array.from({ length: MAX_LEVEL }, (_, i) => {
+              const lv = i + 1;
+              const pct = lv * 10;
+              const done = lv < level;
+              const now = lv === level;
+              return (
+                <div key={lv} title={`Level ${lv} — ${pct}% speed`}
+                  className="flex-1 min-w-0 rounded-sm text-center overflow-hidden"
+                  style={{
+                    height: 15, lineHeight: '15px', fontSize: 8, fontWeight: 700, cursor: 'default',
+                    background: now ? 'var(--color-brand)' : done ? 'rgba(201,169,110,0.4)' : 'var(--color-surface-700)',
+                    color: now ? 'var(--color-surface-900)' : done ? 'var(--color-surface-900)' : 'var(--color-ink-ghost)',
+                    boxShadow: now ? '0 0 8px rgba(201,169,110,0.6)' : 'none',
+                    animation: now ? 'pgPulse 2s ease-in-out infinite' : 'none',
+                  }}>
+                  <span className="hidden sm:inline">{pct}</span>
+                </div>
+              );
+            })}
           </div>
 
           {/* Lane */}
@@ -783,7 +963,25 @@ export default function PracticeGame({ cfg }) {
                       <ChordTip name={ci.name}>
                         <span className="text-base font-black cursor-help" style={{ color: 'var(--color-danger)' }}>{ci.name}</span>
                       </ChordTip>
-                      {ci.tab && <FretboardDiagram chord={{ name: '', tab: ci.tab, notes: ci.notes }} showFingers />}
+                      {ci.tab && (() => {
+                        // Paint the diagnosis onto the diagram: one mark per
+                        // failed string; 'missing' (red) wins over 'weak' (amber).
+                        const marks = {};
+                        for (const t of ci.tones) for (const sp of t.spots) {
+                          if (marks[sp.string] !== 'missing') marks[sp.string] = t.kind;
+                        }
+                        return (
+                          <>
+                            <FretboardDiagram chord={{ name: '', tab: ci.tab, notes: ci.notes }} showFingers marks={marks} />
+                            {Object.keys(marks).length > 0 && (
+                              <p className="text-[9px] leading-tight text-center" style={{ color: 'var(--color-ink-ghost)' }}>
+                                <span style={{ color: '#ef4444' }}>●</span> didn't sound{' '}
+                                <span style={{ color: '#f59e0b' }}>●</span> buzzed
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0 space-y-1.5">
                       <p className="text-[11px]" style={{ color: 'var(--color-ink-ghost)' }}>

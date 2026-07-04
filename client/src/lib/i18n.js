@@ -4,6 +4,7 @@ export const t = {
     appSubtitle: 'Difficulty scores for your hand',
     tabHand: 'My Hand', tabStrings: 'Composer', tabPlay: 'Play', tabScale: 'Scales', tabChordFinder: 'Chord Finder', tabTuner: 'Tuner',
     tabListen: 'Listen', tabAudioTab: 'Audio → Tab', tabChords: 'Chords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
+    tabPlayAlong: 'Play-Along', tabRecorder: 'Recorder', tabMicPractice: 'Practice', tabMicTune: 'Mic Tune',
     tabAudioIntro: 'Upload a short guitar clip. We transcribe it to tab and score each detected shape for your hand.',
     tabAudioGo: 'Transcribe', tabAudioWorking: 'Transcribing…',
     tabAudioSlow: 'This can take 30–60s — the model separates and analyzes the audio.',

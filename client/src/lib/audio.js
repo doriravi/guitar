@@ -475,27 +475,38 @@ export function playTicks(count, spb, { accentFirst = true, delaySec = 0.05 } = 
  *
  * @param {number} totalBeats  total beats to tick (count-in NOT included)
  * @param {number} spb         seconds per beat
- * @param {{ startAt?: number }} opts  startAt = absolute AudioContext time of beat 0
+ * @param {{ startInSec?: number, accentPhase?: number }} opts
+ *   startInSec = seconds from NOW until beat 0. A relative delay, not an
+ *   absolute time — callers measure time on the mic's AudioContext, which is
+ *   a different clock from this module's; absolute times don't transfer.
+ *   accentPhase = which beat-in-bar (0–3) beat 0 falls on, so a mid-song
+ *   start keeps the bar accent in the right place.
+ * @returns {() => void} stop function — silences this metronome only,
+ *   without touching other scheduled audio (drums etc.)
  */
-export function playMetronome(totalBeats, spb, { startAt } = {}) {
+export function playMetronome(totalBeats, spb, { startInSec = 0.05, accentPhase = 0 } = {}) {
   const ctx = getCtx();
-  const base = startAt ?? (ctx.currentTime + 0.05);
+  const base = ctx.currentTime + Math.max(0.02, startInSec);
+  const bus = ctx.createGain();
+  bus.connect(ctx._out);
   let beat = 0;
+  let stopped = false;
 
   const pump = () => {
+    if (stopped) return;
     const horizon = ctx.currentTime + SCHED_WINDOW;
     while (beat < totalBeats) {
       const t = base + beat * spb;
       if (t > horizon) break;
       if (t >= ctx.currentTime - 0.01) {
-        const accent = beat % 4 === 0;
+        const accent = (beat + accentPhase) % 4 === 0;
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.value = accent ? 2800 : 2500;
         g.gain.setValueAtTime(accent ? 0.28 : 0.18, t);
         g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-        osc.connect(g); g.connect(ctx._out);
+        osc.connect(g); g.connect(bus);
         osc.start(t); osc.stop(t + 0.06);
       }
       beat++;
@@ -503,6 +514,7 @@ export function playMetronome(totalBeats, spb, { startAt } = {}) {
     if (beat < totalBeats) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
   };
   pump();
+  return () => { stopped = true; try { bus.disconnect(); } catch { /* ignore */ } };
 }
 
 export function stopAudio() {

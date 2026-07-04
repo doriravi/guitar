@@ -76,7 +76,10 @@ function getTabs(tr) {
     { id: 'scale',        label: tr.tabScale || 'Scales',     icon: '🎵', side: true },
     { id: 'chordfinder',  label: tr.tabChordFinder || 'Chord Finder', icon: '🔎', side: true },
     { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️', side: true },
-    { id: 'listen',       label: tr.tabListen,       icon: '🎙️' },
+    { id: 'recorder',     label: tr.tabRecorder || 'Recorder',     icon: '🎤', side: true },
+    { id: 'micpractice',  label: tr.tabMicPractice || 'Practice',  icon: '🎸', side: true },
+    { id: 'mictune',      label: tr.tabMicTune || 'Mic Tune',      icon: '⚙️', side: true },
+    { id: 'listen',       label: tr.tabPlayAlong || 'Play-Along',  icon: '🎮' },
     { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼' },
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
@@ -93,7 +96,10 @@ const TAB_HELP = {
   scale:        'The Scale tab shows any scale across the fretboard so you can see and hear its notes in every position.',
   chordfinder:  'The Chord Finder lets you search a chord and see its playable voicings on the fretboard, each rated for your hand.',
   tuner:        'The Tuner listens through your microphone and tells you whether each string is in tune.',
-  listen:       'The Listen tab detects the chord you play and tells you what it is in real time.',
+  recorder:     'The Recorder listens through your microphone and names the chords you play in real time.',
+  micpractice:  'Practice mode shows you a chord to play and checks with the microphone that you hit it.',
+  mictune:      'Mic Tune adjusts how the chord detector hears you — sensitivity, snapshot rate, and scan range.',
+  listen:       'Play-Along is a game: chords scroll in time with a song while the microphone listens, scores each change, and tracks your improvement.',
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
   chords:       'The Chords tab is a table of chord shapes, each rated from one to ten for how hard it is for your hand.',
   import:       'The Import tab lets you paste a chord sheet and save it as your own playable song with hand-friendly chords.',
@@ -628,7 +634,10 @@ export default function App() {
             {activeTab === 'scale'        && <GuitarStrings lang={lang} mode="scale" />}
             {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
-            {activeTab === 'listen'       && <ChordListener lang={lang} />}
+            {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
+            {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}
+            {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" />}
+            {activeTab === 'mictune'      && <ChordListener lang={lang} mode="tune" />}
             {activeTab === 'audiotab'     && <TabTranscriber />}
             {activeTab === 'chords'       && <ChordTable lang={lang} />}
             {activeTab === 'progressions' && <ProgressionExplorer lang={lang} onSaveProfile={handleSaveProfile} />}
