@@ -172,26 +172,44 @@ export function playProgression(voicings, bpm = 72, onChord, onDone) {
   // Larger lead so the first strum isn't scheduled before the (just-resumed)
   // clock has actually advanced on iOS.
   const lead = 0.15;
+  const base = ctx.currentTime + lead;
 
-  voicings.forEach((voicing, i) => {
-    const tChord = ctx.currentTime + lead + i * chordDur;
-
-    // Strum: 16 ms between each string (low → high)
-    tabToNotes(voicing.tab).forEach((note, ni) => {
-      pluck(ctx, fretHz(note.string, note.fret), tChord + ni * 0.016, noteDur);
-    });
-
-    if (onChord) {
-      const ms = Math.max(0, (tChord - ctx.currentTime) * 1000);
-      _timeouts.push(setTimeout(() => onChord(i), ms));
+  // Chunked look-ahead scheduling: creating every oscillator up front chokes the
+  // audio thread on long songs (150 chords ≈ thousands of nodes → silence), so
+  // only the next ~SCHED_WINDOW seconds of strums exist at any moment.
+  let idx = 0;
+  const pump = () => {
+    const horizon = ctx.currentTime + SCHED_WINDOW;
+    while (idx < voicings.length) {
+      const tChord = base + idx * chordDur;
+      if (tChord > horizon) break;
+      // Strum: 16 ms between each string (low → high)
+      tabToNotes(voicings[idx].tab).forEach((note, ni) => {
+        pluck(ctx, fretHz(note.string, note.fret), tChord + ni * 0.016, noteDur);
+      });
+      idx++;
     }
-  });
+    if (idx < voicings.length) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
+  };
+  pump();
+
+  if (onChord) {
+    voicings.forEach((_, i) => {
+      const ms = Math.max(0, (base + i * chordDur - ctx.currentTime) * 1000);
+      _timeouts.push(setTimeout(() => onChord(i), ms));
+    });
+  }
 
   if (onDone) {
-    const totalMs = (voicings.length * chordDur + 0.4) * 1000;
+    const totalMs = (lead + voicings.length * chordDur + 0.4) * 1000;
     _timeouts.push(setTimeout(onDone, totalMs));
   }
 }
+
+// Look-ahead scheduling shared by all players: how far ahead audio nodes are
+// created, and how often the scheduler tops the window up.
+const SCHED_WINDOW = 12;      // seconds of audio built ahead
+const SCHED_TICK_MS = 4000;   // top-up interval (well inside the window)
 
 /**
  * Play a transcribed clip from its timed note events.
@@ -229,22 +247,262 @@ export function playEvents(events, onDone) {
   }
 
   const lead = 0.15;
-  const t0 = Math.min(...playable.map(e => e.time || 0)); // normalize so playback starts now
-  let endRel = 0;
+  playable.sort((a, b) => (a.time || 0) - (b.time || 0));
+  const t0 = playable[0].time || 0;   // normalize so playback starts now
+  const base = ctx.currentTime + lead;
 
+  let endRel = 0;
   for (const e of playable) {
-    const rel = (e.time || 0) - t0;
-    // Ring for the note's own duration, with sane floor/ceiling so very short
-    // detected notes are still audible and very long ones don't pile up.
     const decay = Math.min(2.5, Math.max(0.25, e.duration || 0.4));
-    pluck(ctx, fretHz(e.string, e.fret), ctx.currentTime + lead + rel, decay);
-    endRel = Math.max(endRel, rel + decay);
+    endRel = Math.max(endRel, ((e.time || 0) - t0) + decay);
   }
+
+  // Chunked look-ahead scheduling — see playProgression. A full song is
+  // thousands of note events; building them all up front silences the engine.
+  let idx = 0;
+  const pump = () => {
+    const horizon = ctx.currentTime + SCHED_WINDOW;
+    while (idx < playable.length) {
+      const e = playable[idx];
+      const at = base + ((e.time || 0) - t0);
+      if (at > horizon) break;
+      // Ring for the note's own duration, with sane floor/ceiling so very short
+      // detected notes are still audible and very long ones don't pile up.
+      const decay = Math.min(2.5, Math.max(0.25, e.duration || 0.4));
+      pluck(ctx, fretHz(e.string, e.fret), at, decay);
+      idx++;
+    }
+    if (idx < playable.length) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
+  };
+  pump();
 
   if (onDone) {
     _timeouts.push(setTimeout(onDone, (lead + endRel + 0.2) * 1000));
   }
   return lead + endRel;
+}
+
+// ─── Backing band (drums / bass) ─────────────────────────────────────────────
+// Synthesized accompaniment scheduled ALONGSIDE an already-started guitar
+// playback (playProgression / playEvents). Everything routes through ctx._out,
+// so stopAudio() silences the band together with the guitar. playBacking never
+// clears the shared timeout list — call it AFTER starting the guitar part.
+
+const BACKING_NOTE_PC = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
+  'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
+};
+
+let _noiseBuf = null;
+function noiseBuffer(ctx) {
+  if (!_noiseBuf || _noiseBuf.sampleRate !== ctx.sampleRate) {
+    const len = ctx.sampleRate;   // 1s of white noise, reused by every hit
+    _noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = _noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return _noiseBuf;
+}
+
+// Kick: a sine whose pitch drops fast (120 → 45 Hz) with a short thump envelope.
+function drumKick(ctx, t) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(120, t);
+  osc.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+  g.gain.setValueAtTime(0.85, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+  osc.connect(g); g.connect(ctx._out);
+  osc.start(t); osc.stop(t + 0.25);
+}
+
+// Snare: a noise burst through a band-pass plus a short 190 Hz body tone.
+function drumSnare(ctx, t) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.28, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+  src.connect(bp); bp.connect(g); g.connect(ctx._out);
+  src.start(t); src.stop(t + 0.18);
+
+  const osc = ctx.createOscillator();
+  const og = ctx.createGain();
+  osc.type = 'triangle'; osc.frequency.value = 190;
+  og.gain.setValueAtTime(0.18, t);
+  og.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+  osc.connect(og); og.connect(ctx._out);
+  osc.start(t); osc.stop(t + 0.1);
+}
+
+// Closed hi-hat: a tick of high-passed noise.
+function drumHat(ctx, t) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx);
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.09, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  src.connect(hp); hp.connect(g); g.connect(ctx._out);
+  src.start(t); src.stop(t + 0.06);
+}
+
+// Bass note: soft sine fundamental + a touch of octave for definition.
+function bassNote(ctx, hz, t, dur) {
+  const env = ctx.createGain();
+  env.connect(ctx._out);
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.32, t + 0.012);
+  env.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  [[1, 'sine', 0.8], [2, 'triangle', 0.18]].forEach(([h, type, amp]) => {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = hz * h;
+    g.gain.value = amp;
+    osc.connect(g); g.connect(env);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  });
+}
+
+/**
+ * Schedule a drums/bass backing track under playback already started with
+ * playProgression or playEvents (same 0.15 s lead, so the band lands on the
+ * same grid). 4/4 feel: kick on 1 & 3, snare on 2 & 4, closed hats in eighths;
+ * bass walks root (beat 1) and fifth (beat 3) of each chord.
+ *
+ * @param {Array<{name: string, beats?: number}>} chords  chord names in play order
+ * @param {number} bpm
+ * @param {{drums?: boolean, bass?: boolean}} parts
+ */
+export function playBacking(chords, bpm = 72, { drums = true, bass = true } = {}) {
+  if (!drums && !bass) return;
+  const ctx = getCtx();
+  const lead = 0.15;
+  const spb = 60 / bpm;
+  const base = ctx.currentTime + lead;
+
+  // Build the flat hit list first, then schedule it in look-ahead chunks —
+  // a full song's worth of drum hits is thousands of nodes otherwise.
+  const hits = [];   // { rel, kind, hz?, dur? }
+  let beat = 0;
+  for (const c of (chords || [])) {
+    const beats = c.beats || 4;
+    const m = (c.name || '').match(/^([A-G][#b]?)/);
+    const rootPc = m ? BACKING_NOTE_PC[m[1]] : null;
+    // Bass register around E2 (82 Hz) — low, but audible on small speakers.
+    const rootHz = rootPc != null ? 82.41 * 2 ** (((rootPc - 4 + 12) % 12) / 12) : null;
+
+    for (let b = 0; b < beats; b++) {
+      const rel = (beat + b) * spb;
+      if (drums) {
+        hits.push({ rel, kind: b % 2 === 0 ? 'kick' : 'snare' });
+        hits.push({ rel, kind: 'hat' });
+        hits.push({ rel: rel + spb / 2, kind: 'hat' });
+      }
+      if (bass && rootHz != null) {
+        if (b === 0) hits.push({ rel, kind: 'bass', hz: rootHz, dur: Math.min(spb * 1.8, 1.6) });
+        else if (b === 2) hits.push({ rel, kind: 'bass', hz: rootHz * 2 ** (7 / 12), dur: Math.min(spb * 1.8, 1.6) });
+      }
+    }
+    beat += beats;
+  }
+  hits.sort((a, b) => a.rel - b.rel);
+
+  let idx = 0;
+  const pump = () => {
+    const horizon = ctx.currentTime + SCHED_WINDOW;
+    while (idx < hits.length) {
+      const h = hits[idx];
+      const t = base + h.rel;
+      if (t > horizon) break;
+      if (h.kind === 'kick') drumKick(ctx, t);
+      else if (h.kind === 'snare') drumSnare(ctx, t);
+      else if (h.kind === 'hat') drumHat(ctx, t);
+      else if (h.kind === 'bass') bassNote(ctx, h.hz, t, h.dur);
+      idx++;
+    }
+    if (idx < hits.length) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
+  };
+  pump();
+}
+
+/**
+ * Metronome ticks for the Play-Along count-in (and optional in-play beat).
+ * Deliberately pitched at 2.5–3 kHz — ABOVE the chord detector's default
+ * 1200 Hz scan ceiling — so the ticks can play through speakers without
+ * polluting the mic's chord detection. Routed through ctx._out so stopAudio()
+ * silences them like everything else.
+ *
+ * @param {number} count  how many ticks
+ * @param {number} spb    seconds per beat
+ * @param {{ accentFirst?: boolean, delaySec?: number }} opts
+ * @returns {number} total duration in seconds until the last tick has sounded
+ */
+export function playTicks(count, spb, { accentFirst = true, delaySec = 0.05 } = {}) {
+  const ctx = getCtx();
+  try {
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b; s.connect(ctx.destination); s.start(0);
+  } catch { /* ignore */ }
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+
+  const base = ctx.currentTime + delaySec;
+  for (let i = 0; i < count; i++) {
+    const t = base + i * spb;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = accentFirst && i === 0 ? 3000 : 2500;
+    g.gain.setValueAtTime(accentFirst && i === 0 ? 0.3 : 0.22, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    osc.connect(g); g.connect(ctx._out);
+    osc.start(t); osc.stop(t + 0.07);
+  }
+  return delaySec + count * spb;
+}
+
+/**
+ * Continuous metronome for the full song. Scheduled in look-ahead chunks like
+ * playBacking so we never create thousands of nodes upfront. Beat 1 of every
+ * bar (every 4th beat) is accented. Pitched at 2.5–2.8 kHz — above the chord
+ * detector's 1200 Hz ceiling — so it is safe through speakers.
+ *
+ * @param {number} totalBeats  total beats to tick (count-in NOT included)
+ * @param {number} spb         seconds per beat
+ * @param {{ startAt?: number }} opts  startAt = absolute AudioContext time of beat 0
+ */
+export function playMetronome(totalBeats, spb, { startAt } = {}) {
+  const ctx = getCtx();
+  const base = startAt ?? (ctx.currentTime + 0.05);
+  let beat = 0;
+
+  const pump = () => {
+    const horizon = ctx.currentTime + SCHED_WINDOW;
+    while (beat < totalBeats) {
+      const t = base + beat * spb;
+      if (t > horizon) break;
+      if (t >= ctx.currentTime - 0.01) {
+        const accent = beat % 4 === 0;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = accent ? 2800 : 2500;
+        g.gain.setValueAtTime(accent ? 0.28 : 0.18, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+        osc.connect(g); g.connect(ctx._out);
+        osc.start(t); osc.stop(t + 0.06);
+      }
+      beat++;
+    }
+    if (beat < totalBeats) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
+  };
+  pump();
 }
 
 export function stopAudio() {

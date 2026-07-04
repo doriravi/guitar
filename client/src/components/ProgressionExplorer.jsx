@@ -11,13 +11,16 @@ import { lyrics as lyricsApi } from '../lib/api';
 import { playProgression, stopAudio } from '../lib/audio';
 import { SONGS_BY_PROGRESSION, songBpm } from '../lib/songs';
 import { loadCustomSongs, addCustomSong, updateCustomSong, songToText } from '../lib/customSongs';
+import { loadCatalogSongs } from '../lib/catalogSongs';
 import { parseChordSheet } from '../lib/chordSheetParser';
 import { lookupVoicings } from '../lib/voicingLookup';
+import { filterSongsByReach } from '../lib/songReach';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
+import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import { useT } from '../lib/i18n';
-import { useHandProfile, useAIFingers } from '../App';
+import { useHandProfile, useAIFingers, useReachLimit } from '../App';
 
 function resolveForKey(root, scaleType, maxDiff) {
   const diatonic = getDiatonicChords(root, scaleType);
@@ -308,63 +311,9 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
       .filter(s => s.voicing);
   }, [annotatedLines, progChordsWithVoicings, playVoicing]);
 
-  // Build a printable chord-over-lyrics sheet for THIS song and hand it to the
-  // browser's print engine ("Save as PDF"). We can only auto-download our OWN
-  // sheet — the Ultimate Guitar tab is a cross-origin page the browser forbids
-  // us from scripting, so its Download-PDF button can't be clicked from here.
-  const downloadPdf = useCallback(() => {
-    const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-    const lines = (annotatedLines || []).map(line => {
-      if (line.blank) return '<div class="blank">&nbsp;</div>';
-      const cells = (line.segments || []).map(seg => {
-        const name = progChordsWithVoicings[seg.chordIndex]?.chordName || '';
-        return `<span class="cell"><span class="chord">${esc(name)}</span><span class="lyric">${esc(seg.text) || '&nbsp;'}</span></span>`;
-      }).join('');
-      return `<div class="line">${cells}</div>`;
-    }).join('\n');
-    const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} — ${esc(artist)}</title>
-<style>
-  body{font-family:'Courier New',monospace;color:#111;margin:32px;}
-  h1{font-size:20px;margin:0 0 2px;} .meta{color:#555;font-size:12px;margin:0 0 20px;}
-  .line{display:flex;flex-wrap:wrap;margin-bottom:8px;}
-  .blank{height:10px;}
-  .cell{display:inline-flex;flex-direction:column;margin-right:14px;}
-  .chord{font-weight:bold;color:#0b66c3;font-size:13px;line-height:1.1;}
-  .lyric{font-size:13px;line-height:1.2;white-space:pre;}
-  @media print{@page{margin:14mm;}}
-</style></head><body>
-  <h1>${esc(title)}</h1>
-  <p class="meta">${esc(artist)}${bpm ? ` · ${esc(bpm)} BPM` : ''}</p>
-  ${lines}
-  <script>window.onload=function(){window.focus();window.print();}<\/script>
-</body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) return; // pop-up blocked → nothing to do
-    w.document.open();
-    w.document.write(doc);
-    w.document.close();
-  }, [annotatedLines, progChordsWithVoicings, title, artist, bpm]);
-
   return (
     <div className="px-3 sm:px-4 py-3 font-mono text-xs"
       style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
-
-      {/* Compare the app's inferred chords against a real, human-made chord sheet.
-          DuckDuckGo's "!ducky" jumps straight to the top Ultimate Guitar chord
-          sheet for this song — no API key, no backend. Clicking ALSO downloads a
-          PDF of this app's own chord sheet (we can't script UG's own button). */}
-      <div className="mb-2 flex items-center gap-3 flex-wrap">
-        <a
-          href={`https://duckduckgo.com/?q=${encodeURIComponent(`\\ ${title} ${artist} chords site:ultimate-guitar.com`)}`}
-          target="_blank" rel="noopener noreferrer"
-          onClick={downloadPdf}
-          className="text-[11px] font-semibold px-2 py-1 rounded hover:underline"
-          style={{ color: 'var(--color-info)', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.08)' }}
-        >Compare real chords ↗</a>
-        <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>
-          opens the chord sheet to compare, and downloads a PDF of ours
-        </span>
-      </div>
 
       {/* Synth song player — plays the chords through the whole lyrics in order */}
       <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
@@ -677,12 +626,10 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
     <div style={{ borderBottom: '1px solid var(--color-surface-750)' }}>
       <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-2 pb-1">
         <div className="min-w-0 flex-1">
-          <a
-            href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(song.title + ' ' + song.artist)}`}
-            target="_blank" rel="noopener noreferrer"
-            className="font-semibold text-sm hover:underline"
+          <span
+            className="font-semibold text-sm"
             style={{ color: 'var(--color-ink)' }}
-          >{song.title}</a>
+          >{song.title}</span>
           <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -743,14 +690,16 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
       <div className="flex flex-wrap gap-x-0 overflow-x-auto pb-1" style={{ borderTop: '1px solid var(--color-surface-750)' }}>
         {stripChords.map((c, j) => (
           <div key={j} className="px-2 sm:px-3 py-1" style={{ minWidth: 48 }}>
-            <a
-              href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(c.chordName)}`}
-              target="_blank" rel="noopener noreferrer"
-              className="text-xs font-mono font-semibold hover:underline"
-              style={{ color: c.inProgression ? 'var(--color-ink-subtle)' : 'var(--color-danger)' }}
-            >
-              {c.chordName}
-            </a>
+            <ChordTip name={c.chordName}>
+              <a
+                href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(c.chordName)}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs font-mono font-semibold hover:underline"
+                style={{ color: c.inProgression ? 'var(--color-ink-subtle)' : 'var(--color-danger)' }}
+              >
+                {c.chordName}
+              </a>
+            </ChordTip>
           </div>
         ))}
       </div>
@@ -864,9 +813,29 @@ function sameKey(a, b) {
 }
 
 // Root pitch class of a chord name (ignores quality/suffix). 'Gm7' → G's pc.
+// Cached — song matching runs this against every chord of every catalog song
+// for every progression card, and the regex dominated that cost.
+const _chordPcCache = new Map();
 function chordPc(name) {
+  if (_chordPcCache.has(name)) return _chordPcCache.get(name);
   const m = (name || '').match(/^([A-G][#b]?)/);
-  return m ? KEY_PC[m[1]] : null;
+  const pc = m ? KEY_PC[m[1]] : null;
+  _chordPcCache.set(name, pc);
+  return pc;
+}
+
+// Diatonic chord names of a progression in a key, cached for the same reason —
+// getDiatonicChords was being rebuilt per song per card during matching.
+const _progNamesCache = new Map();
+function progChordNamesFor(keyRoot, scaleType, degrees) {
+  const k = `${keyRoot}|${scaleType}|${degrees.join(',')}`;
+  let names = _progNamesCache.get(k);
+  if (!names) {
+    const dia = getDiatonicChords(keyRoot, scaleType);
+    names = degrees.map(d => dia[d]?.chordName).filter(Boolean);
+    _progNamesCache.set(k, names);
+  }
+  return names;
 }
 
 // Does the song's actual chord-name list contain the progression's chords (by
@@ -927,7 +896,7 @@ function detectBestProgression(chordNames, keyRoot, scaleType) {
 // Built-in songs are keyed by progression name; user-imported (custom) songs
 // have no progression name, so they're matched purely on scale + key + the
 // degree pattern, and folded in here so they appear alongside the built-ins.
-function matchingSongs(progName, progDegrees, progScaleType, targetRoot, customSongs = []) {
+function matchingSongs(progName, progDegrees, progScaleType, targetRoot, customSongs = [], catalogSongs = [], reach = null) {
   // Built-ins: degree-based match (their data is degree-shaped and well-formed).
   const fitsBuiltIn = song => {
     if (song.scaleType !== progScaleType) return false;
@@ -942,33 +911,52 @@ function matchingSongs(progName, progDegrees, progScaleType, targetRoot, customS
     if (targetRoot && targetRoot !== 'all' && !sameKey(song.key, targetRoot)) return false;
     if (!Array.isArray(song.chords) || !song.chords.length) return false;
     const keyForProg = (targetRoot && targetRoot !== 'all') ? targetRoot : song.key;
-    const diatonic = getDiatonicChords(keyForProg, progScaleType);
-    const progChordNames = progDegrees.map(d => diatonic[d]?.chordName).filter(Boolean);
+    const progChordNames = progChordNamesFor(keyForProg, progScaleType, progDegrees);
     return chordsContainProgression(song.chords, progChordNames);
   };
   const custom = customSongs.filter(fitsCustom);
   // A custom (user-saved/edited) song with the same name supersedes the built-in,
   // so the same title never shows twice.
   const customTitles = new Set(custom.map(s => (s.title || '').trim().toLowerCase()));
+
+  // The DB catalog — every song regenerated from a REAL chord sheet (actual
+  // chords + full lyrics) — REPLACES the static songs.js entries. Catalog songs
+  // carry real chord names, so they match exactly like pasted songs. The static
+  // degree-based list is only the fallback while the catalog hasn't loaded
+  // (backend down and no cache yet).
+  // When "limit to my reach" is on, hide any song with a chord ANYWHERE in it the
+  // hand can't comfortably play — the whole song is excluded from the list + count.
+  const applyReach = (list) =>
+    reach?.limitToReach ? filterSongsByReach(list, reach.profile, true) : list;
+
+  if (catalogSongs.length) {
+    const catalog = catalogSongs
+      .filter(fitsCustom)
+      .filter(s => !customTitles.has((s.title || '').trim().toLowerCase()));
+    return applyReach([...custom, ...catalog]);
+  }
+
   const builtIn = (SONGS_BY_PROGRESSION[progName] || [])
     .filter(fitsBuiltIn)
     .filter(s => !customTitles.has((s.title || '').trim().toLowerCase()));
-  return [...custom, ...builtIn];
+  return applyReach([...custom, ...builtIn]);
 }
 
-function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, customSongs, tr, onSongEdited, onSongMoved }) {
+function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, customSongs, catalogSongs, tr, reach, onSongEdited, onSongMoved }) {
   // Set of degree indices that belong to this progression — used to flag "outside" chords in red
   const progDegreeSet = useMemo(() => new Set(progDegrees), [progDegrees]);
 
-  const songs = matchingSongs(progressionName, progDegrees, progScaleType, targetRoot, customSongs).slice(0, 10);
+  const songs = matchingSongs(progressionName, progDegrees, progScaleType, targetRoot, customSongs, catalogSongs, reach).slice(0, 10);
 
   if (!songs.length) {
     const keyed = targetRoot && targetRoot !== 'all';
     return (
       <div className="px-4 py-3 text-sm italic" style={{ color: 'var(--color-ink-ghost)', borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
-        {keyed
-          ? `No famous songs on record for this progression in the key of ${targetRoot}. Try another key, or "All roots".`
-          : 'No song examples on record for this progression.'}
+        {reach?.limitToReach
+          ? 'No songs here are fully within your reach. Turn off “limit to my reach” in Account settings to see songs with harder chords.'
+          : keyed
+            ? `No famous songs on record for this progression in the key of ${targetRoot}. Try another key, or "All roots".`
+            : 'No song examples on record for this progression.'}
       </div>
     );
   }
@@ -1411,6 +1399,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const tr = useT(lang);
   const handProfile = useHandProfile();
   const aiFingers   = useAIFingers();
+  const limitToReach = useReachLimit();
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
   const [showHandFilters, setShowHandFilters] = useState(false);
@@ -1429,6 +1418,14 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
     const reload = () => setCustomSongs(loadCustomSongs());
     window.addEventListener('focus', reload);
     return () => window.removeEventListener('focus', reload);
+  }, []);
+  // The DB song catalog (real fetched chord sheets) — replaces the static
+  // songs.js entries in the lists once loaded; [] keeps the static fallback.
+  const [catalogSongs, setCatalogSongs] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    loadCatalogSongs().then(songs => { if (alive) setCatalogSongs(songs); });
+    return () => { alive = false; };
   }, []);
   const [tooltip,     setTooltip]     = useState(null);  // { voicing, x, y }
   const [moveNotice,  setMoveNotice]  = useState(null);  // banner after a Save moves a song
@@ -1465,6 +1462,24 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
     if (!showHandFilters) return resolved;
     return filterByHandData(resolved, activeProfile, aiFingers, handFilters);
   }, [resolved, activeProfile, aiFingers, handFilters, showHandFilters]);
+
+  // ♪ badge counts for every card, computed ONCE per data change. Matching all
+  // catalog songs (real chord names) against every card inside the render loop
+  // froze the UI — each state change re-ran cards × songs × chords regex work.
+  const reach = useMemo(
+    () => ({ profile: activeProfile, limitToReach }),
+    [activeProfile, limitToReach],
+  );
+  const songCounts = useMemo(() => {
+    const counts = new Map();
+    for (const prog of filtered) {
+      counts.set(
+        cardKey(prog),
+        matchingSongs(prog.name, prog.degrees, prog.scaleType, prog.root, customSongs, catalogSongs, reach).length,
+      );
+    }
+    return counts;
+  }, [filtered, customSongs, catalogSongs, reach]);
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -1665,10 +1680,12 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           const isPlaying   = playState?.key === key;
           const activeChord = isPlaying ? playState.chordIdx : -1;
           const songsOpen   = openSongs.has(key);
-          const easierOpen  = openEasier.has(key);
+          // With the app-wide "limit to my reach" preference on, surface the
+          // easier (in-reach) alternatives automatically on every card.
+          const easierOpen  = openEasier.has(key) || limitToReach;
           const upperOpen   = openUpper.has(key);
           const triadOpen   = openTriad.has(key);
-          const songCount   = matchingSongs(prog.name, prog.degrees, prog.scaleType, prog.root, customSongs).length;
+          const songCount   = songCounts.get(key) ?? 0;
 
           return (
             <div key={i} className="rounded-lg overflow-hidden"
@@ -1695,14 +1712,14 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
                   <button
                     onClick={() => toggleEasier(key)}
-                    title="Suggest easier chords that fit your hand"
+                    title={limitToReach ? 'Shown automatically — “limit to my reach” is on (Account settings)' : 'Suggest easier chords that fit your hand'}
                     data-explain="The easier button suggests simpler chord shapes that fit your hand, with the same sound — so you can play this progression even with short fingers."
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
                     style={easierOpen
                       ? { background: 'rgba(74,222,128,0.14)', color: 'var(--color-success)' }
                       : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
-                    ✋ easier
+                    ✋ easier{limitToReach && ' ✓'}
                   </button>
 
                   <button
@@ -1837,7 +1854,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
               )}
 
               {/* Songs panel (collapsible) */}
-              {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} tr={tr} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} }} />}
+              {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} catalogSongs={catalogSongs} tr={tr} reach={reach} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} }} />}
 
             </div>
           );

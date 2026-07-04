@@ -46,11 +46,13 @@ public class SecurityConfig {
                         .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/version").permitAll()
-                        .requestMatchers("/api/analyze-hand").permitAll()
+                        .requestMatchers("/api/analyze-hand", "/api/analyze-hand/claude").permitAll()
                         .requestMatchers("/api/tab/**").permitAll()
                         .requestMatchers("/api/explain").permitAll()
                         .requestMatchers("/api/compose").permitAll()
                         .requestMatchers("/api/advise").permitAll()
+                        .requestMatchers("/api/chordsheet").permitAll()
+                        .requestMatchers("/api/catalog/**").permitAll()
                         // Protected REST endpoints (everything else under /api).
                         .requestMatchers("/api/**").authenticated()
                         // Everything NOT under /api is the bundled single-page app

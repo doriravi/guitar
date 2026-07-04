@@ -38,6 +38,30 @@ Before telling me a change works, actually verify it. Do not report success from
 3. **Frontend loads:** request `http://localhost:5173/` *with an `Accept: text/html` header* — a bare request 404s by design (Vite's SPA fallback only triggers for HTML requests), which is not a real failure.
 4. **Report honestly:** if something failed or was skipped, say so with the actual output. Only state "done and verified" when it has actually been checked.
 
+## Chord-library rules — keep every chord supported everywhere
+
+1. **Unknown chords: extend the library automatically.** The chord library
+   [client/src/lib/chords.js](client/src/lib/chords.js) (consumed via
+   `voicingLookup.js`) is the single source behind every graphic and sound:
+   fretboard diagrams, hover shapes, difficulty scores, and audio playback.
+   Imported/catalog songs carry real-sheet chord names (slash chords like
+   `Am/G`, extensions like `F6`, `A7(4)`, `F7M2/4+`) that may be missing —
+   `lookupVoicings(name)` returns `[]` for them, and every graphic silently
+   degrades. Whenever you encounter such a chord anywhere in the app's data
+   or while working on a task, **add a playable voicing for it to `chords.js`
+   immediately, without being asked**, so all graphics support chords the
+   user isn't familiar with yet. Follow the existing entry shape
+   (`{ name, type, tab, notes }`), the 6-char `EADGBe` tab convention, and
+   include only fretted notes in `notes` (opens/mutes excluded). Add ONE
+   spelling only — enharmonics (Bb ↔ A#) resolve automatically. Prefer the
+   common practical shape a beginner would be shown.
+2. **Hover chord map everywhere.** Every place in the application that
+   displays a chord name must show the chord's SHAPE (a `FretboardDiagram`
+   tooltip) on hover — the pattern used by the Progressions tab's lyrics
+   panel and the Song Editor's cells. When adding or touching any UI that
+   renders chord names (chips, tables, previews, lists), wire the same
+   hover-shape tooltip; never leave a chord name as plain text.
+
 ## Architecture
 
 ### The reach engine lives entirely in the frontend

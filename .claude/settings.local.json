@@ -15,7 +15,20 @@
       "Bash(cmd.exe /c \"dir C:\\\\vitetemp\")",
       "Bash(npm install:*)",
       "WebFetch(domain:www.e-chords.com)",
-      "Read(//c/Program Files/Java/**)"
+      "Read(//c/Program Files/Java/**)",
+      "Bash(PORT=8092 DB_PATH=__CMDSUB_OUTPUT__/data/async-test.db MAIL_HOST=smtp.invalid MAIL_USERNAME=x@x.com MAIL_PASSWORD=x '/c/Program Files/Java/jdk-26.0.1/bin/java' --enable-native-access=ALL-UNNAMED -jar target/guitar-reach-api-0.0.1-SNAPSHOT.jar)",
+      "PowerShell($up=$false; for \\($i=0;$i -lt 40;$i++\\){ try { $h=Invoke-RestMethod \"http://localhost:8092/actuator/health\" -TimeoutSec 2 -ErrorAction Stop; if\\($h.status -eq \"UP\"\\){$up=$true;break} } catch {}; Start-Sleep -Milliseconds 800 }; \"up: $up\")",
+      "Bash(rm -rf dist)",
+      "Bash(VITE_API_URL=\"https://perfect-compassion-production-fa2c.up.railway.app\" npm run build)",
+      "Bash(railway --version)",
+      "Bash(railway link *)",
+      "Bash(railway status *)",
+      "Bash(bash \"C:/Users/User/.claude/statusline.sh\")",
+      "Bash(npx eslint *)",
+      "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode)",
+      "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/lib/scales.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode)",
+      "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode)",
+      "PowerShell($deadline = \\(Get-Date\\).AddSeconds\\(30\\); do { $up = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue; if \\($up\\) { break }; Start-Sleep -Milliseconds 500 } while \\(\\(Get-Date\\) -lt $deadline\\); if \\($up\\) { \\(Invoke-WebRequest http://localhost:5173/ -Headers @{Accept='text/html'} -UseBasicParsing\\).StatusCode } else { 'port 5173 not listening' })"
     ]
   }
 }

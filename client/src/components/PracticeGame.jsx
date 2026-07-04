@@ -1,0 +1,886 @@
+// Play-Along — the practice game. Pick a song, its chords scroll toward a
+// now-line in time with the song's bpm, the mic listens to you play along on a
+// real guitar, and every chord window is scored live (perfect/good/partial/miss)
+// with combo, grade and per-song improvement history.
+//
+// Architecture (from the 3-specialist design):
+//   • ONE clock: the mic AudioContext's currentTime, anchored at start. Every
+//     visual/scoring event derives from songSec inside a single rAF loop.
+//   • Per-frame work writes ONLY to refs/styles (lane transform, volume, count-in,
+//     live meter). React state changes happen once per resolved window (~2 s).
+//   • Detection reuses the Listen tab's mic stack + the user's saved calibration
+//     (lib/micDetect.js), opened RAW (no echo-cancel/NS/AGC — they garble guitar).
+//   • No chord/bass audio during play (the mic would score the app itself):
+//     silent mode with 2.5 kHz count-in ticks (above the detection band), plus an
+//     optional drums-only backing (hats/snare live outside the 60–1200 Hz scan).
+//   • All game math is pure lib/practiceGame.js.
+
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  buildPlayTimeline, windowScorer, applyWindowResult, initialGameState,
+  accuracyPct, speedAdjAccuracy, gradeFor, multiplierFor, worstChords,
+  songKeyOf, saveSession, sessionsForSong, bestForSong, ghostForSong,
+} from '../lib/practiceGame';
+import { useMic, detectPeaksConfigured } from '../lib/micDetect';
+import { playTicks, playBacking, playMetronome, stopAudio, unlockAudio } from '../lib/audio';
+import { loadCustomSongs } from '../lib/customSongs';
+import { loadCatalogSongs } from '../lib/catalogSongs';
+import { filterSongsByReach, chordWithinReach, songAllChordNames } from '../lib/songReach';
+import { buildSessionReport } from '../lib/practiceReport';
+import { personalDifficulty } from '../lib/handProfile';
+import { easiestVoicing } from '../lib/voicingLookup';
+import { songBpm } from '../lib/songs';
+import { useHandProfile, useReachLimit } from '../App';
+import FretboardDiagram from './FretboardDiagram';
+import DifficultyBadge from './DifficultyBadge';
+import ChordTip from './ChordTip';
+
+const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
+const NOW_X = 110;               // px position of the now-line inside the lane
+const SNAP_LAG = 0.10;           // s — analyser latency compensation
+const FFT_MS = 100;              // detection cadence (≈ one full 4096-FFT frame)
+const SILENCE_PAUSE_MS = 8000;   // sustained silence → auto-pause
+
+const QUALITY_COLOR = {
+  perfect: 'var(--color-success)',
+  good: 'var(--color-brand)',
+  partial: 'var(--color-warning)',
+  miss: 'var(--color-danger)',
+  silent: 'var(--color-ink-ghost)',
+};
+const QUALITY_LABEL = { perfect: 'PERFECT', good: 'GOOD', partial: 'ALMOST', miss: 'MISS', silent: '—' };
+const GRADE_COLOR = {
+  S: 'var(--color-brand)', A: 'var(--color-success)', B: 'var(--color-info)',
+  C: 'var(--color-warning)', D: 'var(--color-danger)',
+};
+
+export default function PracticeGame({ cfg }) {
+  const profile = useHandProfile();
+  const limitToReach = useReachLimit();
+
+  // ── Screen phase ──
+  const [phase, setPhase] = useState('select');   // select | playing | paused | done
+  const [pauseReason, setPauseReason] = useState(null);
+  const [permDenied, setPermDenied] = useState(false);
+
+  // ── Song select state ──
+  const [customSongs, setCustomSongs] = useState([]);
+  const [catalogSongs, setCatalogSongs] = useState([]);
+  const [search, setSearch] = useState('');
+  const [speed, setSpeed] = useState(1);
+  const [drumsOn, setDrumsOn] = useState(false);
+  const [metronomeOn, setMetronomeOn] = useState(false);
+  const [histTick, setHistTick] = useState(0);    // bump to refresh history-derived chips
+
+  // ── Game state (one React update per resolved window) ──
+  const [game, setGame] = useState(initialGameState);
+  const [summary, setSummary] = useState(null);   // { record, worst, prevBest, history }
+  const [song, setSong] = useState(null);
+
+  // ── Refs (per-frame mutable, never re-render) ──
+  const mic = useMic();
+  const cfgRef = useRef(cfg); cfgRef.current = cfg;
+  const gameRef = useRef(game);
+  const timelineRef = useRef(null);               // { windows, meta }
+  const scorersRef = useRef([]);
+  const ghostRef = useRef(null);                  // previous run's scoreTimeline
+  const t0Ref = useRef(0);                        // mic-clock time of song beat 0
+  const rafRef = useRef(null);
+  const lastFFTRef = useRef(0);
+  const cursorRef = useRef(0);                    // window receiving snapshots
+  const nextToScoreRef = useRef(0);
+  const silenceSinceRef = useRef(null);
+  const phaseRef = useRef(phase); phaseRef.current = phase;
+
+  const laneTrackRef = useRef(null);
+  const volRef = useRef(null);
+  const meterRef = useRef(null);
+  const countWrapRef = useRef(null);
+  const countNumRef = useRef(null);
+
+  // The rAF loop is a stable callback; pause/finish close over CURRENT state
+  // (song, speed), so the loop reaches them through refs refreshed each render.
+  const pauseRef = useRef(null);
+  const finishRef = useRef(null);
+  const speedRef = useRef(speed); speedRef.current = speed;
+
+  // ── Load song sources ──
+  useEffect(() => {
+    let alive = true;
+    loadCatalogSongs().then(s => { if (alive) setCatalogSongs(s || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (phase === 'select') { setCustomSongs(loadCustomSongs()); setHistTick(t => t + 1); }
+  }, [phase]);
+
+  // ── Song list (custom + catalog, dedup, ≥4 chord hits, reach-aware) ──
+  const songItems = useMemo(() => {
+    const customTitles = new Set(customSongs.map(s => `${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`));
+    const merged = [
+      ...customSongs,
+      ...catalogSongs.filter(s => !customTitles.has(`${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`)),
+    ];
+    const withOcc = merged
+      .map(s => {
+        const occ = (s.lyricLines || []).reduce((n, ln) => n + (ln.chordNames?.length || 0), 0);
+        return { song: s, occ };
+      })
+      .filter(x => x.occ >= 4);
+    const reachFiltered = limitToReach
+      ? withOcc.filter(x => filterSongsByReach([x.song], profile, true).length)
+      : withOcc;
+    return reachFiltered.map(({ song: s, occ }) => {
+      const key = songKeyOf(s);
+      const uniq = songAllChordNames(s);
+      let hardest = 0;
+      for (const n of uniq) {
+        const v = easiestVoicing(n, { profile, limitToReach });
+        if (v) hardest = Math.max(hardest, personalDifficulty(v.score, profile));
+      }
+      const beyond = limitToReach ? 0 : uniq.filter(n => !chordWithinReach(n, profile)).length;
+      const sessions = sessionsForSong(key);
+      const best = bestForSong(key);
+      return {
+        song: s, key, occ, uniq, hardest, beyond,
+        bpm: Math.min(220, Math.max(40, s.bpm ?? songBpm(s.title) ?? 100)),
+        best, last: sessions[0] || null,
+        spark: sessions.slice(0, 5).reverse().map(x => x.accuracy),
+      };
+    }).sort((a, b) => (a.song.title || '').localeCompare(b.song.title || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customSongs, catalogSongs, profile, limitToReach, histTick]);
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return songItems;
+    return songItems.filter(x => `${x.song.title} ${x.song.artist}`.toLowerCase().includes(q));
+  }, [songItems, search]);
+
+  // ── Cleanup on unmount ──
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    mic.current.close();
+    stopAudio();
+  }, [mic]);
+
+  // ── Auto-pause when the tab is hidden (rAF throttling would corrupt scoring) ──
+  useEffect(() => {
+    const onVis = () => { if (document.hidden && phaseRef.current === 'playing') pauseRef.current?.('hidden'); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const setGameBoth = (next) => { gameRef.current = next; setGame(next); };
+
+  // ── The single rAF loop ──
+  const loop = useCallback((ts) => {
+    rafRef.current = requestAnimationFrame(loop);
+    const api = mic.current;
+    const tl = timelineRef.current;
+    if (!api.audioCtx || !tl) return;
+    const { windows, meta } = tl;
+    const songSec = api.audioCtx.currentTime - t0Ref.current;
+
+    // Lane scroll + count-in — style/ref writes only.
+    if (laneTrackRef.current) {
+      laneTrackRef.current.style.transform =
+        `translate3d(${NOW_X - (songSec / meta.spb) * PX_PER_BEAT}px,0,0)`;
+    }
+    if (songSec < 0) {
+      if (countWrapRef.current) {
+        countWrapRef.current.style.display = 'flex';
+        if (countNumRef.current) countNumRef.current.textContent = String(Math.ceil(-songSec / meta.spb));
+      }
+      return;
+    }
+    if (countWrapRef.current && countWrapRef.current.style.display !== 'none') {
+      countWrapRef.current.style.display = 'none';
+    }
+
+    // Detection tick (~100 ms).
+    if (ts - lastFFTRef.current >= FFT_MS) {
+      lastFFTRef.current = ts;
+      const rms = api.getRMS();
+      if (volRef.current) volRef.current.style.width = `${Math.min(100, Math.round(rms * 800))}%`;
+
+      // Sustained-silence auto-pause.
+      if (rms < cfgRef.current.silenceRms) {
+        if (silenceSinceRef.current == null) silenceSinceRef.current = ts;
+        else if (ts - silenceSinceRef.current > SILENCE_PAUSE_MS) { pauseRef.current?.('silence'); return; }
+      } else {
+        silenceSinceRef.current = null;
+      }
+
+      const t = songSec - SNAP_LAG;
+      if (t >= 0 && t < meta.totalSec) {
+        while (cursorRef.current < windows.length - 1 && t >= windows[cursorRef.current].endSec) {
+          cursorRef.current++;
+        }
+        const w = windows[cursorRef.current];
+        if (t >= w.startSec) {
+          const fd = api.getFreqData();
+          if (fd) {
+            const peaks = detectPeaksConfigured(fd, api.audioCtx.sampleRate, api.analyser.fftSize, cfgRef.current);
+            const sc = scorersRef.current[cursorRef.current];
+            sc.add(peaks, rms, t - w.startSec);
+            const live = sc.current();
+            if (meterRef.current) {
+              meterRef.current.style.width = `${Math.round(live.q * 100)}%`;
+              meterRef.current.style.background = QUALITY_COLOR[live.quality] || 'var(--color-ink-ghost)';
+            }
+          }
+        }
+      }
+    }
+
+    // Close every window whose end has passed — ONE state update per window.
+    while (nextToScoreRef.current < windows.length &&
+           songSec - SNAP_LAG >= windows[nextToScoreRef.current].endSec) {
+      const i = nextToScoreRef.current++;
+      const r = scorersRef.current[i].final();
+      setGameBoth(applyWindowResult(gameRef.current, r, speedRef.current));
+    }
+
+    if (songSec > meta.totalSec + 0.5) finishRef.current?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mic]);
+
+  // ── Start / pause / resume / finish ──
+  const start = async (item) => {
+    setPermDenied(false);
+    try {
+      await mic.current.open(cfgRef.current.smoothing, { raw: true });
+    } catch (e) {
+      if (e.name === 'NotAllowedError') setPermDenied(true);
+      return;
+    }
+    const tl = buildPlayTimeline(item.song, { speed, profile, limitToReach });
+    if (!tl.windows.length) { mic.current.close(); return; }
+    timelineRef.current = tl;
+    scorersRef.current = tl.windows.map((w, i) =>
+      windowScorer(w, cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null));
+    ghostRef.current = ghostForSong(item.key, speed)?.scoreTimeline || null;
+    cursorRef.current = 0;
+    nextToScoreRef.current = 0;
+    lastFFTRef.current = 0;
+    silenceSinceRef.current = null;
+    setGameBoth(initialGameState());
+    setSummary(null);
+    setSong(item.song);
+
+    // Count-in: audible ticks (silent mode) or a drums-only count bar (backing on).
+    unlockAudio();
+    const micNow = mic.current.audioCtx.currentTime;
+    if (drumsOn) {
+      playBacking(
+        [{ name: '', beats: tl.meta.countInBeats },
+         ...tl.windows.map(w => ({ name: w.name, beats: tl.meta.beatsPerChord }))],
+        tl.meta.bpm, { drums: true, bass: false },
+      );
+      t0Ref.current = micNow + 0.15 + tl.meta.countInSec;   // audio.js scheduling lead
+    } else {
+      const lead = playTicks(tl.meta.countInBeats, tl.meta.spb);
+      t0Ref.current = micNow + lead;
+    }
+    if (metronomeOn) {
+      const totalBeats = tl.windows.length * tl.meta.beatsPerChord;
+      playMetronome(totalBeats, tl.meta.spb, { startAt: t0Ref.current });
+    }
+    setPhase('playing');
+    rafRef.current = requestAnimationFrame(loop);
+  };
+
+  const pause = (reason = null) => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    stopAudio();
+    setPauseReason(reason);
+    setPhase('paused');
+  };
+
+  const resume = () => {
+    const tl = timelineRef.current;
+    if (!tl) return;
+    const i = Math.min(nextToScoreRef.current, tl.windows.length - 1);
+    // Restart at the top of the first unscored window with a fresh count-in;
+    // its partial evidence is discarded (completed windows keep their scores).
+    scorersRef.current[i] = windowScorer(tl.windows[i], cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null);
+    cursorRef.current = i;
+    silenceSinceRef.current = null;
+    const micNow = mic.current.audioCtx.currentTime;
+    const countSec = 4 * tl.meta.spb;
+    if (drumsOn) {
+      playBacking(
+        [{ name: '', beats: 4 },
+         ...tl.windows.slice(i).map(w => ({ name: w.name, beats: tl.meta.beatsPerChord }))],
+        tl.meta.bpm, { drums: true, bass: false },
+      );
+      t0Ref.current = micNow + 0.15 + countSec - tl.windows[i].startSec;
+    } else {
+      const lead = playTicks(4, tl.meta.spb);
+      t0Ref.current = micNow + lead - tl.windows[i].startSec;
+    }
+    if (metronomeOn) {
+      const remainingBeats = (tl.windows.length - i) * tl.meta.beatsPerChord;
+      playMetronome(remainingBeats, tl.meta.spb, { startAt: t0Ref.current + tl.windows[i].startSec });
+    }
+    setPauseReason(null);
+    setPhase('playing');
+    rafRef.current = requestAnimationFrame(loop);
+  };
+
+  const finish = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    stopAudio();
+    mic.current.close();
+
+    const tl = timelineRef.current;
+    if (!tl) { setPhase('select'); return; }
+    const g = gameRef.current;
+    const completed = nextToScoreRef.current >= tl.windows.length;
+    const key = songKeyOf(song || {});
+    const acc = accuracyPct(g);
+    const spdAcc = speedAdjAccuracy(acc, speed);
+    const worst = worstChords(tl.windows, g.results);
+    const prevBest = bestForSong(key);   // captured BEFORE saving this run
+
+    let record = null;
+    if (g.resolved >= 3) {               // don't record trivial abandons
+      record = {
+        songKey: key,
+        title: song?.title || '', artist: song?.artist || '',
+        bpm: tl.meta.bpmBase, speed,
+        endedAt: new Date().toISOString(),
+        completed,
+        score: g.score, maxCombo: g.maxCombo,
+        accuracy: Math.round(acc * 10) / 10,
+        speedAdjAccuracy: Math.round(spdAcc * 10) / 10,
+        grade: gradeFor(acc),
+        counts: g.counts,
+        worst: worst.map(w => w.name),
+        scoreTimeline: g.scoreTimeline,
+      };
+      saveSession(record);
+    }
+    // The detailed practice report: buzz/mute inference per failed chord tone,
+    // finger attribution, wrong-note analysis, hardest transitions, suggestions.
+    const report = buildSessionReport(tl.windows, g.results, profile);
+
+    setSummary({
+      record, worst, prevBest, report,
+      history: key ? sessionsForSong(key).slice(0, 10) : [],
+      accuracy: acc, grade: gradeFor(acc), completed,
+    });
+    setPhase('done');
+  };
+
+  pauseRef.current = pause;
+  finishRef.current = finish;
+
+  const quitToSelect = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    stopAudio();
+    mic.current.close();
+    setPhase('select');
+  };
+
+  // ── Derived HUD values ──
+  const acc = accuracyPct(game);
+  const ghostDelta = ghostRef.current && game.resolved > 0
+    ? game.score - (ghostRef.current[game.resolved - 1] ?? 0)
+    : null;
+  const lastResult = game.results[game.results.length - 1] || null;
+  const tl = timelineRef.current;
+  const activeIdx = game.resolved;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="space-y-4">
+      <style>{`
+        @keyframes pgPop   { 0%{transform:scale(1)} 40%{transform:scale(1.06)} 100%{transform:scale(1)} }
+        @keyframes pgShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+        @keyframes pgFloat { 0%{opacity:1; transform:translateY(0)} 100%{opacity:0; transform:translateY(-24px)} }
+        @keyframes pgPulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+      `}</style>
+
+      {/* ══ SONG SELECT ══ */}
+      {phase === 'select' && (
+        <>
+          <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+              <p className="text-sm font-bold" style={{ color: 'var(--color-ink)' }}>🎮 Play-Along</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Speed</span>
+                  <input
+                    type="range" min={50} max={150} step={5}
+                    value={Math.round(speed * 100)}
+                    onChange={e => setSpeed(Number(e.target.value) / 100)}
+                    className="w-28 cursor-pointer"
+                    style={{ accentColor: 'var(--color-brand)' }}
+                  />
+                  <span className="text-xs font-bold tabular-nums w-14" style={{ color: 'var(--color-brand)' }}>
+                    {Math.round(speed * 100)}%
+                    {speed !== 1 && (
+                      <span className="ml-1 font-normal text-[10px]" style={{ color: speed > 1 ? 'var(--color-success)' : 'var(--color-ink-ghost)' }}>
+                        ×{(0.6 + 0.4 * speed).toFixed(2)}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <button onClick={() => setMetronomeOn(v => !v)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                  title="Audible metronome click while you play"
+                  style={metronomeOn
+                    ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                    : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                  🎵 Click
+                </button>
+                <button onClick={() => setDrumsOn(v => !v)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                  title="Drum backing while you play (headphones recommended — the mic must not hear the app)"
+                  style={drumsOn
+                    ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                    : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                  🥁 Drums
+                </button>
+              </div>
+            </div>
+            <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+              Chords scroll in time — play each one on your guitar and the mic scores how well you match.
+              {' '}Faster speed earns a higher score multiplier (up to ×1.20 at 150%).
+              {drumsOn && <span style={{ color: 'var(--color-warning)' }}> Headphones recommended with drums on.</span>}
+            </p>
+            {permDenied && <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>Microphone access denied — the game needs the mic to hear you play.</p>}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search songs…"
+              className="flex-1 text-sm rounded-lg px-3 py-2 outline-none"
+              style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }} />
+            <span className="text-xs tabular-nums" style={{ color: 'var(--color-ink-ghost)' }}>{filteredItems.length} songs</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {filteredItems.map(item => (
+              <div key={item.key} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-ink)' }}>{item.song.title}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>— {item.song.artist}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-[11px] flex-wrap" style={{ color: 'var(--color-ink-ghost)' }}>
+                    <span>♩{item.bpm}</span>
+                    <span>{item.occ} chords</span>
+                    <DifficultyBadge score={item.hardest || 1} />
+                    {item.beyond > 0 && (
+                      <span className="px-1.5 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.1)', color: 'var(--color-warning)' }}>
+                        {item.beyond} beyond reach
+                      </span>
+                    )}
+                    {item.best && (
+                      <span style={{ color: 'var(--color-success)' }}>Best {item.best.grade} {Math.round(item.best.accuracy)}%</span>
+                    )}
+                    {item.last && !item.best && <span>Last {Math.round(item.last.accuracy)}%</span>}
+                    {!item.last && <span style={{ color: 'var(--color-surface-550)' }}>Never played</span>}
+                  </div>
+                </div>
+                {item.spark.length > 1 && (
+                  <div className="hidden sm:flex items-end gap-0.5 h-6 shrink-0">
+                    {item.spark.map((a, k) => (
+                      <div key={k} className="w-1.5 rounded-sm"
+                        style={{ height: `${Math.max(12, a)}%`, background: k === item.spark.length - 1 ? 'var(--color-brand)' : 'var(--color-surface-550)' }} />
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => start(item)}
+                  className="text-xs font-bold px-4 py-2 rounded-lg shrink-0"
+                  style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+                  ▶ Play
+                </button>
+              </div>
+            ))}
+            {!filteredItems.length && (
+              <div className="text-center py-10 text-sm" style={{ color: 'var(--color-ink-ghost)' }}>
+                {songItems.length === 0
+                  ? (limitToReach
+                    ? 'No songs fully within your reach yet — import easier songs, or turn off "limit to my reach" in Account settings.'
+                    : 'No songs yet — import one in the Import tab, and it appears here.')
+                  : `No songs match “${search}”.`}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ══ PLAYING / PAUSED ══ */}
+      {(phase === 'playing' || phase === 'paused') && tl && (
+        <>
+          {/* Header */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => (phase === 'paused' ? resume() : pause())}
+              className="text-xs font-semibold px-3 py-2 rounded-lg"
+              style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
+              {phase === 'paused' ? '▶ Resume' : '⏸ Pause'}
+            </button>
+            <div className="text-sm min-w-0 flex-1 truncate" style={{ color: 'var(--color-ink)' }}>
+              <span className="font-semibold">{song?.title}</span>
+              <span style={{ color: 'var(--color-ink-faint)' }}> — {song?.artist}</span>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
+              ♩{Math.round(tl.meta.bpm)}{speed !== 1 ? ` · ${Math.round(speed * 100)}%` : ''}
+              {speed !== 1 && (
+                <span className="ml-1" style={{ color: speed > 1 ? 'var(--color-success)' : 'var(--color-ink-ghost)' }}>
+                  ×{(0.6 + 0.4 * speed).toFixed(2)}
+                </span>
+              )}
+              {metronomeOn && <span className="ml-1">🎵</span>}
+            </span>
+            <button onClick={finish}
+              className="text-xs font-semibold px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--color-danger)' }}>
+              ✕ End
+            </button>
+          </div>
+
+          {/* HUD */}
+          <div className="flex items-center gap-4 flex-wrap rounded-xl px-4 py-2.5"
+            style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+            <div>
+              <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Score</span>
+              <span className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{game.score.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Combo</span>
+              <span className="text-lg font-black tabular-nums" style={{ color: game.combo >= 5 ? 'var(--color-brand)' : 'var(--color-ink-subtle)' }}>
+                {game.combo > 0 ? `🔥${game.combo}` : '—'}
+                <span className="text-xs font-bold ml-1" style={{ color: 'var(--color-ink-ghost)' }}>×{multiplierFor(game.combo)}</span>
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Accuracy</span>
+              <span className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{game.resolved ? `${Math.round(acc)}%` : '—'}</span>
+            </div>
+            {ghostDelta != null && (
+              <div>
+                <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>vs last run</span>
+                <span className="text-lg font-black tabular-nums"
+                  style={{ color: ghostDelta >= 0 ? 'var(--color-success)' : 'var(--color-warning)' }}>
+                  {ghostDelta >= 0 ? `▲ +${ghostDelta}` : `▼ ${ghostDelta}`}
+                </span>
+              </div>
+            )}
+            <div className="flex-1" />
+            {/* mic volume */}
+            <div className="w-24">
+              <span className="text-[10px] uppercase tracking-widest font-semibold block mb-1" style={{ color: 'var(--color-ink-ghost)' }}>Mic</span>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
+                <div ref={volRef} className="h-full rounded-full" style={{ width: '0%', background: 'var(--color-success)' }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Lane */}
+          <div className="relative rounded-xl overflow-hidden" style={{ height: 96, background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+            {/* now-line */}
+            <div className="absolute top-0 bottom-0 z-10" style={{
+              left: NOW_X, width: 2, background: 'var(--color-brand)',
+              animation: `pgPulse ${tl.meta.spb}s ease-in-out infinite`,
+            }} />
+            {/* judgment floater */}
+            {lastResult && (
+              <div key={game.resolved} className="absolute z-20 text-sm font-black pointer-events-none"
+                style={{ left: NOW_X + 10, top: 8, color: QUALITY_COLOR[lastResult.quality], animation: 'pgFloat 0.6s ease-out forwards' }}>
+                {QUALITY_LABEL[lastResult.quality]}{lastResult.points > 0 ? ` +${lastResult.points}` : ''}
+              </div>
+            )}
+            {/* conveyor track */}
+            <div ref={laneTrackRef} className="absolute top-0 bottom-0 left-0" style={{ willChange: 'transform' }}>
+              {tl.windows.map((w, i) => {
+                const res = game.results[i];
+                const isActive = i === activeIdx && phase === 'playing';
+                return (
+                  <div key={i} className="absolute rounded-lg flex flex-col items-center justify-center"
+                    style={{
+                      left: i * 4 * PX_PER_BEAT, width: 4 * PX_PER_BEAT - 8, top: 10, bottom: 10,
+                      background: isActive ? 'rgba(201,169,110,0.08)' : 'var(--color-surface-800)',
+                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? 'var(--color-brand)' : 'var(--color-surface-650)'}`,
+                      opacity: res ? (res.quality === 'miss' || res.quality === 'silent' ? 0.4 : 0.75) : 1,
+                      animation: res
+                        ? (res.quality === 'miss' ? 'pgShake 0.3s' : res.quality === 'perfect' || res.quality === 'good' ? 'pgPop 0.24s' : 'none')
+                        : 'none',
+                    }}>
+                    <span className="text-base font-black leading-none" style={{ color: res ? QUALITY_COLOR[res.quality] : 'var(--color-accent)' }}>
+                      {w.name}
+                    </span>
+                    {res && <span className="text-[9px] font-bold mt-1" style={{ color: QUALITY_COLOR[res.quality] }}>{QUALITY_LABEL[res.quality]}</span>}
+                  </div>
+                );
+              })}
+            </div>
+            {/* count-in overlay (ref-driven) */}
+            <div ref={countWrapRef} className="absolute inset-0 z-30 items-center justify-center gap-3" style={{ display: 'none', background: 'rgba(0,0,0,0.55)' }}>
+              <span className="text-xs uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-faint)' }}>Get ready</span>
+              <span ref={countNumRef} className="text-4xl font-black" style={{ color: 'var(--color-brand)' }}>4</span>
+            </div>
+            {/* paused overlay */}
+            {phase === 'paused' && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2" style={{ background: 'rgba(0,0,0,0.6)' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--color-ink)' }}>
+                  {pauseReason === 'silence' ? "Paused — can't hear your guitar" : pauseReason === 'hidden' ? 'Paused — tab was hidden' : 'Paused'}
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={resume} className="text-xs font-bold px-4 py-2 rounded-lg" style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>▶ Resume</button>
+                  <button onClick={finish} className="text-xs font-semibold px-4 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--color-danger)' }}>End</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* live match meter */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Match</span>
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-650)' }}>
+              <div ref={meterRef} className="h-full rounded-full" style={{ width: '0%', background: 'var(--color-ink-ghost)', transition: 'width 0.15s' }} />
+            </div>
+          </div>
+
+          {/* current + next shapes */}
+          <div className="flex items-start gap-4 rounded-xl px-4 py-3" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+            {tl.windows[activeIdx] && (
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-brand)' }}>Now</span>
+                <FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />
+              </div>
+            )}
+            {tl.windows[activeIdx + 1] && (
+              <div className="flex flex-col items-center opacity-60">
+                <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-ink-ghost)' }}>Next</span>
+                <FretboardDiagram chord={{ name: tl.windows[activeIdx + 1].name, tab: tl.windows[activeIdx + 1].tab, notes: tl.windows[activeIdx + 1].notes }} />
+              </div>
+            )}
+            <div className="flex-1 text-xs self-center" style={{ color: 'var(--color-ink-faint)' }}>
+              {activeIdx < tl.windows.length
+                ? <>Chord {Math.min(activeIdx + 1, tl.windows.length)} of {tl.windows.length}</>
+                : 'Finishing…'}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ══ RESULTS ══ */}
+      {phase === 'done' && summary && (
+        <>
+          <div className="rounded-xl p-6 text-center" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+            <div className="text-6xl font-black mb-1" style={{
+              color: GRADE_COLOR[summary.grade],
+              textShadow: summary.grade === 'S' ? '0 0 24px rgba(201,169,110,0.5)' : 'none',
+            }}>
+              {summary.grade}
+            </div>
+            {summary.record && summary.completed &&
+              (!summary.prevBest || summary.record.speedAdjAccuracy > summary.prevBest.speedAdjAccuracy) && (
+              <div className="text-xs font-bold mb-2" style={{ color: 'var(--color-brand)' }}>★ Personal best!</div>
+            )}
+            <p className="text-sm" style={{ color: 'var(--color-ink)' }}>
+              Accuracy <strong>{Math.round(summary.accuracy)}%</strong> · Score <strong>{game.score.toLocaleString()}</strong>
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>
+              Best combo {game.maxCombo}{speed !== 1 ? ` · ${speed * 100}% speed` : ''}{!summary.completed ? ' · ended early' : ''}
+            </p>
+
+            {/* quality bar */}
+            {game.resolved > 0 && (
+              <div className="flex h-2.5 rounded-full overflow-hidden mt-4" style={{ background: 'var(--color-surface-650)' }}>
+                {['perfect', 'good', 'partial', 'miss', 'silent'].map(q => (
+                  game.counts[q] > 0 && (
+                    <div key={q} style={{ width: `${(game.counts[q] / game.resolved) * 100}%`, background: QUALITY_COLOR[q] }} />
+                  )
+                ))}
+              </div>
+            )}
+            <div className="flex justify-center gap-3 mt-2 text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>
+              <span style={{ color: 'var(--color-success)' }}>{game.counts.perfect}✦</span>
+              <span style={{ color: 'var(--color-brand)' }}>{game.counts.good}✓</span>
+              <span style={{ color: 'var(--color-warning)' }}>{game.counts.partial}◐</span>
+              <span style={{ color: 'var(--color-danger)' }}>{game.counts.miss + game.counts.silent}✗</span>
+            </div>
+          </div>
+
+          {/* progress on this song */}
+          {summary.history.length > 1 && (
+            <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+              <p className="text-[10px] uppercase tracking-widest font-semibold mb-2" style={{ color: 'var(--color-ink-ghost)' }}>Progress on this song</p>
+              <div className="flex items-end gap-1.5 h-16">
+                {summary.history.slice().reverse().map((s, k, arr) => (
+                  <div key={k} className="flex-1 rounded-t"
+                    title={`${Math.round(s.accuracy)}% · ${s.grade} · ${new Date(s.endedAt).toLocaleDateString()}`}
+                    style={{
+                      height: `${Math.max(6, s.accuracy)}%`,
+                      background: k === arr.length - 1 ? 'var(--color-brand)' : 'var(--color-surface-550)',
+                    }} />
+                ))}
+              </div>
+              {summary.history.length >= 2 && (
+                <p className="text-xs mt-2" style={{ color: 'var(--color-ink-muted)' }}>
+                  {(() => {
+                    const delta = Math.round(summary.history[0].accuracy - summary.history[1].accuracy);
+                    return delta >= 0 ? `▲ +${delta}% vs last run` : `▼ ${delta}% vs last run`;
+                  })()}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Practice report — detailed post-run diagnosis ── */}
+          {summary.report && (
+            <div className="rounded-xl p-4 space-y-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+              <p className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-brand)' }}>
+                📋 Practice report
+              </p>
+
+              {/* Overall narrative */}
+              {summary.report.overall.length > 0 && (
+                <div className="space-y-2">
+                  {summary.report.overall.map((line, k) => (
+                    <p key={k} className="text-xs leading-relaxed" style={{ color: 'var(--color-ink-muted)' }}>{line}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Finger scoreboard */}
+              {summary.report.fingerStats.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: 'var(--color-ink-ghost)' }}>Fingers this run</p>
+                  <div className="flex flex-wrap gap-2">
+                    {summary.report.fingerStats.slice().sort((a, b) => a.finger - b.finger).map(f => (
+                      <span key={f.finger} className="text-[11px] px-2.5 py-1 rounded-lg tabular-nums"
+                        style={{
+                          background: f.rate >= 0.35 ? 'rgba(239,68,68,0.1)' : f.rate >= 0.2 ? 'rgba(251,191,36,0.08)' : 'rgba(74,222,128,0.08)',
+                          color: f.rate >= 0.35 ? 'var(--color-danger)' : f.rate >= 0.2 ? 'var(--color-warning)' : 'var(--color-success)',
+                          border: '1px solid var(--color-surface-600)',
+                        }}>
+                        {f.finger} · {f.name}: {Math.round(f.rate * 100)}% failed ({f.issues}/{f.attempts})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-chord diagnosis */}
+              {summary.report.chordIssues.map(ci => (
+                <div key={ci.name} className="rounded-lg p-3" style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-700)' }}>
+                  <div className="flex items-start gap-3">
+                    <div className="shrink-0 flex flex-col items-center">
+                      <ChordTip name={ci.name}>
+                        <span className="text-base font-black cursor-help" style={{ color: 'var(--color-danger)' }}>{ci.name}</span>
+                      </ChordTip>
+                      {ci.tab && <FretboardDiagram chord={{ name: '', tab: ci.tab, notes: ci.notes }} showFingers />}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <p className="text-[11px]" style={{ color: 'var(--color-ink-ghost)' }}>
+                        {Math.round(ci.avgQ * 100)}% avg match over {ci.attempts} bar{ci.attempts !== 1 ? 's' : ''}
+                        {ci.lateRate >= 0.4 && <span style={{ color: 'var(--color-warning)' }}> · often late</span>}
+                        {ci.silentRate >= 0.5 && <span style={{ color: 'var(--color-ink-faint)' }}> · often silent</span>}
+                        {ci.beyondReach && <span style={{ color: 'var(--color-danger)' }}> · beyond your reach ceiling</span>}
+                      </p>
+                      {/* failed tones: string / fret / finger with buzz-vs-mute reading */}
+                      {ci.tones.map((t, k) => (
+                        <p key={k} className="text-[11px] flex items-start gap-1.5" style={{ color: 'var(--color-ink-subtle)' }}>
+                          <span className="mt-0.5 shrink-0 inline-block w-2 h-2 rounded-full"
+                            style={{ background: t.kind === 'missing' ? 'var(--color-danger)' : 'var(--color-warning)' }} />
+                          <span>{t.text}{t.required && <strong style={{ color: 'var(--color-ink-muted)' }}> (a defining tone of the chord)</strong>}</span>
+                        </p>
+                      ))}
+                      {/* wrong notes heard */}
+                      {ci.wrongNotes.map((wn, k) => (
+                        <p key={k} className="text-[11px] flex items-start gap-1.5" style={{ color: 'var(--color-ink-subtle)' }}>
+                          <span className="mt-0.5 shrink-0 inline-block w-2 h-2 rounded-full" style={{ background: 'var(--color-accent)' }} />
+                          <span>Heard a stray <strong>{wn.noteName}</strong> — {wn.hint}.</span>
+                        </p>
+                      ))}
+                      {/* suggestions */}
+                      {ci.suggestions.length > 0 && (
+                        <ul className="mt-1 space-y-1">
+                          {ci.suggestions.map((s, k) => (
+                            <li key={k} className="text-[11px] leading-relaxed pl-2" style={{ color: 'var(--color-success)', borderLeft: '2px solid rgba(74,222,128,0.35)' }}>
+                              {s}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {summary.report.chordIssues.length === 0 && (
+                <p className="text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>
+                  No chord-level problems worth flagging — nice hands.
+                </p>
+              )}
+
+              {/* Hardest transitions */}
+              {summary.report.transitions.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: 'var(--color-ink-ghost)' }}>Hardest changes</p>
+                  {summary.report.transitions.map((t, k) => (
+                    <p key={k} className="text-[11px] mb-0.5" style={{ color: 'var(--color-ink-subtle)' }}>
+                      <ChordTip name={t.from}><strong className="cursor-help" style={{ color: 'var(--color-ink)' }}>{t.from}</strong></ChordTip>
+                      {' → '}
+                      <ChordTip name={t.to}><strong className="cursor-help" style={{ color: 'var(--color-ink)' }}>{t.to}</strong></ChordTip>
+                      {`: ${Math.round(t.avgQ * 100)}% avg match`}
+                      {t.lateRate >= 0.4 ? `, late ${Math.round(t.lateRate * 100)}% of the time` : ''}
+                      {t.physicalCost != null ? ` · physical cost ${t.physicalCost}/10 for this switch` : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* toughest chords (simple list — only when the detailed report has nothing) */}
+          {!(summary.report?.chordIssues?.length) && summary.worst.length > 0 && (
+            <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+              <p className="text-[10px] uppercase tracking-widest font-semibold mb-3" style={{ color: 'var(--color-ink-ghost)' }}>Toughest chords — practice these</p>
+              <div className="flex flex-wrap gap-4">
+                {summary.worst.map(w => {
+                  const v = easiestVoicing(w.name, { profile, limitToReach });
+                  return (
+                    <div key={w.name} className="flex flex-col items-center gap-1">
+                      <ChordTip name={w.name}>
+                        <span className="text-sm font-bold cursor-help" style={{ color: 'var(--color-danger)' }}>{w.name}</span>
+                      </ChordTip>
+                      {v && <FretboardDiagram chord={{ name: w.name, tab: v.tab, notes: v.notes }} showFingers />}
+                      <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>{Math.round(w.avgQ * 100)}% avg match</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={() => { const item = songItems.find(x => x.key === songKeyOf(song || {})); if (item) start(item); }}
+              className="text-sm font-bold px-5 py-2.5 rounded-xl"
+              style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+              ▶ Play again
+            </button>
+            <button onClick={quitToSelect}
+              className="text-sm font-semibold px-5 py-2.5 rounded-xl"
+              style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
+              Songs
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

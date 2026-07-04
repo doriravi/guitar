@@ -54,6 +54,18 @@ export function personalDifficulty(rawScore, profile) {
 }
 
 /**
+ * Is a raw difficulty score within this hand's comfortable reach?
+ *
+ * Compares the DISPLAYED (personalized) difficulty of a shape against the hand's
+ * recommended ceiling. Used app-wide when the user turns on "limit to my reach"
+ * so any shape that plays harder than they can comfortably manage is flagged /
+ * filtered out. Equal-to-ceiling counts as within reach.
+ */
+export function isWithinReach(rawScore, profile) {
+  return personalDifficulty(rawScore, profile) <= recommendedMaxDifficulty(profile);
+}
+
+/**
  * Recommended "comfortable" max-difficulty ceiling for this hand (1-10).
  *
  * A chord that feels like a mild-to-moderate stretch (displayed ≈ 7/10) is a

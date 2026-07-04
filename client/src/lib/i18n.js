@@ -52,6 +52,11 @@ export const t = {
     // Account Settings
     accountSettings: 'Account Settings', emailNotVerified: '⚠ Your email is not verified.',
     language: 'Language',
+    playability: 'Playability',
+    limitToReachLabel: 'Limit everything to my reach & flexibility',
+    limitToReachHelp: 'Across the whole app, prefer chord shapes you can comfortably play and flag ones beyond your reach. Based on your measured hand.',
+    appliesInstantly: 'Applies instantly — no need to press “Save changes”.',
+    saved: 'Saved',
     resendEmail: 'Resend email', profile: 'Profile', name: 'Name',
     leaveBlankPassword: 'Leave blank to keep your current password.',
     currentPassword: 'Current password', requiredToChange: 'Required to change password',

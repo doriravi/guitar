@@ -8,6 +8,7 @@ import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
 import { getDiatonicChords } from '../lib/scales';
 import { compose } from '../lib/api';
+import { allLibrarySongs, songToComposerSong } from '../lib/composerLibrary';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -761,6 +762,15 @@ function keyRootAscii(keyName) {
   return keyName.replace('♯', '#').replace('♭', 'b');
 }
 
+// Map a library song's key (ASCII root + scaleType) to the composer's key name.
+// Minor keys use their relative major (same key signature and diatonic set).
+function songKeyToComposerKey(root, scaleType) {
+  let pc = NOTE_TO_SEMITONE[root];
+  if (pc == null) return null;
+  if (scaleType === 'minor') pc = (pc + 3) % 12;
+  return KEYS.find(k => k.pc === pc)?.name ?? null;
+}
+
 // Find the easiest playable voicing (lowest reach difficulty) for a chord name,
 // within the difficulty ceiling. Falls back to the easiest overall if none fit.
 function easiestVoicing(chordName, diffMax) {
@@ -1129,9 +1139,8 @@ function ExpertPicker({ beats, onInsert, musicKey, diffMax, want = 'chords', tr 
   );
 }
 
-function ProgressionPicker({ onInsert, diffMax, musicKey, tr }) {
+function ProgressionPicker({ onInsert, diffMax, musicKey, progName, setProgName, tr }) {
   const [open, setOpen] = useState(false);
-  const [progName, setProgName] = useState(MAJOR_PROGRESSIONS[0].name);
 
   const prog = useMemo(
     () => MAJOR_PROGRESSIONS.find(p => p.name === progName) ?? MAJOR_PROGRESSIONS[0],
@@ -1403,15 +1412,24 @@ function saveSongs(songs) {
   try { localStorage.setItem(SONGS_KEY, JSON.stringify(songs)); } catch {}
 }
 
-function SongManager({ beats, bpm, loop, capo, onLoad, onClose }) {
+function SongManager({ beats, bpm, loop, capo, musicKey, progName, onLoad, onClose }) {
   const [songs, setSongs] = useState(loadSongs);
   const [nameInput, setNameInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [libQuery, setLibQuery] = useState('');
+  const library = useMemo(() => allLibrarySongs(), []);
+
+  const filteredLibrary = useMemo(() => {
+    const q = libQuery.trim().toLowerCase();
+    if (!q) return library;
+    return library.filter(s =>
+      `${s.title} ${s.artist || ''}`.toLowerCase().includes(q));
+  }, [library, libQuery]);
 
   const handleSave = () => {
     const name = nameInput.trim();
     if (!name) return;
-    const song = { name, bpm, loop, capo: capo ?? 0, beats: beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null })), savedAt: Date.now() };
+    const song = { name, bpm, loop, capo: capo ?? 0, key: musicKey, progression: progName, beats: beats.map(b => ({ frets: b.frets, chordLabel: b.chordLabel ?? null })), savedAt: Date.now() };
     const updated = [...songs.filter(s => s.name !== name), song];
     saveSongs(updated);
     setSongs(updated);
@@ -1419,6 +1437,13 @@ function SongManager({ beats, bpm, loop, capo, onLoad, onClose }) {
   };
 
   const handleLoad = (song) => {
+    onLoad(song);
+    onClose();
+  };
+
+  const handleLoadLibrary = (s) => {
+    const song = songToComposerSong(s);
+    if (!song) return; // none of its chords are catalogued — nothing to load
     onLoad(song);
     onClose();
   };
@@ -1493,6 +1518,49 @@ function SongManager({ beats, bpm, loop, capo, onLoad, onClose }) {
           ))}
         </div>
       )}
+
+      {/* Song library — every song from the Progression tab (built-in + custom),
+          loadable as beats using the easiest voicing of each chord. */}
+      <div className="mt-3 pt-3 border-t border-surface-650">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-brand">Song library</span>
+          <span className="text-[10px] text-ink-ghost">{filteredLibrary.length} songs</span>
+        </div>
+        <input
+          value={libQuery}
+          onChange={e => setLibQuery(e.target.value)}
+          placeholder="Search title or artist…"
+          className="w-full px-3 py-1.5 rounded-lg text-xs outline-none mb-2 bg-surface-750 text-ink border border-surface-550"
+        />
+        {filteredLibrary.length === 0 ? (
+          <p className="text-xs text-center py-3 text-ink-ghost">No matching songs</p>
+        ) : (
+          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-0.5">
+            {filteredLibrary.slice(0, 60).map((s, i) => (
+              <div key={`${s.title}|${s.artist || ''}|${i}`}
+                className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-surface-750 border border-surface-650">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate text-ink">{s.title}</p>
+                  <p className="text-[10px] truncate text-ink-ghost">
+                    {s.custom ? 'My song' : s.artist}{!s.custom && s.year ? ` · ${s.year}` : ''}{s.key ? ` · ${s.key}${s.scaleType === 'minor' ? 'm' : ''}` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleLoadLibrary(s)}
+                  className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-brand"
+                  style={{ background: 'rgba(201,169,110,0.12)', border: '1px solid rgba(201,169,110,0.2)' }}>
+                  Load
+                </button>
+              </div>
+            ))}
+            {filteredLibrary.length > 60 && (
+              <p className="text-[10px] text-center py-1 text-ink-ghost">
+                Showing 60 of {filteredLibrary.length} — refine the search
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1506,6 +1574,7 @@ function MusicEditorMode({ diffMax, tr }) {
   const [loop, setLoop] = useState(false);
   const [showSongs, setShowSongs] = useState(false);
   const [musicKey, setMusicKey] = useState('C');
+  const [progName, setProgName] = useState(MAJOR_PROGRESSIONS[0].name);
   const [capo, setCapo] = useState(0); // capo fret (0 = none); raises pitch, eases reach
   const capoRef = useRef(capo);
   capoRef.current = capo;
@@ -1618,6 +1687,18 @@ function MusicEditorMode({ diffMax, tr }) {
     setBpm(song.bpm);
     setLoop(song.loop ?? false);
     setCapo(song.capo ?? 0);
+    // Adopt the song's key and progression when it carries them. Saved composer
+    // songs store the key as-is (♯/♭ glyph name); library songs carry an ASCII
+    // root + scaleType that needs mapping (minor → relative major).
+    if (song.key) {
+      const keyName = KEYS.some(k => k.name === song.key)
+        ? song.key
+        : songKeyToComposerKey(song.key, song.scaleType);
+      if (keyName) setMusicKey(keyName);
+    }
+    if (song.progression && MAJOR_PROGRESSIONS.some(p => p.name === song.progression)) {
+      setProgName(song.progression);
+    }
     setEditIdx(0);
     setPlayIdx(null);
     setIsPlaying(false);
@@ -1765,6 +1846,8 @@ function MusicEditorMode({ diffMax, tr }) {
           bpm={bpm}
           loop={loop}
           capo={capo}
+          musicKey={musicKey}
+          progName={progName}
           onLoad={loadSong}
           onClose={() => setShowSongs(false)}
         />
@@ -1774,7 +1857,7 @@ function MusicEditorMode({ diffMax, tr }) {
       <ExpertPicker beats={beats} onInsert={insertProgression} musicKey={musicKey} diffMax={diffMax} tr={tr} />
 
       {/* Progression picker — fills the track with a diatonic progression */}
-      <ProgressionPicker onInsert={insertProgression} diffMax={diffMax} musicKey={musicKey} tr={tr} />
+      <ProgressionPicker onInsert={insertProgression} diffMax={diffMax} musicKey={musicKey} progName={progName} setProgName={setProgName} tr={tr} />
 
       {/* Chord picker */}
       <ChordPicker onApply={applyChord} diffMax={diffMax} musicKey={musicKey} tr={tr} />

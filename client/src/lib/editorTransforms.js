@@ -364,6 +364,123 @@ export function transformCapoSuggestion(section, profile) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TRANSFORM — Cadence (rewrite the end of the selection as a classic cadence)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Each cadence is a chord pattern relative to the tonic: [semitones-from-root,
+// quality suffix]. Separate major/minor spellings so a minor-key song gets the
+// harmonically correct chords (e.g. V stays MAJOR in minor — harmonic minor).
+export const CADENCES = {
+  perfect:    { label: 'Perfect (V → I)',
+                major: [[7, ''], [0, '']],            minor: [[7, ''], [0, 'm']] },
+  plagal:     { label: 'Plagal (IV → I)',
+                major: [[5, ''], [0, '']],            minor: [[5, 'm'], [0, 'm']] },
+  half:       { label: 'Half (ends on V)',
+                major: [[0, ''], [7, '']],            minor: [[0, 'm'], [7, '']] },
+  deceptive:  { label: 'Deceptive (V → vi)',
+                major: [[7, ''], [9, 'm']],           minor: [[7, ''], [8, '']] },
+  jazz251:    { label: 'Jazz ii–V–I',
+                major: [[2, 'm7'], [7, '7'], [0, 'maj7']], minor: [[2, 'dim'], [7, '7'], [0, 'm']] },
+  andalusian: { label: 'Andalusian (i–♭VII–♭VI–V)',
+                major: [[9, 'm'], [7, ''], [5, ''], [4, '']], minor: [[0, 'm'], [10, ''], [8, ''], [7, '']] },
+};
+
+// Sharp-leaning pitch-class spelling (matches the chord library's names).
+const PC_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+// When the exact cadence chord has no shape on file, retry a simpler quality
+// (Dm7 → Dm, G7 → G, Bdim → Bm) so the cadence still lands, with a warning.
+const CADENCE_FALLBACK_SUFFIX = { maj7: '', m7: 'm', 7: '', dim: 'm' };
+
+// Resolve one cadence step to a concrete chord name + shape (with the quality
+// fallback). Returns { name, voicing, warnings } — voicing null when nothing
+// playable exists even after the fallback.
+function resolveCadenceStep(keyPc, interval, suffix) {
+  const root = PC_NAMES[(keyPc + interval) % 12];
+  let name = root + suffix;
+  let voicing = easiestVoicing(name);
+  const warnings = [];
+  if (!voicing && suffix in CADENCE_FALLBACK_SUFFIX) {
+    const simpler = root + CADENCE_FALLBACK_SUFFIX[suffix];
+    voicing = easiestVoicing(simpler);
+    if (voicing) {
+      warnings.push(`No ${name} shape on file — using ${simpler}.`);
+      name = simpler;
+    }
+  }
+  return { name, voicing, warnings };
+}
+
+/**
+ * Apply the chosen cadence, in the song's key.
+ *
+ * mode 'replace' (default): rewrite the TAIL of the marked section — cadences
+ * are endings, so the last N chords of the selection become the cadence's N
+ * chords; anything before them is left untouched. A selection shorter than the
+ * cadence gets the cadence's final chords.
+ *
+ * mode 'add': APPEND the full cadence as NEW chords after the selection — the
+ * caller inserts the returned `added` chords into the song (nothing existing
+ * changes).
+ *
+ * @returns {TransformResult & { kind:'cadence', meta }} for 'replace',
+ *          { kind:'cadenceAdd', added, warnings, meta } for 'add'.
+ */
+export function transformCadence(section, profile, opts = {}) {
+  const scoreFn = makeScoreFn(profile);
+  const def = CADENCES[opts.cadenceId] || CADENCES.perfect;
+  const pattern = section.scaleType === 'minor' ? def.minor : def.major;
+  const keyPc = NOTE_TO_SEMITONE[section.key] ?? 0;
+
+  if (opts.mode === 'add') {
+    const warnings = [];
+    const added = [];
+    for (const [interval, suffix] of pattern) {
+      const step = resolveCadenceStep(keyPc, interval, suffix);
+      warnings.push(...step.warnings);
+      if (!step.voicing) { warnings.push(`No playable shape for ${step.name} — skipped.`); continue; }
+      added.push({ name: step.name, tab: step.voicing.tab, notes: step.voicing.notes, score: round1(scoreFn(step.voicing.notes)) });
+    }
+    return {
+      kind: 'cadenceAdd',
+      added,
+      warnings,
+      meta: {
+        label: `${def.label} added after the selection: ${added.map(a => a.name).join(' – ') || '(nothing playable)'}`,
+        source: 'music theory',
+      },
+    };
+  }
+
+  const n = Math.min(pattern.length, section.chords.length);
+  const steps = pattern.slice(pattern.length - n);
+  const tailStart = section.chords.length - n;
+  const warnings = [];
+  if (section.chords.length < pattern.length) {
+    warnings.push(`Selection is shorter than the full ${def.label} — applied its last ${n} chord${n > 1 ? 's' : ''}.`);
+  }
+
+  const chords = section.chords.map((cell, i) => {
+    if (i < tailStart) return blankResult(cell, scoreFn);   // untouched lead-in
+    const [interval, suffix] = steps[i - tailStart];
+    const step = resolveCadenceStep(keyPc, interval, suffix);
+    if (!step.voicing) return blankResult(cell, scoreFn, `No playable shape for ${step.name} — kept ${cell.chordName}.`);
+    if (step.name === cell.chordName) return blankResult(cell, scoreFn);   // already that chord
+    return madeResult(cell, scoreFn, step.name, step.voicing, scoreFn(step.voicing.notes), step.warnings);
+  });
+
+  const res = rollUp(chords, section, warnings);
+  return {
+    kind: 'cadence',
+    ...res,
+    meta: {
+      label: `${def.label} in ${section.key}${section.scaleType === 'minor' ? 'm' : ''}`,
+      source: 'music theory',
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Musical transforms — shared helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
