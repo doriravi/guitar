@@ -1009,10 +1009,18 @@ function PracticeMode({ cfg, tr }) {
 // Root export
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function ChordListener({ lang }) {
+/**
+ * With no `mode` prop: the classic four-tool screen with its own sub-tab bar.
+ * With `mode` ('recorder' | 'practice' | 'game' | 'tune'): renders that single
+ * tool with no sub-tab bar — used by App.jsx, which now exposes Recorder,
+ * Practice and Tune as their own ☰-menu entries and keeps Play-Along as the
+ * main tab.
+ */
+export default function ChordListener({ lang, mode = null }) {
   const tr  = useT(lang);
   const [tab, setTab] = useState('recorder');
   const [cfg, setCfg] = useState(loadConfig);
+  const active = mode || tab;
 
   const TABS = [
     { id: 'recorder', icon: '🎤', label: 'Recorder' },
@@ -1023,22 +1031,24 @@ export default function ChordListener({ lang }) {
 
   return (
     <div className="p-3 sm:p-5">
-      <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: 'var(--color-surface-800)' }}>
-        {TABS.map(({ id, icon, label }) => (
-          <button key={id} onClick={() => setTab(id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
-            style={tab === id
-              ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
-              : { color: 'var(--color-ink-faint)' }}>
-            <span>{icon}</span><span>{label}</span>
-          </button>
-        ))}
-      </div>
+      {!mode && (
+        <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: 'var(--color-surface-800)' }}>
+          {TABS.map(({ id, icon, label }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
+              style={tab === id
+                ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
+                : { color: 'var(--color-ink-faint)' }}>
+              <span>{icon}</span><span>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === 'recorder' && <RecorderMode cfg={cfg} />}
-      {tab === 'practice' && <PracticeMode cfg={cfg} tr={tr} />}
-      {tab === 'game'     && <PracticeGame cfg={cfg} />}
-      {tab === 'tune'     && <TuneMode cfg={cfg} setCfg={setCfg} />}
+      {active === 'recorder' && <RecorderMode cfg={cfg} />}
+      {active === 'practice' && <PracticeMode cfg={cfg} tr={tr} />}
+      {active === 'game'     && <PracticeGame cfg={cfg} />}
+      {active === 'tune'     && <TuneMode cfg={cfg} setCfg={setCfg} />}
     </div>
   );
 }

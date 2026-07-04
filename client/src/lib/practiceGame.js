@@ -385,9 +385,12 @@ export function bestForSong(songKey) {
   return done.reduce((a, b) => (b.speedAdjAccuracy > a.speedAdjAccuracy ? b : a));
 }
 
-/** The previous completed run at the same speed — the "ghost" to beat. */
+/** The previous completed run at the same starting speed (difficulty) — the
+ *  "ghost" to beat. Ramped runs end faster than they started, so the starting
+ *  speed is the comparable label; older records without startSpeed fall back
+ *  to their (then-fixed) speed. */
 export function ghostForSong(songKey, speed) {
   return sessionsForSong(songKey).find(
-    s => s.completed && s.speed === speed && Array.isArray(s.scoreTimeline) && s.scoreTimeline.length,
+    s => s.completed && (s.startSpeed ?? s.speed) === speed && Array.isArray(s.scoreTimeline) && s.scoreTimeline.length,
   ) || null;
 }
