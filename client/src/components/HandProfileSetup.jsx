@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { DEFAULT_PROFILE, abilityLabel, reachMultiplier, flexibilityScore, flexibilityLabel } from '../lib/handProfile';
 import CameraHandMeasure from './CameraHandMeasure';
 import { useT } from '../lib/i18n';
+import { handAnalysis } from '../lib/api';
 
 const GAPS = [
   { key: 'thumbToIndex',  labelKey: 'thumbIndex',  descKey: 'thumbIndexTip',  range: [8, 18],  step: 0.5, color: '#a78bfa', fingers: ['T','I'] },
@@ -251,71 +252,11 @@ function AIHandAnalysis({ lang, onMeasured }) {
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY is not set. Add it to your .env.local file.');
-
-      const SYSTEM = `You are a guitar biomechanics expert. Analyze this left hand photo and estimate the player's finger gap measurements and chord reach capability.
-
-Measure the visible spread distances between adjacent fingertips when the hand is splayed:
-- thumb_to_index_cm: distance in cm between thumb tip and index tip (range 8-18)
-- index_to_middle_cm: distance in cm between index and middle fingertips (range 4-12)
-- middle_to_ring_cm: distance in cm between middle and ring fingertips (range 3-10)
-- ring_to_pinky_cm: distance in cm between ring and pinky fingertips (range 5-14)
-
-Also assess each finger individually:
-- thumb: length category (Short/Medium/Long), flexibility (Low/Medium/High), note about guitar technique impact
-- index: length (Short/Medium/Long), straightness (Curved/Straight), barre chord suitability
-- middle: length (Short/Medium/Long), independence from ring finger (Low/Medium/High)
-- ring: length (Short/Medium/Long), independence (Low/Medium/High)
-- pinky: length (Short/Medium/Long), reach (Weak/Moderate/Strong), note about 4th finger use
-
-Grades: 1=Open chords, 2=Drop-2/jazz voicings, 3=Full barre/minor9ths, 4=Hendrix thumb/5-fret stretches, 5=Holdsworth wide voicings.
-
-Return ONLY valid JSON, no markdown fences, no extra text. Keep all description strings under 60 chars:
-{"measurements":{"thumb_to_index_cm":13.5,"index_to_middle_cm":7.5,"middle_to_ring_cm":6.0,"ring_to_pinky_cm":9.5},"biomechanical_profile":{"absolute_span_assessment":"Small|Medium|Large","inferred_flexibility_splay":"Low|Medium|High","fingers":{"thumb":{"length":"Short|Medium|Long","flexibility":"Low|Medium|High","note":"<15 words>"},"index":{"length":"Short|Medium|Long","straightness":"Curved|Straight","note":"<15 words>"},"middle":{"length":"Short|Medium|Long","independence":"Low|Medium|High","note":"<15 words>"},"ring":{"length":"Short|Medium|Long","independence":"Low|Medium|High","note":"<15 words>"},"pinky":{"length":"Short|Medium|Long","reach":"Weak|Moderate|Strong","note":"<15 words>"}}},"chord_capability_grades":[{"grade_level":"Grade 1","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 2","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 3","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 4","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"},{"grade_level":"Grade 5","status":"Optimal|Challenging|Structurally Restricted","supported_voicings":["chord1","chord2"],"anatomical_reasoning":"<20 words>"}],"recommended_focus":"<25 words>"}`;
-
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 3000,
-          system: SYSTEM,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-              { type: 'text', text: 'Analyze this hand photo and return the biomechanical JSON report.' },
-            ],
-          }],
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        const msg = data?.error?.message || `Claude API error ${res.status}`;
-        throw new Error(msg);
-      }
-      let text = data.content[0].text.trim();
-      if (text.startsWith('```')) { text = text.replace(/^```[a-z]*\n?/, '').replace(/```\s*$/, '').trim(); }
-      // Find the outermost JSON object by tracking brace depth
-      let start = text.indexOf('{');
-      if (start === -1) throw new Error('No JSON object found in response.');
-      let depth = 0, end = -1;
-      for (let i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++;
-        else if (text[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
-      }
-      const jsonStr = end !== -1 ? text.slice(start, end + 1) : text.slice(start);
-      let parsed;
-      try {
-        parsed = JSON.parse(jsonStr);
-      } catch (parseErr) {
-        throw new Error(`Claude returned malformed JSON: ${parseErr.message}\n\nRaw response (first 300 chars):\n${text.slice(0, 300)}`);
+      // The Anthropic key and biomechanics prompt live on the backend
+      // (ClaudeHandAnalysisController) — the browser only ships the photo.
+      const parsed = await handAnalysis.claude(b64);
+      if (!parsed || !parsed.biomechanical_profile) {
+        throw new Error('Analysis returned no report. Please retake the photo and try again.');
       }
       setReport(parsed);
       setPhase('done');

@@ -28,6 +28,12 @@ function isDefaultProfile(p) {
 export const HandProfileContext = createContext(DEFAULT_PROFILE);
 export function useHandProfile() { return useContext(HandProfileContext); }
 
+// Global "limit me to my reach & flexibility" preference. When on, the whole app
+// steers toward chord shapes the user can comfortably play (easier voicings are
+// auto-preferred, out-of-reach shapes are flagged). Read via useReachLimit().
+export const ReachLimitContext = createContext(false);
+export function useReachLimit() { return useContext(ReachLimitContext); }
+
 export const AIFingerContext = createContext(null);
 export function useAIFingers() { return useContext(AIFingerContext); }
 
@@ -45,6 +51,10 @@ function loadLocalProfile() {
     if (raw) return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
   } catch {}
   return DEFAULT_PROFILE;
+}
+
+function loadLimitToReach() {
+  try { return localStorage.getItem('guitar_limit_to_reach') === '1'; } catch { return false; }
 }
 
 function getTokenFromUrl(param) {
@@ -94,6 +104,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('start');
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
+  const [limitToReach, setLimitToReach] = useState(loadLimitToReach);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -120,6 +131,13 @@ export default function App() {
     if (currentUser) {
       userApi.update({ language: code }).catch(() => {});
     }
+  }
+
+  // Toggle the app-wide "limit to my reach & flexibility" preference (persisted
+  // locally so it survives reloads and applies whether signed in or not).
+  function handleLimitToReach(on) {
+    setLimitToReach(on);
+    try { localStorage.setItem('guitar_limit_to_reach', on ? '1' : '0'); } catch {}
   }
 
   // When a session is restored or a user signs in, switch the UI to the language
@@ -402,6 +420,7 @@ export default function App() {
       <LangContext.Provider value={lang}>
       <AIFingerContext.Provider value={aiFingers}>
       <HandProfileContext.Provider value={handProfile}>
+      <ReachLimitContext.Provider value={limitToReach}>
         <div className="min-h-screen bg-surface-base">
           {showSettings && currentUser && (
             <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
@@ -415,6 +434,8 @@ export default function App() {
                     onDeleted={handleDeleted}
                     lang={lang}
                     onLangSelect={handleLangSelect}
+                    limitToReach={limitToReach}
+                    onLimitToReachChange={handleLimitToReach}
                   />
                 </div>
               </div>
@@ -440,6 +461,7 @@ export default function App() {
             </div>
           </main>
         </div>
+      </ReachLimitContext.Provider>
       </HandProfileContext.Provider>
       </AIFingerContext.Provider>
       </LangContext.Provider>
@@ -451,6 +473,7 @@ export default function App() {
     <LangContext.Provider value={lang}>
     <AIFingerContext.Provider value={aiFingers}>
     <HandProfileContext.Provider value={handProfile}>
+    <ReachLimitContext.Provider value={limitToReach}>
       <div className="min-h-screen bg-surface-base">
 
         {showAuth && !showForgot && (
@@ -494,6 +517,8 @@ export default function App() {
                   onDeleted={handleDeleted}
                   lang={lang}
                   onLangSelect={handleLangSelect}
+                  limitToReach={limitToReach}
+                  onLimitToReachChange={handleLimitToReach}
                 />
               </div>
             </div>
@@ -618,6 +643,7 @@ export default function App() {
         {/* Floating AI advisor — music-theory + guitar + this-app consultant */}
         <AdvisorWidget activeTab={activeTab} />
       </div>
+    </ReachLimitContext.Provider>
     </HandProfileContext.Provider>
     </AIFingerContext.Provider>
     </LangContext.Provider>

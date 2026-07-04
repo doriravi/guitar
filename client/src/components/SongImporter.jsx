@@ -1,12 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
 import { parseChordSheet, keyLabel } from '../lib/chordSheetParser';
-import { loadCustomSongs, addCustomSong, updateCustomSong, deleteCustomSong, songToText } from '../lib/customSongs';
+import { loadCustomSongs, addCustomSong, updateCustomSong, deleteCustomSong, songToText, saveCustomSong } from '../lib/customSongs';
+import { chordSheet as chordSheetApi } from '../lib/api';
 import { ALL_BUILTIN_SONGS } from '../lib/songs';
 import { getDiatonicChords } from '../lib/scales';
+import SongEditor from './SongEditor';
+import ChordTip from './ChordTip';
+import { useHandProfile } from '../App';
 
-// Paste a chord sheet → parse to structured song data → review/edit → save to
-// the browser. Saved songs are listed below; each can be edited (manually or by
-// re-pasting) or removed.
+// Import a song BY NAME: the generate-music-data pipeline fetches the real
+// chord sheet through the backend (/api/chordsheet), parses it into the app's
+// structured song shape, and saves it straight into the user's imported songs
+// (localStorage, plus the DB when logged in). Pasting a sheet by hand remains
+// as the manual fallback. Saved songs are listed below; each can be edited or
+// removed.
 
 export default function SongImporter() {
   const [text, setText] = useState('');
@@ -16,8 +23,47 @@ export default function SongImporter() {
   const [savedMsg, setSavedMsg] = useState('');
   const [editingId, setEditingId] = useState(null); // id when editing an existing song
   const [search, setSearch] = useState('');          // catalog search box
+  const [nameQuery, setNameQuery] = useState('');    // import-by-name: song title
+  const [artistQuery, setArtistQuery] = useState(''); // import-by-name: optional artist
+  const [fetching, setFetching] = useState(false);
+  const [fetchErr, setFetchErr] = useState('');
+  const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
+  const editorProfile = useHandProfile();
 
   useEffect(() => { setSaved(loadCustomSongs()); }, []);
+
+  // Import by name — the whole generate-music-data pipeline in one click:
+  // fetch the REAL sheet (actual chords + full lyrics) → parse → save as an
+  // imported song. The saved song then behaves exactly like a pasted one.
+  const handleImportByName = async () => {
+    const title = nameQuery.trim();
+    if (!title || fetching) return;
+    setFetching(true); setFetchErr(''); setSavedMsg('');
+    try {
+      const res = await chordSheetApi.fetch(artistQuery.trim(), title); // { url, text }
+      const { song, warnings: warns } = parseChordSheet(res.text);
+      const withMeta = { ...song, custom: true, sourceUrl: res.url };
+      // Saves locally right away; also pushes to the DB when logged in (a
+      // logged-out save simply syncs on the next login).
+      const list = await saveCustomSong(withMeta, true);
+      setSaved(list);
+      const savedSong = list.find(s =>
+        (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
+      // Drop it into the review editor so it can be tweaked immediately.
+      setEditingId(savedSong.id || null);
+      setParsed(savedSong);
+      setText(songToText(savedSong));
+      setWarnings(warns);
+      setSavedMsg(`Imported “${song.title}” — saved to your songs. Review below and Update if you tweak anything.`);
+      setNameQuery(''); setArtistQuery('');
+    } catch (e) {
+      setFetchErr(e?.status === 404
+        ? 'No chord sheet found for that name — check the spelling, or add the artist.'
+        : 'The chord-sheet service is unavailable right now — is the backend running?');
+    } finally {
+      setFetching(false);
+    }
+  };
 
   // Full catalog (built-ins) filtered by the search box.
   const catalog = useMemo(() => {
@@ -66,14 +112,11 @@ export default function SongImporter() {
     setEditingId(null);
   };
 
-  // Load a saved song into the editor (fields + re-pastable text) for editing.
+  // Edit opens the SAME full-screen Song Editor the Progressions tab uses
+  // (section transforms, easier voicings, capo, melody…). It saves through
+  // saveCustomSong itself; we just reload the list when it closes.
   const handleEdit = (song) => {
-    setEditingId(song.id);
-    setParsed(song);
-    setText(songToText(song));
-    setWarnings([]);
-    setSavedMsg('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setEditorSong(song);
   };
 
   const cancelEdit = () => {
@@ -91,14 +134,59 @@ export default function SongImporter() {
 
   return (
     <div className="p-3 sm:p-5 max-w-3xl mx-auto">
+      {editorSong && (
+        <SongEditor
+          song={editorSong}
+          profile={editorProfile}
+          onClose={() => { setEditorSong(null); setSaved(loadCustomSongs()); }}
+        />
+      )}
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--color-ink)' }}>
         {editingId ? 'Edit song' : 'Import a song'}
       </h2>
       <p className="text-sm mb-4" style={{ color: 'var(--color-ink-faint)' }}>
         {editingId
           ? 'Edit the text below and Parse to re-read it, or change the fields in the preview, then Update.'
-          : 'Paste a chord sheet (chords on their own line above each lyric line, like Ultimate Guitar). We turn it into a playable song with your hand-friendly chords and save it in this browser.'}
+          : 'Type a song name — we fetch its real chord sheet (actual chords + full lyrics) and save it straight to your songs.'}
       </p>
+
+      {/* ── Import by name (primary) ── */}
+      {!editingId && (
+        <div className="rounded-xl p-4 mb-5" style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-700)' }}>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              value={nameQuery}
+              onChange={e => { setNameQuery(e.target.value); setFetchErr(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') handleImportByName(); }}
+              placeholder="Song name — e.g. Autumn Leaves"
+              className="flex-1 text-sm rounded-lg px-3 py-2 outline-none"
+              style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
+            />
+            <input
+              value={artistQuery}
+              onChange={e => setArtistQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleImportByName(); }}
+              placeholder="Artist (optional)"
+              className="sm:w-48 text-sm rounded-lg px-3 py-2 outline-none"
+              style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
+            />
+            <button
+              onClick={handleImportByName}
+              disabled={!nameQuery.trim() || fetching}
+              className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
+              style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
+            >
+              {fetching ? 'Fetching…' : 'Import'}
+            </button>
+          </div>
+          {fetchErr && (
+            <div className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{fetchErr}</div>
+          )}
+          <p className="text-[10px] mt-2" style={{ color: 'var(--color-ink-ghost)' }}>
+            Fetches the real published sheet, structures it, and saves it to your songs — it then shows up in the Progressions tab under whatever progression its chords match. Or paste a sheet by hand below.
+          </p>
+        </div>
+      )}
 
       <textarea
         value={text}
@@ -171,7 +259,9 @@ export default function SongImporter() {
             <span className="text-[10px] mr-1 self-center" style={{ color: 'var(--color-ink-faint)' }}>Detected chords:</span>
             {(parsed.chords?.length)
               ? parsed.chords.map((c, i) => (
-                  <span key={i} className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-brand)' }}>{c}</span>
+                  <ChordTip key={i} name={c}>
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-brand)' }}>{c}</span>
+                  </ChordTip>
                 ))
               : <span className="text-[11px] italic" style={{ color: 'var(--color-danger)' }}>none — check the format</span>}
           </div>
@@ -182,7 +272,11 @@ export default function SongImporter() {
               ? parsed.lyricLines.map((ln, i) => (
                   <div key={i} className="mb-1">
                     {ln.chordNames?.length > 0 && (
-                      <div className="font-bold" style={{ color: 'var(--color-accent)' }}>{ln.chordNames.join('  ')}</div>
+                      <div className="font-bold" style={{ color: 'var(--color-accent)' }}>
+                        {ln.chordNames.map((n, k) => (
+                          <ChordTip key={k} name={n}><span className="mr-2">{n}</span></ChordTip>
+                        ))}
+                      </div>
                     )}
                     <div style={{ color: 'var(--color-ink-subtle)' }}>{ln.text || ' '}</div>
                   </div>

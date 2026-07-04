@@ -11,80 +11,42 @@
 // screen, the marking UX, and the audio preview wiring (playEvents / playProgression
 // / stopAudio / unlockAudio from audio.js).
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { getDiatonicChords } from '../lib/scales';
-import { enrichChords, alignChordsToLyrics } from '../lib/lyricChords';
+import { useState, useMemo, useRef, useEffect, useCallback, Fragment } from 'react';
+import { alignChordsToLyrics } from '../lib/lyricChords';
+import { resolveChordCells } from '../lib/songTimeline';
 import { lookupVoicings, easiestVoicing, allChordNames } from '../lib/voicingLookup';
+import { isWithinReach } from '../lib/handProfile';
 import { songBpm } from '../lib/songs';
 import { compose as composeApi, lyrics as lyricsApi } from '../lib/api';
-import { playProgression, playEvents, stopAudio, unlockAudio } from '../lib/audio';
+import { playProgression, playEvents, playBacking, stopAudio, unlockAudio } from '../lib/audio';
+import { singLines, stopSinging, listVoices, onVoicesReady, vocalsSupported } from '../lib/vocals';
 import {
   buildMarkedSection,
   transformMoveUpFrets,
   transformEasierVoicings,
   transformCapoSuggestion,
+  transformCadence,
   transformRhythm,
   composeWithAI,
   tabToEvents,
   RHYTHM_PATTERNS,
   STYLE_PRESETS,
+  CADENCES,
 } from '../lib/editorTransforms';
-import { saveCustomSong } from '../lib/customSongs';
-import { useAuth } from '../App';
+import { saveCustomSong, songToText } from '../lib/customSongs';
+import { parseChordSheet } from '../lib/chordSheetParser';
+import { useAuth, useReachLimit } from '../App';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
-
-// Build the flat per-cell chord timeline for a song (one entry per chord beat-
-// cell, NOT deduplicated). Mirrors ProgressionExplorer's chord resolution so the
-// editor sees the same chords the song shows.
-function buildTimeline(song) {
-  // Custom (saved) song: source of truth is its lyricLines, in order.
-  if (song.lyricLines && song.lyricLines.length) {
-    const seq = [];
-    for (const ln of song.lyricLines) {
-      for (const name of (ln.chordNames || [])) {
-        const voicings = lookupVoicings(name).slice().sort((a, b) => a.score - b.score);
-        seq.push({ chordName: name, voicings, degree: null, roman: null });
-      }
-    }
-    if (seq.length) return seq;
-  }
-
-  if (!song.degrees || !song.degrees.length) return [];
-  const diatonic = getDiatonicChords(song.key, song.scaleType);
-  const baseNames = song.degrees.map(d => diatonic[d].chordName);
-
-  let finalNames;
-  if (song.chords && song.chords.length) {
-    finalNames = song.degrees.map((_, i) => song.chords[i] || baseNames[i]);
-  } else if (song.qualities) {
-    finalNames = baseNames.map((base, i) => {
-      const quality = song.qualities[i] || '';
-      if (!quality) return base;
-      const m = base.match(/^([A-G][#b]?)(.*)$/);
-      const root = m ? m[1] : base;
-      const triadSuffix = m ? m[2] : '';
-      return /^(m|dim|aug|sus|maj|add|°)/.test(quality) ? root + quality : root + triadSuffix + quality;
-    });
-  } else if (song.lineChords || song.exact) {
-    finalNames = baseNames;
-  } else {
-    finalNames = enrichChords(song.degrees, baseNames, song.scaleType);
-  }
-
-  return song.degrees.map((d, i) => {
-    const chordName = finalNames[i];
-    const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
-    const dia = diatonic[d];
-    return { chordName, voicings, degree: d, roman: dia?.roman ?? null };
-  });
-}
+import NoteStaff from './NoteStaff';
+import { chordToneNames } from '../lib/notation';
 
 const TRANSFORMS = [
   { id: 'manual', label: '✎ Edit chords', kind: 'manual' },
   { id: 'moveUp', label: 'Move up frets', kind: 'reach' },
   { id: 'easier', label: 'Easier voicings', kind: 'reach' },
   { id: 'capo', label: 'Capo', kind: 'reach' },
+  { id: 'cadence', label: 'Cadence', kind: 'harmony' },
   { id: 'melody', label: '+ Melody', kind: 'musical' },
   { id: 'rhythm', label: 'Rhythm', kind: 'musical' },
   { id: 'style', label: 'Style', kind: 'musical' },
@@ -93,11 +55,22 @@ const TRANSFORMS = [
 const DENSITIES = ['sparse', 'medium', 'busy'];
 const CONTOURS = ['arch', 'ascending', 'descending', 'wave', 'static'];
 
-export default function SongEditor({ song, profile, onClose }) {
+export default function SongEditor({ song: initialSong, profile, onClose }) {
   const currentUser = useAuth();
+  const limitToReach = useReachLimit();
   const [saveMsg, setSaveMsg] = useState(null);   // { type: 'ok'|'err', text }
   const [saving, setSaving] = useState(false);
-  const timeline = useMemo(() => buildTimeline(song), [song]);
+
+  // The editable working copy. Everything downstream (timeline, sheet, transforms,
+  // audio, save) reads `song` — so pointing it at a state copy means the plain-text
+  // "Notepad" editor can rewrite the whole song (lyrics + chords) by parsing the
+  // edited text back into this object, and every existing feature keeps working on
+  // the new content with no other change.
+  const [song, setSong] = useState(initialSong);
+  // Re-seed if the parent opens a different song.
+  useEffect(() => { setSong(initialSong); }, [initialSong]);
+
+  const timeline = useMemo(() => resolveChordCells(song), [song]);
   const chordNames = useMemo(() => allChordNames(), []);
   const bpm = song.bpm ?? songBpm(song.title) ?? 100;
   const meta = useMemo(
@@ -114,6 +87,17 @@ export default function SongEditor({ song, profile, onClose }) {
   const [sheetStatus, setSheetStatus] = useState(isCustom ? 'done' : 'loading');
   const [lyricsText, setLyricsText] = useState('');
   const [sheetOpen, setSheetOpen] = useState(true);
+
+  // ─── Plain-text ("Notepad") editing ──────────────────────────────────────────
+  // A full free-text editor for the whole song — chords AND lyrics as one editable
+  // chord-sheet (the same format Import uses). Toggling it on serializes the current
+  // working song to text; applying re-parses that text back into the working song,
+  // so every other feature (marking, transforms, sing, play, save) then operates on
+  // the edited content. Live overrides can't survive an arbitrary text rewrite, so
+  // applying text clears them.
+  const [textMode, setTextMode] = useState(false);
+  const [draftText, setDraftText] = useState('');
+  const [textWarnings, setTextWarnings] = useState([]);
 
   useEffect(() => {
     if (isCustom) { setSheetStatus('done'); return; }
@@ -179,10 +163,27 @@ export default function SongEditor({ song, profile, onClose }) {
 
   // When there are no lyric lines, fall back to marking the bare timeline chords —
   // one cell per timeline entry, still per-occurrence.
-  const cells = useMemo(
+  const baseCells = useMemo(
     () => (sheetCells.length ? sheetCells : timeline.map((c, i) => ({ ...c, pos: i }))),
     [sheetCells, timeline],
   );
+
+  // With "limit to my reach" on, promote each chord's easiest IN-REACH voicing to
+  // the front so the default shape shown/played/notated everywhere in the editor
+  // is one the user can comfortably play. Falls back to the overall easiest when
+  // no catalogued shape qualifies, so every chord stays playable.
+  const cells = useMemo(() => {
+    if (!limitToReach) return baseCells;
+    return baseCells.map(cell => {
+      const vs = cell.voicings;
+      if (!vs || vs.length < 2) return cell;
+      if (isWithinReach(vs[0].score, profile)) return cell; // already easiest & in reach
+      const idx = vs.findIndex(v => isWithinReach(v.score, profile));
+      if (idx <= 0) return cell;                             // none in reach → leave as is
+      const reordered = [vs[idx], ...vs.slice(0, idx), ...vs.slice(idx + 1)];
+      return { ...cell, voicings: reordered };
+    });
+  }, [baseCells, limitToReach, profile]);
 
   // Marking: tap a cell = start; tap another = end (range). Tap inside clears.
   const [markStart, setMarkStart] = useState(null);
@@ -193,6 +194,10 @@ export default function SongEditor({ song, profile, onClose }) {
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState({});       // pos -> { name, tab, notes } overrides
   const [melodyTrack, setMelodyTrack] = useState(null); // applied melody events
+  // Chords ADDED to the song (cadence "add" mode): pos -> [{ name, tab, notes }]
+  // inserted right after that cell. They render as green "+chord" chips, play in
+  // both Play paths, and are baked into the saved lyric lines.
+  const [insertions, setInsertions] = useState({});
 
   // Transform options.
   const [moveStyle, setMoveStyle] = useState('barre');
@@ -204,10 +209,101 @@ export default function SongEditor({ song, profile, onClose }) {
   const [feel, setFeel] = useState('straight');
   const [presetId, setPresetId] = useState('folk');
   const [useAI, setUseAI] = useState(false);
+  const [cadenceId, setCadenceId] = useState('perfect');
+  const [cadenceMode, setCadenceMode] = useState('replace'); // 'replace' ending | 'add' after selection
 
   // Preview playback.
   const [playing, setPlaying] = useState(false);
+  // The cell position currently sounding — highlighted live in the sheet so you
+  // can follow along, karaoke-style, with whatever chord is playing right now.
+  const [playingPos, setPlayingPos] = useState(null);
+  const highlightTimers = useRef([]);
   const loopEnabled = useRef(false);
+
+  // Schedule the live chord highlight to track playback: `marks` is a list of
+  // { pos, at } (seconds from now) telling us when each cell starts sounding.
+  // Clears any prior schedule first so loops and re-plays don't stack.
+  const scheduleHighlight = useCallback((marks) => {
+    highlightTimers.current.forEach(clearTimeout);
+    highlightTimers.current = [];
+    for (const m of marks) {
+      highlightTimers.current.push(
+        setTimeout(() => setPlayingPos(m.pos), Math.max(0, m.at * 1000)),
+      );
+    }
+  }, []);
+  const clearHighlight = useCallback(() => {
+    highlightTimers.current.forEach(clearTimeout);
+    highlightTimers.current = [];
+    setPlayingPos(null);
+  }, []);
+
+  // Keep the currently-playing chord scrolled into view inside the song sheet so
+  // you can follow along without hunting for it.
+  const sheetScrollRef = useRef(null);
+  useEffect(() => {
+    if (playingPos == null || !sheetScrollRef.current) return;
+    const el = sheetScrollRef.current.querySelector(`[data-cell-pos="${playingPos}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [playingPos]);
+  // Backing band: play drums/bass under the guitar (applies on the next Play).
+  const [drumsOn, setDrumsOn] = useState(false);
+  const [bassOn, setBassOn] = useState(false);
+
+  // Vocals: a human voice that "sings" the lyrics along with the guitar (browser
+  // TTS, paced to the beat). The user picks from the installed system voices —
+  // different types/genders/accents. Off by default.
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceId, setVoiceId] = useState('');
+  const [voices, setVoices] = useState([]);
+  const stopVocalsRef = useRef(null);
+  useEffect(() => {
+    if (!vocalsSupported()) return;
+    const unsub = onVoicesReady((list) => {
+      setVoices(list);
+      // Default to the first English voice (or the first voice) once loaded.
+      setVoiceId(prev => prev || (list.find(v => /^en/i.test(v.lang)) || list[0])?.id || '');
+    });
+    return unsub;
+  }, []);
+  const stopVocals = useCallback(() => {
+    if (stopVocalsRef.current) { stopVocalsRef.current(); stopVocalsRef.current = null; }
+    stopSinging();
+  }, []);
+
+  // Build timed lyric lines to sing over playback. Each sheet line becomes one
+  // sung phrase, started at the beat where its FIRST chord sounds and paced to
+  // last until the next line's chord. `beatAtPos` maps a cell position → its beat
+  // offset in the current play scope; `spb` = seconds per beat; `lead` matches the
+  // audio scheduler's start offset so the voice lands with the guitar. `melody`
+  // gently rises/falls per line so the delivery lilts instead of monotone.
+  const buildSungLines = useCallback((beatAtPos, spb, lead, songBeats, { onlyKnownBeats = false } = {}) => {
+    if (!sheetLines.length) return [];
+    // First-chord beat + text for every non-blank line. When onlyKnownBeats is set
+    // (selection playback), skip lines whose first chord isn't in this scope's
+    // beat map so we sing only the marked run, not the whole sheet.
+    const raw = [];
+    for (const line of sheetLines) {
+      if (line.blank || !line.segments?.length) continue;
+      const text = line.segments.map(s => s.text).filter(Boolean).join(' ').trim();
+      if (!text) continue;
+      const firstPos = line.segments[0].pos;
+      if (onlyKnownBeats && beatAtPos[firstPos] == null) continue;
+      const beat = beatAtPos[firstPos] ?? (firstPos * songBeats);
+      raw.push({ text, beat });
+    }
+    raw.sort((a, b) => a.beat - b.beat);
+    return raw.map((r, i) => {
+      const nextBeat = i + 1 < raw.length ? raw[i + 1].beat : r.beat + songBeats;
+      const durBeats = Math.max(1, nextBeat - r.beat);
+      return {
+        text: r.text,
+        at: lead + r.beat * spb,
+        dur: durBeats * spb,
+        melody: Math.sin(i * 0.9),   // -1..1 lilt across successive lines
+      };
+    });
+  }, [sheetLines]);
 
   // Hover tooltip: the chord shape (fretboard diagram) for the cell under the cursor.
   const [tooltip, setTooltip] = useState(null); // { voicing, x, y }
@@ -231,7 +327,42 @@ export default function SongEditor({ song, profile, onClose }) {
     return cells[pos]?.voicings?.[0] || null;
   };
 
-  useEffect(() => () => { loopEnabled.current = false; stopAudio(); }, []);
+  // ─── Note sheet ──────────────────────────────────────────────────────────────
+  // A treble-clef staff of the song's chords (the actual notes each voicing plays),
+  // rendered from the SAME per-cell chord sequence the sheet uses (applied edits
+  // included). Consecutive repeats of the same chord+shape collapse to one column;
+  // each column remembers the cell positions it covers so it lights up in sync with
+  // the live play highlight.
+  const [noteSheetOpen, setNoteSheetOpen] = useState(false);
+  const noteColumns = useMemo(() => {
+    const cols = [];
+    cells.forEach((cell, pos) => {
+      const ov = applied[pos];
+      const name = ov?.name || cell.chordName || '';
+      const tab = ov?.tab || cell.voicings?.[0]?.tab || '';
+      if (!tab) return;
+      const prev = cols[cols.length - 1];
+      if (prev && prev.name === name && prev.tab === tab) {
+        prev.positions.push(pos);           // extend the run
+      } else {
+        cols.push({ name, tab, positions: [pos] });
+      }
+    });
+    return cols;
+  }, [cells, applied]);
+  // Which note-sheet column is sounding now (maps the live playingPos onto a column).
+  const activeNoteCol = useMemo(() => {
+    if (playingPos == null) return null;
+    const i = noteColumns.findIndex(c => c.positions.includes(playingPos));
+    return i === -1 ? null : i;
+  }, [noteColumns, playingPos]);
+
+  useEffect(() => () => {
+    loopEnabled.current = false;
+    stopAudio();
+    stopSinging();
+    highlightTimers.current.forEach(clearTimeout);
+  }, []);
 
   const hasMark = markStart != null && markEnd != null;
 
@@ -256,6 +387,10 @@ export default function SongEditor({ song, profile, onClose }) {
     if (!res || !sec) return;
     if (res.kind === 'melody') {
       setMelodyTrack({ start: sec.start, events: res.events });
+    } else if (res.kind === 'cadenceAdd') {
+      if (res.added?.length) {
+        setInsertions(prev => ({ ...prev, [sec.end]: res.added.map(a => ({ name: a.name, tab: a.tab, notes: a.notes })) }));
+      }
     } else if (res.kind === 'style' && res.voicings) {
       setApplied(prev => {
         const next = { ...prev };
@@ -283,7 +418,7 @@ export default function SongEditor({ song, profile, onClose }) {
   const runTransform = useCallback(async (id, overrides = {}) => {
     if (!section) return;
     const o = {
-      moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI,
+      moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI, cadenceId, cadenceMode,
       ...overrides,
     };
     setBusy(true);
@@ -298,6 +433,9 @@ export default function SongEditor({ song, profile, onClose }) {
           break;
         case 'capo':
           res = transformCapoSuggestion(section, profile);
+          break;
+        case 'cadence':
+          res = transformCadence(section, profile, { cadenceId: o.cadenceId, mode: o.cadenceMode });
           break;
         case 'rhythm':
           res = transformRhythm(section, { patternId: o.patternId, feel: o.feel });
@@ -318,7 +456,7 @@ export default function SongEditor({ song, profile, onClose }) {
     } finally {
       setBusy(false);
     }
-  }, [section, profile, moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI, applyResult]);
+  }, [section, profile, moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI, cadenceId, cadenceMode, applyResult]);
 
   const selectTransform = (id) => {
     setTransformId(id);
@@ -332,7 +470,7 @@ export default function SongEditor({ song, profile, onClose }) {
   useEffect(() => {
     if (transformId && transformId !== 'manual') runTransform(transformId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI]);
+  }, [moveStyle, allowQuality, density, contour, seed, patternId, feel, presetId, useAI, cadenceId, cadenceMode]);
 
   const transformMeta = TRANSFORMS.find(t => t.id === transformId);
   const isMusical = transformMeta?.kind === 'musical';
@@ -343,7 +481,7 @@ export default function SongEditor({ song, profile, onClose }) {
   // specific voicing. Writes an `applied` override keyed by position, exactly like
   // the auto-transforms, so the sheet, audio, and Save all pick it up uniformly.
   const setChordAt = (pos, chordName) => {
-    const v = easiestVoicing(chordName);
+    const v = easiestVoicing(chordName, { profile, limitToReach });
     if (!v) return;
     setApplied(prev => ({ ...prev, [pos]: { name: chordName, tab: v.tab, notes: v.notes, type: v.type } }));
   };
@@ -352,6 +490,10 @@ export default function SongEditor({ song, profile, onClose }) {
   };
   const clearChordAt = (pos) => {
     setApplied(prev => { const next = { ...prev }; delete next[pos]; return next; });
+  };
+  // Remove a run of added (inserted) chords hanging off a cell.
+  const removeInsertionAt = (pos) => {
+    setInsertions(prev => { const next = { ...prev }; delete next[pos]; return next; });
   };
 
   // ─── Audio preview ───────────────────────────────────────────────────────────
@@ -375,7 +517,22 @@ export default function SongEditor({ song, profile, onClose }) {
   const playCurrent = useCallback(() => {
     if (!section) return;
     stopAudio();
-    const done = () => { if (loopEnabled.current) playCurrent(); else setPlaying(false); };
+    const done = () => { if (loopEnabled.current) playCurrent(); else { setPlaying(false); clearHighlight(); } };
+
+    // Live chord highlight: walk the section's cells at their beat offsets so the
+    // sheet lights up the chord that's sounding right now (plus any inserted chords).
+    const lead = 0.15;
+    const spb = 60 / section.bpm;
+    const marks = [];
+    const beatAtPos = {};
+    let beat = 0;
+    section.chords.forEach(c => {
+      beatAtPos[c.index] = beat;
+      marks.push({ pos: c.index, at: lead + beat * spb });
+      beat += c.beats || 4;
+      for (const ins of (insertions[c.index] || [])) beat += 4;
+    });
+    scheduleHighlight(marks);
 
     // Rhythm/style transforms produce a timed event stream — prefer it so the feel
     // is audible. Otherwise strum the current (applied) chord voicings.
@@ -385,10 +542,33 @@ export default function SongEditor({ song, profile, onClose }) {
     } else if (melodyTrack) {
       playEvents([...chordBed(), ...melodyTrack.events], done);
     } else {
-      const voicings = section.chords.map(c => ({ tab: c.tab }));
+      // Strum the applied voicings, with any inserted (added-cadence) chords
+      // played right after the cell they follow.
+      const voicings = [];
+      section.chords.forEach(c => {
+        voicings.push({ tab: c.tab });
+        for (const ins of (insertions[c.index] || [])) {
+          if (ins.tab) voicings.push({ tab: ins.tab });
+        }
+      });
       playProgression(voicings, section.bpm, () => {}, done);
     }
-  }, [section, result, melodyTrack, chordBed]);
+    // Backing band under whichever guitar path played (same grid, same stop).
+    if (drumsOn || bassOn) {
+      const bandChords = [];
+      section.chords.forEach(c => {
+        bandChords.push({ name: c.chordName, beats: c.beats || 4 });
+        for (const ins of (insertions[c.index] || [])) bandChords.push({ name: ins.name, beats: 4 });
+      });
+      playBacking(bandChords, section.bpm, { drums: drumsOn, bass: bassOn });
+    }
+    // Human voice singing the marked section's lyrics, in time.
+    stopVocals();
+    if (voiceOn) {
+      const sung = buildSungLines(beatAtPos, spb, lead, 4, { onlyKnownBeats: true });
+      if (sung.length) stopVocalsRef.current = singLines(sung, { voiceId });
+    }
+  }, [section, result, melodyTrack, chordBed, drumsOn, bassOn, insertions, scheduleHighlight, clearHighlight, voiceOn, voiceId, buildSungLines, stopVocals]);
 
   const play = () => {
     unlockAudio();
@@ -403,25 +583,52 @@ export default function SongEditor({ song, profile, onClose }) {
   const playFullSong = useCallback(() => {
     if (!cells.length) return;
     stopAudio();
-    const done = () => { if (loopEnabled.current) playFullSong(); else setPlaying(false); };
+    const done = () => { if (loopEnabled.current) playFullSong(); else { setPlaying(false); clearHighlight(); } };
     const songBeats = 4;
     const spb = 60 / bpm;
+    const lead = 0.15;
+    const marks = [];
 
-    // Chord bed across the entire song from the applied/original voicings.
+    // Chord bed across the entire song from the applied/original voicings, with
+    // inserted (added-cadence) chords woven in after the cell they follow. Track
+    // each cell's actual beat offset so the melody still lands on its region.
     const events = [];
+    const bandChords = [];
+    const beatAtPos = {};
+    let beatPos = 0;
     cells.forEach((cell, i) => {
+      beatAtPos[i] = beatPos;
+      marks.push({ pos: i, at: lead + beatPos * spb });
       const ov = applied[i];
       const tab = ov?.tab || cell.voicings?.[0]?.tab;
-      if (tab) events.push(...tabToEvents(tab, i * songBeats * spb, songBeats * spb * 0.9));
+      if (tab) events.push(...tabToEvents(tab, beatPos * spb, songBeats * spb * 0.9));
+      bandChords.push({ name: ov?.name || cell.chordName, beats: songBeats });
+      beatPos += songBeats;
+      for (const ins of (insertions[i] || [])) {
+        if (ins.tab) events.push(...tabToEvents(ins.tab, beatPos * spb, songBeats * spb * 0.9));
+        bandChords.push({ name: ins.name, beats: songBeats });
+        beatPos += songBeats;
+      }
     });
     // Layer the applied melody (its event times are relative to the marked region's
     // start cell — offset them onto the full-song timeline).
     if (melodyTrack) {
-      const offset = (melodyTrack.start || 0) * songBeats * spb;
+      const offset = (beatAtPos[melodyTrack.start] ?? (melodyTrack.start || 0) * songBeats) * spb;
       melodyTrack.events.forEach(e => events.push({ ...e, time: (e.time || 0) + offset }));
     }
     playEvents(events, done);
-  }, [cells, applied, melodyTrack, bpm]);
+    scheduleHighlight(marks);
+    // Backing band across the whole song (applied names + inserted chords).
+    if (drumsOn || bassOn) {
+      playBacking(bandChords, bpm, { drums: drumsOn, bass: bassOn });
+    }
+    // Human voice singing the lyrics over the whole song, in time.
+    stopVocals();
+    if (voiceOn) {
+      const sung = buildSungLines(beatAtPos, spb, lead, songBeats);
+      if (sung.length) stopVocalsRef.current = singLines(sung, { voiceId });
+    }
+  }, [cells, applied, melodyTrack, bpm, drumsOn, bassOn, insertions, scheduleHighlight, clearHighlight, voiceOn, voiceId, buildSungLines, stopVocals]);
 
   const playSong = () => {
     unlockAudio();
@@ -430,7 +637,7 @@ export default function SongEditor({ song, profile, onClose }) {
     playFullSong();
   };
 
-  const stop = () => { loopEnabled.current = false; stopAudio(); setPlaying(false); };
+  const stop = () => { loopEnabled.current = false; stopAudio(); setPlaying(false); clearHighlight(); stopVocals(); };
   const [playScope, setPlayScope] = useState('selection'); // which Play button is active
 
   const toggleLoop = () => { loopEnabled.current = !loopEnabled.current; setLoopTick(t => t + 1); };
@@ -453,10 +660,64 @@ export default function SongEditor({ song, profile, onClose }) {
 
   const inSection = (i) => hasMark && i >= markStart && i <= markEnd;
 
+  // ─── Plain-text editor open / apply / cancel ─────────────────────────────────
+  // Open: stop playback and seed the textarea with the current song serialized to
+  // the chord-sheet format — but bake any live edits (applied voicings / added
+  // chords) into the text first, so what you see in Notepad matches the sheet.
+  const openTextMode = () => {
+    stop();
+    const baked = {
+      ...song,
+      lyricLines: currentLyricLines(),
+    };
+    setDraftText(songToText(baked));
+    setTextWarnings([]);
+    setTextMode(true);
+  };
+  // Apply: parse the edited text back into the working song. Keep the identity
+  // fields (id/title/artist/key) unless the text overrides them, clear live
+  // overrides (they can't map onto rewritten text), and drop the marks.
+  const applyTextMode = () => {
+    const { song: parsed, warnings } = parseChordSheet(draftText);
+    if (!parsed.lyricLines?.length && !parsed.chords?.length) {
+      setTextWarnings(['Nothing to read — add chords over lyrics, e.g. a line “C  G  Am  F” above the words.']);
+      return;
+    }
+    setSong(prev => ({
+      ...prev,
+      // parsed header wins when present; otherwise keep the original identity
+      title: parsed.title && parsed.title !== 'Untitled' ? parsed.title : prev.title,
+      artist: parsed.artist && parsed.artist !== 'Unknown' ? parsed.artist : prev.artist,
+      key: parsed.key || prev.key,
+      scaleType: parsed.scaleType || prev.scaleType,
+      capo: parsed.capo ?? prev.capo,
+      bpm: parsed.bpm ?? prev.bpm,
+      degrees: parsed.degrees,
+      chords: parsed.chords,
+      lineChords: undefined,           // the text is authoritative now
+      lyricLines: parsed.lyricLines,
+      custom: true,
+    }));
+    // Reset everything that was keyed to the OLD positions.
+    setApplied({});
+    setInsertions({});
+    setMelodyTrack(null);
+    setMarkStart(null); setMarkEnd(null);
+    setTransformId(null); setResult(null);
+    setTextWarnings(warnings || []);
+    setTextMode(false);
+  };
+  const cancelTextMode = () => { setTextMode(false); setTextWarnings([]); };
+
   // Revert every transform applied to the marked section back to the original.
   const revertSection = () => {
     if (!hasMark) return;
     setApplied(prev => {
+      const next = { ...prev };
+      for (let i = markStart; i <= markEnd; i++) delete next[i];
+      return next;
+    });
+    setInsertions(prev => {
       const next = { ...prev };
       for (let i = markStart; i <= markEnd; i++) delete next[i];
       return next;
@@ -467,26 +728,44 @@ export default function SongEditor({ song, profile, onClose }) {
   };
 
   // ─── Save (per user, to the DB when logged in) ────────────────────────────────
-  // Bake every applied transform into a standalone song object: rebuild the lyric
-  // lines from the sheet with the transformed chord NAMES substituted per position,
-  // tag it as a user edit, and persist (localStorage always; DB when logged in).
-  const saveEditedSong = async () => {
-    setSaving(true);
-    setSaveMsg(null);
 
-    // Group the per-occurrence cells back into lyric lines, using applied names.
+  // Group the per-occurrence cells back into lyric lines with every live edit baked
+  // in (applied chord NAMES substituted per position; added cadence chords woven in).
+  // Shared by Save and by the plain-text editor's "open" (so Notepad shows edits).
+  const currentLyricLines = useCallback(() => {
     const lyricLines = [];
     if (sheetLines.length) {
       for (const line of sheetLines) {
         if (line.blank) { lyricLines.push({ text: '', chordNames: [] }); continue; }
-        const chordNames = line.segments.map(s => applied[s.pos]?.name || cells[s.pos]?.chordName).filter(Boolean);
+        const chordNames = [];
+        for (const s of line.segments) {
+          const nm = applied[s.pos]?.name || cells[s.pos]?.chordName;
+          if (nm) chordNames.push(nm);
+          for (const ins of (insertions[s.pos] || [])) chordNames.push(ins.name);  // added cadence chords
+        }
         const text = line.segments.map(s => s.text).filter(Boolean).join(' ');
         lyricLines.push({ text, chordNames });
       }
     } else {
-      // No lyrics → one line carrying the (possibly transformed) chord sequence.
-      lyricLines.push({ text: '', chordNames: cells.map(c => applied[c.pos]?.name || c.chordName) });
+      // No lyrics → one line carrying the (possibly transformed) chord sequence
+      // with any added cadence chords woven in.
+      const chordNames = [];
+      for (const c of cells) {
+        chordNames.push(applied[c.pos]?.name || c.chordName);
+        for (const ins of (insertions[c.pos] || [])) chordNames.push(ins.name);
+      }
+      lyricLines.push({ text: '', chordNames });
     }
+    return lyricLines;
+  }, [sheetLines, applied, insertions, cells]);
+
+  // Bake every applied transform into a standalone song object, tag it as a user
+  // edit, and persist (localStorage always; DB when logged in).
+  const saveEditedSong = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+
+    const lyricLines = currentLyricLines();
 
     // Keep the song's own name — saving edits in place, not under a new title.
     // Strip any leftover "(my edit)" suffixes from earlier builds so old copies heal.
@@ -545,6 +824,14 @@ export default function SongEditor({ song, profile, onClose }) {
         <span className="text-xs px-2 py-0.5 rounded mr-2" style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
           {song.key}{song.scaleType === 'minor' ? 'm' : ''} · {bpm}bpm
         </span>
+        <button onClick={textMode ? cancelTextMode : openTextMode}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg mr-2"
+          title="Edit the whole song (chords + lyrics) as plain text"
+          style={textMode
+            ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+            : { background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
+          📝 {textMode ? 'Close text' : 'Edit as text'}
+        </button>
         <button onClick={saveEditedSong} disabled={saving || !timeline.length}
           className="text-xs font-semibold px-3 py-1.5 rounded-lg"
           style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)', opacity: (saving || !timeline.length) ? 0.5 : 1 }}
@@ -561,6 +848,50 @@ export default function SongEditor({ song, profile, onClose }) {
       )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* Plain-text ("Notepad") editor — the whole song as one editable chord
+            sheet. Replaces the visual editor while open; Apply re-parses it back
+            into the song so every other feature works on the edited content. */}
+        {textMode && (
+          <div className="rounded-lg p-3 space-y-3" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-faint)' }}>
+                Edit song as text — chords on their own line above each lyric
+              </span>
+            </div>
+            <textarea
+              value={draftText}
+              onChange={e => setDraftText(e.target.value)}
+              spellCheck={false}
+              rows={18}
+              className="w-full font-mono text-xs rounded-lg p-3 outline-none resize-y"
+              style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)', lineHeight: 1.5, whiteSpace: 'pre', overflowWrap: 'normal', overflowX: 'auto' }}
+            />
+            {textWarnings.length > 0 && (
+              <div className="px-3 py-2 rounded-lg text-[11px]" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: 'var(--color-warning)' }}>
+                {textWarnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
+              </div>
+            )}
+            <p className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>
+              Format: a line of chords (e.g. <span className="font-mono">C  G  Am  F</span>) directly above its lyric line.
+              Blank lines separate sections. Header lines like <span className="font-mono">Key: G</span>, <span className="font-mono">Capo: 2</span>, <span className="font-mono">120 bpm</span> set the song’s metadata.
+              Applying replaces the song’s chords and lyrics and clears any marks or transforms.
+            </p>
+            <div className="flex items-center gap-2">
+              <button onClick={applyTextMode}
+                className="text-sm font-semibold px-4 py-2 rounded-lg"
+                style={{ background: 'var(--color-success)', color: 'var(--color-surface-base)' }}>
+                ✓ Apply changes
+              </button>
+              <button onClick={cancelTextMode}
+                className="text-sm px-4 py-2 rounded-lg"
+                style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!textMode && <>
         {/* Song sheet — the words + lyrics + chords, copied onto the editor screen */}
         <div className="rounded-lg" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
           <button
@@ -592,22 +923,29 @@ export default function SongEditor({ song, profile, onClose }) {
                 </p>
               )}
 
-              <div className="max-h-72 overflow-y-auto">
+              <div ref={sheetScrollRef} className="max-h-72 overflow-y-auto">
                 {/* Chord-over-lyrics: tap a chord to mark. */}
                 {sheetStatus === 'done' && sheetLines.length > 0 && sheetLines.map((line, i) => {
                   if (line.blank) return <div key={i} className="mt-2" />;
                   return (
                     <div key={i} className="mb-1.5 flex flex-wrap items-end gap-x-1 leading-tight">
                       {line.segments.map((seg, j) => (
-                        <ChordCell key={j}
-                          name={applied[seg.pos]?.name || cells[seg.pos]?.chordName || ''}
-                          text={seg.text}
-                          marked={inSection(seg.pos)}
-                          pendingStart={markStart === seg.pos && markEnd == null}
-                          changed={!!applied[seg.pos]}
-                          onTap={() => tapCell(seg.pos)}
-                          onHover={(e) => showShape(e, voicingFor(seg.pos))}
-                          onLeave={hideShape} />
+                        <Fragment key={j}>
+                          <ChordCell
+                            name={applied[seg.pos]?.name || cells[seg.pos]?.chordName || ''}
+                            text={seg.text}
+                            pos={seg.pos}
+                            marked={inSection(seg.pos)}
+                            pendingStart={markStart === seg.pos && markEnd == null}
+                            changed={!!applied[seg.pos]}
+                            nowPlaying={playingPos === seg.pos}
+                            onTap={() => tapCell(seg.pos)}
+                            onHover={(e) => showShape(e, voicingFor(seg.pos))}
+                            onLeave={hideShape} />
+                          {insertions[seg.pos] && (
+                            <InsertedChips list={insertions[seg.pos]} onRemove={() => removeInsertionAt(seg.pos)} />
+                          )}
+                        </Fragment>
                       ))}
                     </div>
                   );
@@ -617,15 +955,22 @@ export default function SongEditor({ song, profile, onClose }) {
                 {!(sheetStatus === 'done' && sheetLines.length > 0) && sheetStatus !== 'loading' && (
                   <div className="flex flex-wrap gap-x-1 gap-y-1.5">
                     {cells.map((cell) => (
-                      <ChordCell key={cell.pos}
-                        name={applied[cell.pos]?.name || cell.chordName}
-                        text=""
-                        marked={inSection(cell.pos)}
-                        pendingStart={markStart === cell.pos && markEnd == null}
-                        changed={!!applied[cell.pos]}
-                        onTap={() => tapCell(cell.pos)}
-                        onHover={(e) => showShape(e, voicingFor(cell.pos))}
-                        onLeave={hideShape} />
+                      <Fragment key={cell.pos}>
+                        <ChordCell
+                          name={applied[cell.pos]?.name || cell.chordName}
+                          text=""
+                          pos={cell.pos}
+                          marked={inSection(cell.pos)}
+                          pendingStart={markStart === cell.pos && markEnd == null}
+                          changed={!!applied[cell.pos]}
+                          nowPlaying={playingPos === cell.pos}
+                          onTap={() => tapCell(cell.pos)}
+                          onHover={(e) => showShape(e, voicingFor(cell.pos))}
+                          onLeave={hideShape} />
+                        {insertions[cell.pos] && (
+                          <InsertedChips list={insertions[cell.pos]} onRemove={() => removeInsertionAt(cell.pos)} />
+                        )}
+                      </Fragment>
                     ))}
                   </div>
                 )}
@@ -640,7 +985,54 @@ export default function SongEditor({ song, profile, onClose }) {
                     ♪ melody applied ({melodyTrack.events.length} notes)
                   </span>
                 )}
+                {Object.keys(insertions).length > 0 && (
+                  <span className="text-[11px] px-2.5 py-1 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' }}>
+                    ＋ {Object.values(insertions).reduce((n, l) => n + l.length, 0)} chords added
+                  </span>
+                )}
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Note sheet — a treble-clef staff of the song's chords (the notes each
+            shape actually plays). Collapsible; the sounding chord's column glows
+            in time with playback. */}
+        <div className="rounded-lg" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+          <button
+            onClick={() => setNoteSheetOpen(o => !o)}
+            className="w-full flex items-center justify-between px-3 py-2 text-[10px] uppercase tracking-widest font-semibold"
+            style={{ color: 'var(--color-ink-faint)' }}
+          >
+            <span>🎼 Note sheet — the chords as staff notation</span>
+            <span style={{ color: 'var(--color-ink-ghost)' }}>{noteSheetOpen ? '▾' : '▸'}</span>
+          </button>
+          {noteSheetOpen && (
+            <div className="px-3 pb-3">
+              {noteColumns.length ? (
+                <>
+                  <div className="overflow-x-auto rounded-lg py-2" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)' }}>
+                    <NoteStaff chords={noteColumns} activeIndex={activeNoteCol} />
+                  </div>
+                  {/* Per-chord note names, e.g. "C = C·E·G". */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px]" style={{ color: 'var(--color-ink-subtle)' }}>
+                    {noteColumns.map((c, i) => (
+                      <span key={i} className="inline-flex items-baseline gap-1">
+                        <span className="font-semibold" style={{ color: 'var(--color-brand)' }}>{c.name}</span>
+                        <span style={{ color: 'var(--color-ink-ghost)' }}>=</span>
+                        <span className="font-mono">{chordToneNames(c.tab).join('·') || '—'}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px] mt-2" style={{ color: 'var(--color-ink-ghost)' }}>
+                    Written at the pitches each shape frets (guitar sounds one octave lower). Applied transforms are reflected here; Play highlights the sounding chord.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>
+                  No chord shapes to notate yet.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -674,6 +1066,24 @@ export default function SongEditor({ song, profile, onClose }) {
                   <input type="checkbox" checked={allowQuality} onChange={e => setAllowQuality(e.target.checked)} />
                   allow substitutions (changes the sound)
                 </label>
+              )}
+              {transformId === 'cadence' && (
+                <>
+                  <span className="inline-flex items-center gap-1">
+                    <span style={{ color: 'var(--color-ink-faint)' }}>cadence:</span>
+                    <select value={cadenceId} onChange={e => setCadenceId(e.target.value)}
+                      className="rounded-md px-1.5 py-0.5"
+                      style={{ background: 'var(--color-surface-800)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-550)' }}>
+                      {Object.entries(CADENCES).map(([id, c]) => <option key={id} value={id}>{c.label}</option>)}
+                    </select>
+                  </span>
+                  <Seg label="mode" value={cadenceMode}
+                    options={[['replace', 'Replace ending'], ['add', 'Add to song']]}
+                    onPick={setCadenceMode} />
+                  <span style={{ color: 'var(--color-ink-ghost)' }}>
+                    {cadenceMode === 'add' ? '— inserts the cadence chords after the selection' : '— rewrites the end of the selection'}
+                  </span>
+                </>
               )}
               {transformId === 'melody' && (
                 <>
@@ -821,6 +1231,63 @@ export default function SongEditor({ song, profile, onClose }) {
                 : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
               ⟲ Loop
             </button>
+
+            {/* Backing band — synthesized drums/bass under the guitar. Toggles
+                take effect on the next Play (or the next loop pass). */}
+            <span className="text-[10px] uppercase tracking-widest font-semibold ml-1" style={{ color: 'var(--color-ink-ghost)' }}>
+              Band:
+            </span>
+            <button onClick={() => setDrumsOn(v => !v)}
+              className="text-xs px-3 py-2 rounded-lg"
+              title="Kick, snare and hats in a 4/4 groove under the chords"
+              style={drumsOn
+                ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
+              🥁 Drums
+            </button>
+            <button onClick={() => setBassOn(v => !v)}
+              className="text-xs px-3 py-2 rounded-lg"
+              title="Bass walking root and fifth of each chord"
+              style={bassOn
+                ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
+              🎸 Bass
+            </button>
+
+            {/* Voice — a human voice that sings the lyrics along with the song.
+                Toggle it on and pick a voice type; takes effect on the next Play.
+                Hidden entirely if the browser has no speech synthesis. */}
+            {vocalsSupported() && (
+              <>
+                <span className="text-[10px] uppercase tracking-widest font-semibold ml-1" style={{ color: 'var(--color-ink-ghost)' }}>
+                  Voice:
+                </span>
+                <button onClick={() => setVoiceOn(v => !v)}
+                  className="text-xs px-3 py-2 rounded-lg"
+                  title="A human voice sings the lyrics in time with the song"
+                  style={voiceOn
+                    ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                    : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
+                  🎤 Sing
+                </button>
+                {voiceOn && (
+                  <select
+                    value={voiceId}
+                    onChange={e => setVoiceId(e.target.value)}
+                    title="Choose the singing voice"
+                    className="text-xs rounded-lg px-2 py-2 max-w-[190px]"
+                    style={{ background: 'var(--color-surface-800)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-550)' }}>
+                    {!voices.length && <option value="">Loading voices…</option>}
+                    {voices.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}{v.gender !== 'neutral' ? ` · ${v.gender}` : ''} ({v.lang})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
+
             <div className="flex-1" />
             {hasMark && (
               <button onClick={revertSection}
@@ -837,6 +1304,7 @@ export default function SongEditor({ song, profile, onClose }) {
             This song has no resolvable chords to edit.
           </div>
         )}
+        </>}
       </div>
 
       {/* Hover diagram — the chord shape (with suggested fingers) for the chord
@@ -900,23 +1368,44 @@ function ManualChordRow({ pos, original, currentName, edited, chordNames, onPick
   );
 }
 
+// Green "+chord" chips for a run of chords ADDED to the song (cadence "add"
+// mode), rendered right after the cell they follow. The ✕ removes the run.
+function InsertedChips({ list, onRemove }) {
+  return (
+    <span className="inline-flex items-end gap-0.5">
+      {list.map((ins, k) => (
+        <span key={k} className="text-[11px] font-bold rounded px-1 leading-tight self-start"
+          style={{ background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px dashed rgba(74,222,128,0.5)' }}
+          title="Chord added to the song (cadence)">
+          +{ins.name}
+        </span>
+      ))}
+      <button onClick={onRemove} className="text-[10px] px-0.5 self-start"
+        style={{ color: 'var(--color-ink-faint)' }} title="Remove the added chords">✕</button>
+    </span>
+  );
+}
+
 // A single tappable chord-over-lyric cell on the song sheet. Marking a section
 // is done by tapping these directly (no separate timeline). `marked` highlights
 // cells inside the selection; `changed` shows a chord a transform has rewritten.
-function ChordCell({ name, text, marked, pendingStart, changed, onTap, onHover, onLeave }) {
+function ChordCell({ name, text, pos, marked, pendingStart, changed, nowPlaying, onTap, onHover, onLeave }) {
+  // The currently-sounding chord glows so you can follow the song live — it wins
+  // over the marked/changed styling while it's playing.
   return (
-    <button type="button" onClick={onTap}
+    <button type="button" onClick={onTap} data-cell-pos={pos}
       onMouseEnter={onHover} onMouseLeave={onLeave} onFocus={onHover} onBlur={onLeave}
       className="inline-flex flex-col items-start rounded text-left transition-colors select-none cursor-pointer"
       style={{
-        background: marked ? 'rgba(201,169,110,0.15)' : 'transparent',
-        outline: pendingStart ? '1px dashed rgba(201,169,110,0.7)' : 'none',
+        background: nowPlaying ? 'rgba(129,140,248,0.28)' : marked ? 'rgba(201,169,110,0.15)' : 'transparent',
+        outline: nowPlaying ? '1px solid var(--color-accent)' : pendingStart ? '1px dashed rgba(201,169,110,0.7)' : 'none',
+        boxShadow: nowPlaying ? '0 0 8px rgba(129,140,248,0.5)' : 'none',
         padding: '0 3px',
         WebkitUserSelect: 'none',
         userSelect: 'none',
       }}>
       <span className="font-bold select-none leading-tight"
-        style={{ color: changed ? 'var(--color-success)' : marked ? 'var(--color-brand)' : 'var(--color-accent)' }}>{name || '·'}</span>
+        style={{ color: nowPlaying ? 'var(--color-accent)' : changed ? 'var(--color-success)' : marked ? 'var(--color-brand)' : 'var(--color-accent)' }}>{name || '·'}</span>
       <span className="leading-tight" style={{ color: marked ? '#b8a88a' : 'var(--color-ink-subtle)' }}>{text || ' '}</span>
     </button>
   );

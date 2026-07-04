@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -49,7 +50,17 @@ public class OAuthService {
     @Value("${oauth.facebook.app-secret:}")
     private String facebookAppSecret;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    // Provider verification calls must never hang the login: a default
+    // RestTemplate has NO timeouts, so a slow/unreachable Google or Facebook
+    // would stall sign-in indefinitely with zero feedback in the UI.
+    private final RestTemplate restTemplate = buildRestTemplate();
+
+    private static RestTemplate buildRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5_000);
+        factory.setReadTimeout(10_000);
+        return new RestTemplate(factory);
+    }
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String GOOGLE_TOKENINFO =

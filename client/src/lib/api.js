@@ -178,6 +178,18 @@ export const advise = {
       .catch(() => null),
 };
 
+// Claude-vision hand analysis for the hand-profile setup wizard. The server
+// holds the Anthropic key and the biomechanics prompt; this just ships the
+// captured photo (base64 JPEG) and gets back the parsed JSON report. Errors
+// (503 no key, 502 model trouble) throw so the wizard can show its error phase.
+export const handAnalysis = {
+  claude: (imageB64) =>
+    apiFetch('/api/analyze-hand/claude', {
+      method: 'POST',
+      body: JSON.stringify({ imageB64 }),
+    }),
+};
+
 export const subscriptions = {
   getStatus: () => apiFetch('/api/subscriptions/me'),
 
@@ -188,6 +200,24 @@ export const subscriptions = {
     }),
 
   cancel: () => apiFetch('/api/subscriptions/cancel', { method: 'POST' }),
+};
+
+// ── Song catalog ─────────────────────────────────────────────────────────────
+// The global catalog_songs table: every built-in song regenerated from a real
+// chord sheet (title, artist, songKey, bpm, style, full chordpro, sourceUrl).
+export const catalog = {
+  list: () => apiFetch('/api/catalog'),
+};
+
+// ── Real chord sheet ─────────────────────────────────────────────────────────
+// A real, human-made chords-over-lyrics sheet for a song, fetched through our
+// backend proxy (/api/chordsheet → Cifra Club). The browser can't read a
+// cross-origin chord-sheet tab, so the server does the reading and returns
+// { url, text } — text already carries the "TITLE Chords by ARTIST" / Key /
+// Capo header lines that parseChordSheet understands.
+export const chordSheet = {
+  fetch: (artist, title) =>
+    apiFetch(`/api/chordsheet?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`),
 };
 
 // ── Lyrics ───────────────────────────────────────────────────────────────────

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code}\\\\n' https://perfect-compassion-production-fa2c.up.railway.app/actuator/health)",
+      "Bash(curl -s -c /tmp/rw-cookies.txt -w '\\\\nHTTP %{http_code}\\\\n' -X POST https://perfect-compassion-production-fa2c.up.railway.app/api/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"apitest@example.com\",\"password\":\"password123\",\"name\":\"Api Test\"}')",
+      "Bash(curl -s --max-time 30 -c /tmp/rw-cookies.txt -w '\\\\nHTTP %{http_code}\\\\n' -X POST https://perfect-compassion-production-fa2c.up.railway.app/api/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"apitest2@example.com\",\"password\":\"password123\",\"name\":\"Api Test\"}')",
+      "Bash(awk '{print $6}')",
+      "Bash(curl -s --max-time 30 -w '\\\\nHTTP %{http_code}\\\\n' -X POST https://perfect-compassion-production-fa2c.up.railway.app/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"nobody@example.com\",\"password\":\"whatever123\"}')",
+      "Bash(curl -s --max-time 20 -w '\\\\nHTTP %{http_code}\\\\n' https://perfect-compassion-production-fa2c.up.railway.app/api/users/me)"
+    ]
+  }
+}

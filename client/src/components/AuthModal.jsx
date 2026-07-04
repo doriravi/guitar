@@ -266,6 +266,19 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
         className="relative w-full max-w-sm rounded-xl p-7"
         style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)' }}
       >
+        {/* Signing-in overlay: OAuth verification takes a network round-trip
+            during which nothing else changes on screen — without this the
+            login looks frozen. */}
+        {loading && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl"
+            style={{ background: 'rgba(10,10,12,0.72)' }}>
+            <span className="h-8 w-8 rounded-full animate-spin"
+              style={{ border: '3px solid var(--color-surface-550)', borderTopColor: 'var(--color-brand)' }} />
+            <span className="text-sm" style={{ color: 'var(--color-ink-muted)' }}>
+              {tk(tr, 'signingIn', 'Signing you in…')}
+            </span>
+          </div>
+        )}
         {!fullPage && (
           <button
             onClick={onClose}

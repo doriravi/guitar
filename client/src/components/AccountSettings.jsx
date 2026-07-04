@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { user as userApi } from '../lib/api';
 import { useT, LANGUAGES } from '../lib/i18n';
+import { useHandProfile } from '../App';
+import { recommendedMaxDifficulty, abilityLabel, flexibilityLabel } from '../lib/handProfile';
 
 function Section({ title, children }) {
   return (
@@ -25,8 +27,12 @@ const inputStyle = {
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
 
-export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect }) {
+export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect, limitToReach, onLimitToReachChange }) {
   const tr = useT(lang);
+  const profile = useHandProfile();
+  const reachCeiling = recommendedMaxDifficulty(profile);
+  const reach = abilityLabel(profile);
+  const flex = flexibilityLabel(profile);
   const [name, setName] = useState(currentUser.name || '');
   const [email, setEmail] = useState(currentUser.email || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -38,6 +44,15 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [resendMsg, setResendMsg] = useState('');
+  const [limitSavedMsg, setLimitSavedMsg] = useState(false);
+
+  function handleLimitToggle(on) {
+    onLimitToReachChange(on);
+    // The preference applies instantly (no form Save needed) — confirm it so the
+    // nearby Profile "Save changes" button isn't mistaken for saving this too.
+    setLimitSavedMsg(true);
+    setTimeout(() => setLimitSavedMsg(false), 2500);
+  }
 
   async function handleUpdateProfile(e) {
     e.preventDefault();
@@ -138,6 +153,48 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
           </div>
         </form>
       </Section>
+
+      {onLimitToReachChange && (
+        <Section title={tr.playability || 'Playability'}>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!limitToReach}
+              onChange={e => handleLimitToggle(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+            />
+            <span>
+              <span className="block text-sm text-ink">
+                {tr.limitToReachLabel || 'Limit everything to my reach & flexibility'}
+                {limitSavedMsg && (
+                  <span className="ml-2 text-xs font-semibold" style={{ color: 'var(--color-success)' }}>
+                    {tr.saved || 'Saved'} ✓
+                  </span>
+                )}
+              </span>
+              <span className="block text-xs mt-1 text-ink-faint">
+                {tr.limitToReachHelp ||
+                  'Across the whole app, prefer chord shapes you can comfortably play and flag ones beyond your reach. Based on your measured hand.'}
+              </span>
+              <span className="block text-[11px] mt-1" style={{ color: 'var(--color-ink-ghost)' }}>
+                {tr.appliesInstantly || 'Applies instantly — no need to press “Save changes”.'}
+              </span>
+            </span>
+          </label>
+          <div className="mt-3 pt-3 border-t border-surface-650 text-xs text-ink-subtle">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>Your hand: <span className={reach.color}>{reach.label}</span></span>
+              <span>Flexibility: <span className={flex.color}>{flex.label}</span></span>
+              <span>Comfortable ceiling: <span className="font-semibold text-brand">{reachCeiling}/10</span></span>
+            </div>
+            <p className="mt-1 text-ink-faint">
+              {limitToReach
+                ? `Shapes harder than ${reachCeiling}/10 for your hand are avoided or flagged.`
+                : 'Turn on to steer the whole app toward what you can play.'}
+            </p>
+          </div>
+        </Section>
+      )}
 
       {onLangSelect && (
         <Section title={tr.language || 'Language'}>

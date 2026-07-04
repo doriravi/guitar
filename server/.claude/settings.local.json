@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(\"C:\\\\tools\\\\apache-maven-3.9.9\\\\bin\\\\mvn\" spring-boot:run)"
+      "Bash(\"C:\\\\tools\\\\apache-maven-3.9.9\\\\bin\\\\mvn\" spring-boot:run)",
+      "Bash(bash C:/Users/User/claude_projects/guitar/server/restart.sh)",
+      "Bash(/c/tools/apache-maven-3.9.9/bin/mvn spring-boot:run *)"
     ]
   }
 }
