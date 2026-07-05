@@ -63,23 +63,35 @@ export function chordproToSong(row) {
       continue; // all other directives (title/artist/…) come from the DB row
     }
     const chordNames = [];
-    const text = raw
-      .replace(/\[([^\]]+)\]/g, (_, c) => {
-        // Only chord-shaped tokens count; leaked section markers ("[Intro]",
-        // "[Final]", "[Chorus]") are sheet noise — removed from the text and
-        // never treated as chords (looksLikeChordName rejects them).
-        const tok = c.trim();
-        if (looksLikeChordName(tok)) chordNames.push(tok);
-        return '';
-      })
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+    // Track where each chord lands in the lyric so the Play-Along game can sync
+    // the words to the chord. Build the cleaned text incrementally as `[C]`
+    // markers are stripped, collapsing runs of whitespace on the way, and record
+    // the offset into that emerging text where each surviving chord sits.
+    const chordPositions = [];
+    let out = '';
+    const push = (s) => { for (const ch of s) { if (/\s/.test(ch)) { if (!/\s$/.test(out)) out += ' '; } else out += ch; } };
+    const inlineRe = /\[([^\]]+)\]/g;
+    let last = 0, m2;
+    while ((m2 = inlineRe.exec(raw)) !== null) {
+      push(raw.slice(last, m2.index));
+      last = m2.index + m2[0].length;
+      // Only chord-shaped tokens count; leaked section markers ("[Intro]",
+      // "[Final]", "[Chorus]") are sheet noise — removed from the text and
+      // never treated as chords (looksLikeChordName rejects them).
+      const tok = m2[1].trim();
+      if (looksLikeChordName(tok)) { chordNames.push(tok); chordPositions.push(out.replace(/\s+$/, '').length); }
+    }
+    push(raw.slice(last));
+    const text = out.trim();
+    // Leading whitespace was collapsed to a single space; shift positions past it.
+    const lead = out.length - out.replace(/^\s+/, '').length;
+    const adjPositions = chordPositions.map(p => Math.max(0, Math.min(text.length, p - lead)));
     if (!text && !chordNames.length) continue;
-    lyricLines.push({ text, chordNames });
+    lyricLines.push({ text, chordNames, chordPositions: adjPositions });
   }
   // Strip helper flags + trailing blank
   while (lyricLines.length && lyricLines[lyricLines.length - 1].blankish) lyricLines.pop();
-  const cleaned = lyricLines.map(({ text, chordNames }) => ({ text, chordNames }));
+  const cleaned = lyricLines.map(({ text, chordNames, chordPositions }) => ({ text, chordNames, chordPositions }));
 
   const { key: root, scaleType } = parseKey(key);
   const chords = [...new Set(cleaned.flatMap(ln => ln.chordNames))];

@@ -183,6 +183,7 @@ export const CHORDS = [
   { name: 'Dm7b5',  type: 'Half-dim',        tab: 'xx0111', notes: [{ string:3,fret:1 },{ string:4,fret:1 },{ string:5,fret:1 }] },
   { name: 'Gm7b5',  type: 'Half-dim',        tab: '3x3333', notes: [{ string:0,fret:3 },{ string:2,fret:3 },{ string:3,fret:3 },{ string:4,fret:3 },{ string:5,fret:3 }] },
   { name: 'Cm7b5',  type: 'Half-dim',        tab: 'x3434x', notes: [{ string:1,fret:3 },{ string:2,fret:4 },{ string:3,fret:3 },{ string:4,fret:4 }] },
+  { name: 'F#m7b5', type: 'Half-dim',        tab: '2x221x', notes: [{ string:0,fret:2 },{ string:2,fret:2 },{ string:3,fret:2 },{ string:4,fret:1 }] },
 
   // ─── More augmented ───────────────────────────────────────────
   { name: 'Caug',   type: 'Augmented',       tab: 'x3221x', notes: [{ string:1,fret:3 },{ string:2,fret:2 },{ string:3,fret:2 },{ string:4,fret:1 }] },

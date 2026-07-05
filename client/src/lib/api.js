@@ -17,7 +17,23 @@ const API_BASE = _envUrl && _envUrl !== 'same-origin'
     ? 'http://localhost:8080'
     : ''; // same-origin → relative /api/...
 
-async function apiFetch(path, options = {}) {
+// Single in-flight refresh shared by all callers, so a burst of expired
+// requests triggers ONE /api/auth/refresh instead of a stampede.
+let _refreshPromise = null;
+
+function refreshAccessToken() {
+  if (!_refreshPromise) {
+    _refreshPromise = fetch(`${API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then(r => { if (!r.ok) throw new Error(`refresh failed (${r.status})`); })
+      .finally(() => { _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
+
+async function apiFetch(path, options = {}, _retried = false) {
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -31,6 +47,17 @@ async function apiFetch(path, options = {}) {
     credentials: 'include',
     headers,
   });
+
+  // Access tokens live only 15 minutes; the refresh cookie lives 7 days.
+  // On an auth failure, refresh once and replay the request — otherwise every
+  // API call starts failing quietly a quarter-hour after login. Auth endpoints
+  // are excluded (a failed login must not trigger a refresh loop).
+  if ((res.status === 401 || res.status === 403) && !_retried && !path.startsWith('/api/auth/')) {
+    try {
+      await refreshAccessToken();
+      return apiFetch(path, options, true);
+    } catch { /* refresh failed (e.g. logged out) — fall through to the original error */ }
+  }
 
   if (res.status === 204) return null;
 

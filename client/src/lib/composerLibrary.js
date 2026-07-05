@@ -10,7 +10,8 @@ import { SONGS_BY_PROGRESSION, songBpm } from './songs';
 import { loadCustomSongs } from './customSongs';
 import { getDiatonicChords } from './scales';
 import { enrichChords } from './lyricChords';
-import { easiestVoicing } from './voicingLookup';
+import { easiestVoicing, lookupVoicings } from './voicingLookup';
+import { CHORDS } from './chords';
 
 function tabToFrets(tab) {
   return tab.split('').map(c => (c === 'x' ? null : parseInt(c, 10)));
@@ -81,6 +82,61 @@ export function songToComposerSong(song) {
     scaleType: song.scaleType ?? 'major',
     progression: song.progression ?? null, // progression-tab name, e.g. 'I – IV – V'
     beats,
+  };
+}
+
+// ── Composer → Play-Along bridge ─────────────────────────────────────────────
+// The Composer tab's SongManager saves the user's own step-editor compositions
+// under this key as { name, bpm, loop, capo, key?, beats:[{ frets, chordLabel }] }.
+const COMPOSER_SONGS_KEY = 'guitar_songs';
+
+/** Raw composer songs saved from the Composer tab. */
+export function loadComposerSongs() {
+  try { return JSON.parse(localStorage.getItem(COMPOSER_SONGS_KEY)) || []; } catch { return []; }
+}
+
+// Reverse index: exact tab string → chord name, for identifying hand-placed
+// beats that carry frets but no chordLabel. Built lazily from the library.
+let _tabToName = null;
+function nameForTab(tab) {
+  if (!_tabToName) {
+    _tabToName = new Map();
+    for (const c of CHORDS) if (!_tabToName.has(c.tab)) _tabToName.set(c.tab, c.name);
+  }
+  return _tabToName.get(tab) || null;
+}
+
+function fretsToTab(frets) {
+  if (!Array.isArray(frets) || frets.length !== 6) return null;
+  if (frets.some(f => typeof f === 'number' && f > 9)) return null; // beyond 1-char tab convention
+  return frets.map(f => (f == null ? 'x' : String(f))).join('');
+}
+
+/**
+ * Convert a composer song to the lyric-song shape the Play-Along game (and
+ * anything else that walks lyricLines) understands. Beats keep their order;
+ * a beat becomes a chord when its chordLabel's name resolves in the voicing
+ * library (labels look like "Am minor" — the name is the first token), or —
+ * for hand-placed beats with no label — when its exact frets match a library
+ * voicing. Returns null when fewer than 4 beats resolve — not enough to
+ * score a run.
+ */
+export function composerSongToLyricSong(cs) {
+  const names = [];
+  for (const b of cs.beats || []) {
+    const labeled = (b.chordLabel || '').split(' ')[0];
+    if (labeled && lookupVoicings(labeled).length) { names.push(labeled); continue; }
+    const matched = nameForTab(fretsToTab(b.frets));
+    if (matched) names.push(matched);
+  }
+  if (names.length < 4) return null;
+  return {
+    title: cs.name || 'Untitled',
+    artist: 'Composer',
+    bpm: cs.bpm ?? 90,
+    key: cs.key ?? null,
+    lyricLines: [{ text: '', chordNames: names }],
+    composer: true,
   };
 }
 

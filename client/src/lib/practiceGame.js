@@ -121,6 +121,7 @@ export function buildPlayTimeline(song, { speed = 1, profile = null, limitToReac
       name: cell.chordName,
       tab: v?.tab || '',
       notes: v?.notes || [],
+      lyric: cell.lyric || '',
       pcs: classifyChordPCs(cell.chordName),
       startSec: i * BEATS_PER_CHORD * spb,
       endSec: (i + 1) * BEATS_PER_CHORD * spb,
