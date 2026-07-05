@@ -117,19 +117,30 @@ export function chordproToSong(row) {
   };
 }
 
+// In-memory cache of the parsed catalog for this page load — every tab that
+// mounts ProgressionExplorer/PracticeGame re-triggers loadCatalogSongs(), and
+// re-parsing ~160 songs' ChordPro on each visit was a measured ~130ms stall
+// per tab switch. The underlying rows rarely change within a session, so
+// parse once and reuse; a hard refresh naturally clears this.
+let _memCache = null;
+
 // Fetch + convert the whole catalog. Resolves to [] when the backend is down
 // and nothing is cached — callers then fall back to the static songs.js list.
 export async function loadCatalogSongs() {
+  if (_memCache) return _memCache;
   try {
     const rows = await catalogApi.list();
     const songs = (rows || []).filter(r => r.chordpro).map(chordproToSong);
     if (songs.length) {
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(songs)); } catch { /* quota — cache is best-effort */ }
+      _memCache = songs;
       return songs;
     }
   } catch { /* backend down → try the cache below */ }
   try {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
-    return Array.isArray(cached) ? cached : [];
+    const songs = Array.isArray(cached) ? cached : [];
+    _memCache = songs;
+    return songs;
   } catch { return []; }
 }

@@ -43,6 +43,7 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
   const [limitSavedMsg, setLimitSavedMsg] = useState(false);
 
@@ -92,6 +93,7 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
     } catch (err) {
       setDeleteError(err.message || 'Failed to delete account.');
       setDeleteLoading(false);
+      setShowDeleteConfirm(false);
     }
   }
 
@@ -214,28 +216,75 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
 
       <Section title={tr.dangerZone}>
         <p className="text-xs mb-3 text-ink-subtle">{tr.deleteAccountWarning}</p>
-        <input
-          style={{ ...inputStyle, borderColor: deleteConfirm === currentUser.email ? 'var(--color-danger)' : 'var(--color-surface-600)' }}
-          value={deleteConfirm}
-          onChange={e => setDeleteConfirm(e.target.value)}
-          placeholder={currentUser.email}
-        />
         {deleteError && <p className="text-xs mt-2 text-danger">{deleteError}</p>}
         <div className="flex justify-end mt-3">
           <button
-            onClick={handleDelete}
-            disabled={deleteConfirm !== currentUser.email || deleteLoading}
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={deleteLoading}
             className="px-5 py-2 rounded-xl text-sm font-semibold transition-opacity"
             style={{
               background: 'rgba(248,113,113,0.1)', color: 'var(--color-danger)',
               border: '1px solid rgba(248,113,113,0.3)',
-              opacity: deleteConfirm !== currentUser.email || deleteLoading ? 0.4 : 1,
-              cursor: deleteConfirm !== currentUser.email ? 'not-allowed' : 'pointer',
+              opacity: deleteLoading ? 0.4 : 1,
+              cursor: 'pointer',
             }}>
             {deleteLoading ? tr.deleting : tr.deleteAccount}
           </button>
         </div>
       </Section>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 bg-surface-base border border-surface-550">
+            <h3 className="text-sm font-bold mb-2 text-danger">
+              {tr.deleteConfirmTitle || 'Delete your account?'}
+            </h3>
+            <p className="text-xs mb-3 text-ink-subtle">
+              {tr.deleteConfirmIntro || 'This is permanent and cannot be undone. It will delete:'}
+            </p>
+            <ul className="text-xs mb-4 text-ink-faint list-disc pl-4 space-y-1">
+              <li>{tr.deleteConfirmItemAccount || 'Your account, login, and email'}</li>
+              <li>{tr.deleteConfirmItemProfile || 'Your hand profile and reach settings'}</li>
+              <li>{tr.deleteConfirmItemSongs || 'Your saved and imported songs'}</li>
+              <li>{tr.deleteConfirmItemHistory || 'Your practice history and progress on every song'}</li>
+              <li>{tr.deleteConfirmItemSubscription || 'Your subscription and billing records'}</li>
+            </ul>
+            <p className="text-xs mb-3 text-ink-ghost">
+              {tr.deleteConfirmNote || 'Built-in catalog songs are shared content and are not affected.'}
+            </p>
+            <label className="block text-xs mb-1 text-ink-muted">
+              {tr.deleteConfirmTypeEmail || `Type ${currentUser.email} to confirm`}
+            </label>
+            <input
+              style={{ ...inputStyle, borderColor: deleteConfirm === currentUser.email ? 'var(--color-danger)' : 'var(--color-surface-600)' }}
+              value={deleteConfirm}
+              onChange={e => setDeleteConfirm(e.target.value)}
+              placeholder={currentUser.email}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-600)' }}>
+                {tr.cancel || 'Cancel'}
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleteConfirm !== currentUser.email || deleteLoading}
+                className="px-4 py-2 rounded-xl text-sm font-semibold transition-opacity"
+                style={{
+                  background: 'var(--color-danger)', color: 'white',
+                  opacity: deleteConfirm !== currentUser.email || deleteLoading ? 0.5 : 1,
+                  cursor: deleteConfirm !== currentUser.email ? 'not-allowed' : 'pointer',
+                }}>
+                {deleteLoading ? tr.deleting : (tr.deleteConfirmYes || 'Yes, delete my account')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -125,6 +125,31 @@ function ParticleField({ count = 420 }) {
       };
     });
 
+    // Pre-rendered glow sprites (one per hue), reused via drawImage for every
+    // particle. ctx.shadowBlur is a real per-shape Gaussian blur recomputed on
+    // every fill() call — doing that 420x/frame (60fps) measured as the single
+    // biggest CPU cost on this page (near-continuous high CPU on the landing
+    // page). Baking the blur once into an offscreen canvas and compositing it
+    // with drawImage keeps the same soft-glow look at a fraction of the cost.
+    const GLOW_SIZE = 24; // px, at 1x — big enough to hold the blur falloff
+    function makeGlowSprite(hue) {
+      const c = document.createElement('canvas');
+      c.width = c.height = GLOW_SIZE;
+      const g = c.getContext('2d');
+      const r = GLOW_SIZE / 2;
+      const grad = g.createRadialGradient(r, r, 0, r, r, r);
+      grad.addColorStop(0, `rgba(${hue}, 0.9)`);
+      grad.addColorStop(0.4, `rgba(${hue}, 0.35)`);
+      grad.addColorStop(1, `rgba(${hue}, 0)`);
+      g.fillStyle = grad;
+      g.fillRect(0, 0, GLOW_SIZE, GLOW_SIZE);
+      return c;
+    }
+    const glowSprites = {
+      gold: makeGlowSprite('201,169,110'),
+      purple: makeGlowSprite('167,139,250'),
+    };
+
     let t = 0;
     // Helix geometry, recomputed from current size each frame.
     const draw = () => {
@@ -149,15 +174,12 @@ function ParticleField({ count = 420 }) {
         const front = (pt.depth + 1) / 2;             // 0..1
         const r = 0.6 + front * 1.6;                  // smaller in back, bigger in front
         const alpha = 0.25 + front * 0.75;            // dimmer in back, brighter in front
-        const hue = pt.gold ? '201,169,110' : '167,139,250';
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${hue}, ${alpha.toFixed(3)})`;
-        ctx.shadowColor = `rgba(${hue}, ${alpha.toFixed(3)})`;
-        ctx.shadowBlur = 4 * front;
-        ctx.fill();
+        const sprite = pt.gold ? glowSprites.gold : glowSprites.purple;
+        const size = GLOW_SIZE * (r / 1.2);           // scale sprite with particle size
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sprite, pt.x - size / 2, pt.y - size / 2, size, size);
       }
-      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     };
     const step = () => {
       t += 1;
