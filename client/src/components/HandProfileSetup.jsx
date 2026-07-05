@@ -5,25 +5,27 @@ import { useT } from '../lib/i18n';
 import { handAnalysis } from '../lib/api';
 
 const GAPS = [
-  { key: 'thumbToIndex',  labelKey: 'thumbIndex',  descKey: 'thumbIndexTip',  range: [8, 18],  step: 0.5, color: '#a78bfa', fingers: ['T','I'] },
-  { key: 'indexToMiddle', labelKey: 'indexMiddle', descKey: 'indexMiddleTip', range: [4, 12],  step: 0.5, color: '#38bdf8', fingers: ['I','M'] },
-  { key: 'middleToRing',  labelKey: 'middleRing',  descKey: 'middleRingTip',  range: [3, 10],  step: 0.5, color: '#34d399', fingers: ['M','R'] },
-  { key: 'ringToLittle',  labelKey: 'ringPinky',   descKey: 'ringPinkyTip',   range: [5, 14],  step: 0.5, color: '#c9a96e', fingers: ['R','P'] },
+  { key: 'thumbToIndex',  labelKey: 'thumbIndex',  descKey: 'thumbIndexTip',  range: [5, 10],    step: 0.25, color: '#a78bfa', fingers: ['T','I'] },
+  { key: 'indexToMiddle', labelKey: 'indexMiddle', descKey: 'indexMiddleTip', range: [2.5, 7],   step: 0.25, color: '#38bdf8', fingers: ['I','M'] },
+  { key: 'middleToRing',  labelKey: 'middleRing',  descKey: 'middleRingTip',  range: [2, 6],     step: 0.25, color: '#34d399', fingers: ['M','R'] },
+  { key: 'ringToLittle',  labelKey: 'ringPinky',   descKey: 'ringPinkyTip',   range: [3, 8.5],   step: 0.25, color: '#c9a96e', fingers: ['R','P'] },
 ];
 
+// Bands are on the raw reach multiplier; the average hand scores ≈ 0.713
+// against the 95th-percentile reference, so "average" is the band around it.
 const GUITAR_LEVELS = [
-  { minM: 0.95, level: 5, titleKey: 'eliteReach',        color: '#4ade80', summary: 'Virtually no chord is out of reach. 4-fret stretches and jazz voicings all feel natural.',             chords: ['Full barré', '4-fret stretches', 'Jazz voicings', 'Extended 9th/13th'] },
-  { minM: 0.87, level: 4, titleKey: 'strongReach',       color: '#38bdf8', summary: 'Most standard chords comfortable. Wide stretches need a warm-up but are achievable.',                  chords: ['Open chords', 'Power chords', 'Most barré', '3-fret stretches'] },
-  { minM: 0.78, level: 3, titleKey: 'averageReach',      color: '#c9a96e', summary: 'Comfortable with everyday chords. Wide stretches (fret 4+) may need repositioning.',                   chords: ['Open chords', 'Power chords', 'Partial barré', '2–3 fret stretches'] },
-  { minM: 0.68, level: 2, titleKey: 'limitedReach',      color: '#fb923c', summary: 'Basic chords are fine. Barré chords and 3-fret spans need effort or alternative fingerings.',          chords: ['Open chords', 'Power chords', 'Simple 2-fret shapes'] },
+  { minM: 0.79, level: 5, titleKey: 'eliteReach',        color: '#4ade80', summary: 'Virtually no chord is out of reach. 4-fret stretches and jazz voicings all feel natural.',             chords: ['Full barré', '4-fret stretches', 'Jazz voicings', 'Extended 9th/13th'] },
+  { minM: 0.73, level: 4, titleKey: 'strongReach',       color: '#38bdf8', summary: 'Most standard chords comfortable. Wide stretches need a warm-up but are achievable.',                  chords: ['Open chords', 'Power chords', 'Most barré', '3-fret stretches'] },
+  { minM: 0.65, level: 3, titleKey: 'averageReach',      color: '#c9a96e', summary: 'Comfortable with everyday chords. Wide stretches (fret 4+) may need repositioning.',                   chords: ['Open chords', 'Power chords', 'Partial barré', '2–3 fret stretches'] },
+  { minM: 0.57, level: 2, titleKey: 'limitedReach',      color: '#fb923c', summary: 'Basic chords are fine. Barré chords and 3-fret spans need effort or alternative fingerings.',          chords: ['Open chords', 'Power chords', 'Simple 2-fret shapes'] },
   { minM: 0,    level: 1, titleKey: 'veryLimitedReach',  color: '#f87171', summary: 'Many shapes are physically difficult. Focus on open chords, capo use, and adapted fingerings.',        chords: ['Open chords', 'Capo-assisted', 'Simplified voicings'] },
 ];
 
 const GAP_IMPACT = {
-  thumbToIndex:  { low: [11, 'Thumb reach limited — thumb-over-neck bass notes will be difficult.'], high: [14, 'Strong thumb span — thumb-over-neck technique feels natural.'], mid: 'Adequate thumb span for standard fretting.' },
-  indexToMiddle: { low: [5.5,'Tight index-middle gap — fret spreads beyond 2 frets will feel strained.'], high: [8, 'Wide gap — 3–4 fret spreads are comfortable.'], mid: 'Standard index-middle spread — 2–3 fret spans manageable.' },
-  middleToRing:  { low: [4.5,'Limited middle-ring independence — chord transitions may be slow.'], high: [6.5,'Good spread — smooth transitions between chord shapes.'], mid: 'Average middle-ring spread — most shapes achievable.' },
-  ringToLittle:  { low: [7,  'Weak pinky reach — 4th finger notes on high frets will be very hard.'], high: [10, 'Strong pinky — can anchor high voicings and extensions.'], mid: 'Moderate pinky reach — standard use fine, wide extensions need effort.' },
+  thumbToIndex:  { low: [6.5, 'Thumb reach limited — thumb-over-neck bass notes will be difficult.'], high: [8.5, 'Strong thumb span — thumb-over-neck technique feels natural.'], mid: 'Adequate thumb span for standard fretting.' },
+  indexToMiddle: { low: [3.5, 'Tight index-middle gap — fret spreads beyond 2 frets will feel strained.'], high: [5.5, 'Wide gap — 3–4 fret spreads are comfortable.'], mid: 'Standard index-middle spread — 2–3 fret spans manageable.' },
+  middleToRing:  { low: [2.5, 'Limited middle-ring independence — chord transitions may be slow.'], high: [4.5, 'Good spread — smooth transitions between chord shapes.'], mid: 'Average middle-ring spread — most shapes achievable.' },
+  ringToLittle:  { low: [4.5, 'Weak pinky reach — 4th finger notes on high frets will be very hard.'], high: [6.5, 'Strong pinky — can anchor high voicings and extensions.'], mid: 'Moderate pinky reach — standard use fine, wide extensions need effort.' },
 };
 
 function getImpact(key, value) {
@@ -151,7 +153,7 @@ function HandDiagram({ profile }) {
     profile.middleToRing  ?? DEFAULT_PROFILE.middleToRing,
     profile.ringToLittle  ?? DEFAULT_PROFILE.ringToLittle,
   ];
-  const s = 0.4;
+  const s = 0.72;   // px per cm ÷ 3 — sized for true-scale gap values (avg ≈ 7.5/4.5/3.5/5.5 cm)
   const tipXs = [0,0,0,0,0];
   tipXs[1] = bases[1].x;
   tipXs[2] = tipXs[1] + userGaps[1] * s * 3;
@@ -184,10 +186,10 @@ function aiReportToProfile(report) {
   const m = report.measurements;
   if (m && typeof m.thumb_to_index_cm === 'number') {
     return {
-      thumbToIndex:  clamp(m.thumb_to_index_cm,  8,  18),
-      indexToMiddle: clamp(m.index_to_middle_cm, 4,  12),
-      middleToRing:  clamp(m.middle_to_ring_cm,  3,  10),
-      ringToLittle:  clamp(m.ring_to_pinky_cm,   5,  14),
+      thumbToIndex:  clamp(m.thumb_to_index_cm,  5,   10),
+      indexToMiddle: clamp(m.index_to_middle_cm, 2.5,  7),
+      middleToRing:  clamp(m.middle_to_ring_cm,  2,    6),
+      ringToLittle:  clamp(m.ring_to_pinky_cm,   3,    8.5),
     };
   }
   // Fallback: bucket from span/splay
@@ -195,10 +197,10 @@ function aiReportToProfile(report) {
   const span  = bp.absolute_span_assessment;
   const splay = bp.inferred_flexibility_splay;
   return {
-    thumbToIndex:  span  === 'Large' ? 15.0 : span  === 'Medium' ? 13.5 : 11.5,
-    indexToMiddle: splay === 'High'  ?  8.5 : splay === 'Medium' ?  7.5 :  6.0,
-    middleToRing:  splay === 'High'  ?  6.5 : splay === 'Medium' ?  6.0 :  4.5,
-    ringToLittle:  (span === 'Large' && splay === 'High') ? 11.0 : span === 'Large' ? 10.0 : splay === 'High' ? 8.5 : 9.5,
+    thumbToIndex:  span  === 'Large' ? 9.0 : span  === 'Medium' ? 7.5 : 6.5,
+    indexToMiddle: splay === 'High'  ? 5.5 : splay === 'Medium' ? 4.5 : 3.5,
+    middleToRing:  splay === 'High'  ? 4.5 : splay === 'Medium' ? 3.5 : 2.5,
+    ringToLittle:  (span === 'Large' && splay === 'High') ? 7.5 : span === 'Large' ? 6.5 : splay === 'High' ? 6.0 : 5.5,
   };
 }
 

@@ -3,17 +3,19 @@ import { useT } from '../lib/i18n';
 
 const TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
 const MCP = { index: 5, pinky: 17 };
-// Fallback palm width (cm) used only when metric world landmarks are unavailable.
-const PALM_REF_CM = 8.5;
+// Fallback palm width (cm, index-knuckle to pinky-knuckle) used only when
+// metric world landmarks are unavailable. True adult average ≈ 8 cm.
+const PALM_REF_CM = 8.0;
 
-// MediaPipe's world landmarks are relative to an internal average-hand model and
-// systematically UNDER-report absolute size — especially with the palm held flat
-// toward the camera, where foreshortening collapses the fingertip-to-fingertip
-// distances. Empirically this reads a real average hand ~30% too small, which
-// pushed average hands into "Very small". This factor rescales the world-landmark
-// measurements back toward true centimeters. (The card-calibration path has a
-// real reference and is unaffected.) Tune if a device reads consistently off.
-const WORLD_SCALE_CORRECTION = 1.4;
+// MediaPipe's world landmarks are metric 3D (meters) fitted to an internal
+// average-hand model, so they already read close to true centimeters. The old
+// ×1.4 factor here existed only to mask the app's previously inflated reference
+// data (average total span was modeled as 36.5 cm vs the true ~21 cm, so real
+// hands read "Very small" and measurements were scaled up to compensate). With
+// the reference data now anatomically correct, no correction is applied — a
+// true-average splayed hand should total ≈ 21 cm across the four gaps. Tune
+// only if a specific device reads consistently off against a ruler.
+const WORLD_SCALE_CORRECTION = 1.0;
 
 const GAP_KEYS = ['thumbToIndex', 'indexToMiddle', 'middleToRing', 'ringToLittle'];
 
@@ -23,10 +25,10 @@ const CARD_SHORT_CM = 5.398; // 53.98 mm short edge
 const CARD_ASPECT = CARD_LONG_CM / CARD_SHORT_CM; // ~1.586
 
 const RANGES = {
-  thumbToIndex:  [8, 18],
-  indexToMiddle: [4, 12],
-  middleToRing:  [3, 10],
-  ringToLittle:  [5, 14],
+  thumbToIndex:  [5, 10],
+  indexToMiddle: [2.5, 7],
+  middleToRing:  [2, 6],
+  ringToLittle:  [3, 8.5],
 };
 
 function dist(a, b) {
@@ -204,10 +206,10 @@ function drawRuler(ctx, W, H, pxPerCm) {
 // Population-average finger gaps (cm), matching DEFAULT_PROFILE. Drawn as a
 // ghost reference hand so the user can compare their reach against "average".
 const AVG_GAPS = {
-  thumbToIndex: 13.5,
-  indexToMiddle: 7.5,
-  middleToRing: 6.0,
-  ringToLittle: 9.5,
+  thumbToIndex: 7.5,
+  indexToMiddle: 4.5,
+  middleToRing: 3.5,
+  ringToLittle: 5.5,
 };
 // Rough average finger lengths (cm) from the knuckle line, for a recognizable
 // stylized outline. These are display-only; the gaps above drive the reach span.

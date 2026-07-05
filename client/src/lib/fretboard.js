@@ -45,14 +45,23 @@ export function calcDifficulty(notes) {
   // Diagonal reach (Euclidean)
   const totalReachMm = Math.sqrt(fretReachMm ** 2 + stringReachMm ** 2);
 
-  // Calibrated for short fingers: max comfortable reach ~60mm diagonal
-  // Score scales from 1 (0mm) to 10 (>=90mm)
-  const score = 1 + (totalReachMm / 90) * 9;
+  // Nonlinear calibration anchored on real shapes. The min→max diagonal
+  // overstates effort for multi-finger chords (fingers share the span one
+  // gap at a time), so the curve is convex: everyday shapes sit mid-scale
+  // and only genuinely extreme spans reach the top.
+  //   ~11mm (Em)            → ~1.2
+  //   ~22mm (A)             → ~1.9
+  //   ~64mm (G)             → ~3.9
+  //   ~75mm (C, 3-fret arc) → ~4.7
+  //   ~87mm (full F barre)  → ~5.7
+  //   ~101mm (4-fret span)  → ~7.0
+  //   ≥130mm                → 10
+  const score = 1 + 9 * Math.pow(totalReachMm / 130, 1.6);
   return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
 }
 
 // Reference comfortable gap maxima (cm), 95th percentile
-export const GAP_REF_MAX = { thumbToIndex: 15, indexToMiddle: 9, middleToRing: 7, ringToLittle: 11 };
+export const GAP_REF_MAX = { thumbToIndex: 9.5, indexToMiddle: 6.5, middleToRing: 5.0, ringToLittle: 7.5 };
 
 // Fret spacing in cm (same model as mm version above, converted)
 function fretSpacingCm(fret) {

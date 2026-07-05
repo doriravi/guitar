@@ -2,19 +2,19 @@
 // All gaps are in centimeters (measured with hand splayed flat on a surface).
 
 export const DEFAULT_PROFILE = {
-  thumbToIndex:   13.5,   // cm  (population avg ~12–15)
-  indexToMiddle:   7.5,   // cm  (population avg ~6–9)
-  middleToRing:    6.0,   // cm  (population avg ~5–7)
-  ringToLittle:    9.5,   // cm  (population avg ~8–11)
+  thumbToIndex:   7.5,   // cm  (population avg; typical range 6.5–8.5)
+  indexToMiddle:  4.5,   // cm  (population avg; typical range 3.5–5.5)
+  middleToRing:   3.5,   // cm  (population avg; typical range 2.5–4.5)
+  ringToLittle:   5.5,   // cm  (population avg; typical range 4.5–6.5)
 };
 
 // Population reference maxima (comfortable stretch, 95th percentile).
 // Scores above these values are clamped to difficulty 10.
 const REF_MAX = {
-  thumbToIndex:   15,
-  indexToMiddle:   9,
-  middleToRing:    7,
-  ringToLittle:   11,
+  thumbToIndex:   9.5,
+  indexToMiddle:  6.5,
+  middleToRing:   5.0,
+  ringToLittle:   7.5,
 };
 
 /**
@@ -41,15 +41,20 @@ export function reachMultiplier(profile) {
 }
 
 /**
- * Re-calibrate a raw difficulty score (1-10, computed for default hand) to the
- * user's personal hand size.  A smaller hand finds the same chord harder.
+ * Re-calibrate a raw difficulty score (1-10, computed for the AVERAGE hand)
+ * to the user's personal hand size. A smaller hand finds the same chord
+ * harder; an average hand sees raw scores unchanged.
  *
- * Formula: effectiveDifficulty = rawScore / multiplier, clamped 1-10.
+ * The scale factor is the hand's reach RELATIVE TO THE AVERAGE hand (not the
+ * 95th-percentile reference — dividing by that inflated every score, even for
+ * average hands, and pushed most of the library to 10/10). The exponent damps
+ * the effect: a hand 25% smaller than average plays ~22% harder, not 33% —
+ * small hands adapt with technique, they don't scale linearly.
  */
 export function personalDifficulty(rawScore, profile) {
-  const m = reachMultiplier(profile);
-  if (m <= 0) return 10;
-  const adjusted = rawScore / m;
+  const r = reachMultiplier(profile) / AVG_MULTIPLIER;   // 1.0 = average hand
+  if (r <= 0) return 10;
+  const adjusted = rawScore / Math.pow(r, 0.7);
   return Math.min(10, Math.max(1, Math.round(adjusted * 10) / 10));
 }
 
@@ -70,15 +75,14 @@ export function isWithinReach(rawScore, profile) {
  *
  * A chord that feels like a mild-to-moderate stretch (displayed ≈ 7/10) is a
  * good upper limit for comfortable play. personalDifficulty maps raw→displayed
- * by dividing by the hand multiplier, so the RAW difficulty that lands at 7 for
- * this hand is `7 * multiplier`. A smaller hand (small multiplier) can only
- * comfortably reach lower raw-difficulty shapes, so it gets a LOWER ceiling; a
- * larger hand gets a higher one. Clamped to 1-10.
+ * by dividing by the damped ratio-to-average, so the RAW difficulty that lands
+ * at 7 for this hand is `7 × r^0.7`. An average hand gets ceiling 7; a smaller
+ * hand a lower one; a larger hand a higher one. Clamped to 1-10.
  */
 export function recommendedMaxDifficulty(profile) {
   const COMFORTABLE_DISPLAYED = 7;
-  const m = reachMultiplier(profile);
-  const ceiling = COMFORTABLE_DISPLAYED * m;
+  const r = reachMultiplier(profile) / AVG_MULTIPLIER;
+  const ceiling = COMFORTABLE_DISPLAYED * Math.pow(Math.max(0, r), 0.7);
   return Math.min(10, Math.max(1, Math.round(ceiling)));
 }
 
@@ -87,7 +91,7 @@ export function recommendedMaxDifficulty(profile) {
 // ability label RELATIVE TO THE AVERAGE HAND (not the max) so normal variation
 // isn't over-penalized — otherwise a slightly-small-but-normal hand wrongly
 // reads as "Very small". `AVG_MULTIPLIER` is what DEFAULT_PROFILE scores.
-const AVG_MULTIPLIER = reachMultiplier(DEFAULT_PROFILE); // ≈ 0.854
+const AVG_MULTIPLIER = reachMultiplier(DEFAULT_PROFILE); // ≈ 0.713
 
 /**
  * Map a hand profile to a human-readable ability label. Bands are expressed as

@@ -14,6 +14,7 @@ import { loadCustomSongs, addCustomSong, updateCustomSong, songToText } from '..
 import { loadCatalogSongs } from '../lib/catalogSongs';
 import { parseChordSheet } from '../lib/chordSheetParser';
 import { lookupVoicings } from '../lib/voicingLookup';
+import { resolveChordCells } from '../lib/songTimeline';
 import { filterSongsByReach } from '../lib/songReach';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
@@ -603,24 +604,23 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
   // The real BPM for this song (per-song map, falls back to a sensible default).
   const playBpm = song.bpm ?? songBpm(song.title) ?? 100;
 
-  // The Play button walks the WHOLE song — every chord in the order it appears
-  // across the lyric lines — not just the bare progression. For a custom song
-  // that's its saved lyricLines; otherwise the song's chord sequence repeated
-  // once through. Each chord resolves to its easiest voicing.
+  // The Play button walks the WHOLE song — every chord cell in the exact order
+  // it appears through the song, resolved the SAME way the display, Song Editor
+  // and Play-Along game resolve it (resolveChordCells: lyricLines verbatim, else
+  // the song's real per-line sequence via lineChords, else the full chord chain).
+  // This is the fix for "play should play the all song": built-in progression
+  // songs previously fell back to each unique chord once instead of the whole
+  // structure. Each cell resolves to its easiest catalogued voicing.
   const songPlaySequence = useMemo(() => {
     const byName = new Map(songChordsWithVoicings.map(c => [c.chordName, c.voicings[0]]));
-    if (song.lyricLines && song.lyricLines.length) {
-      const seq = [];
-      for (const ln of song.lyricLines) {
-        for (const name of (ln.chordNames || [])) {
-          const v = byName.get(name) || lookupVoicings(name)[0];
-          if (v) seq.push(v);
-        }
-      }
-      if (seq.length) return seq;
+    const seq = [];
+    for (const cell of resolveChordCells(song)) {
+      const v = byName.get(cell.chordName) || cell.voicings?.[0] || lookupVoicings(cell.chordName)[0];
+      if (v) seq.push(v);
     }
+    if (seq.length) return seq;
     return songChordsWithVoicings.map(c => c.voicings[0]).filter(Boolean);
-  }, [song.lyricLines, songChordsWithVoicings]);
+  }, [song, songChordsWithVoicings]);
 
   return (
     <div style={{ borderBottom: '1px solid var(--color-surface-750)' }}>
@@ -990,10 +990,10 @@ const INDEP_ORDER   = { Low: 0, Medium: 1, High: 2 };
 
 function HandFiltersPanel({ profile, aiFingers, handFilters, setHandFilters, onSaveProfile, onGapsChange }) {
   const GAPS = [
-    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [0, 18],  step: 0.5, color: 'var(--color-accent)' },
-    { key: 'indexToMiddle', label: 'Index → Middle', range: [0, 12],  step: 0.5, color: 'var(--color-info)' },
-    { key: 'middleToRing',  label: 'Middle → Ring',  range: [0, 10],  step: 0.5, color: 'var(--color-success)' },
-    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [0, 14],  step: 0.5, color: 'var(--color-brand)' },
+    { key: 'thumbToIndex',  label: 'Thumb → Index',  range: [0, 10],  step: 0.25, color: 'var(--color-accent)' },
+    { key: 'indexToMiddle', label: 'Index → Middle', range: [0, 7],   step: 0.25, color: 'var(--color-info)' },
+    { key: 'middleToRing',  label: 'Middle → Ring',  range: [0, 6],   step: 0.25, color: 'var(--color-success)' },
+    { key: 'ringToLittle',  label: 'Ring → Pinky',   range: [0, 8.5], step: 0.25, color: 'var(--color-brand)' },
   ];
 
   const [localGaps, setLocalGaps] = useState({

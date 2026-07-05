@@ -37,10 +37,10 @@ public class ClaudeHandAnalysisController {
     private static final String SYSTEM_PROMPT =
         "You are a guitar biomechanics expert. Analyze this left hand photo and estimate the player's finger gap measurements and chord reach capability.\n\n" +
         "Measure the visible spread distances between adjacent fingertips when the hand is splayed:\n" +
-        "- thumb_to_index_cm: distance in cm between thumb tip and index tip (range 8-18)\n" +
-        "- index_to_middle_cm: distance in cm between index and middle fingertips (range 4-12)\n" +
-        "- middle_to_ring_cm: distance in cm between middle and ring fingertips (range 3-10)\n" +
-        "- ring_to_pinky_cm: distance in cm between ring and pinky fingertips (range 5-14)\n\n" +
+        "- thumb_to_index_cm: distance in cm between thumb tip and index tip (adult average 7.5, range 5-10)\n" +
+        "- index_to_middle_cm: distance in cm between index and middle fingertips (adult average 4.5, range 2.5-7)\n" +
+        "- middle_to_ring_cm: distance in cm between middle and ring fingertips (adult average 3.5, range 2-6)\n" +
+        "- ring_to_pinky_cm: distance in cm between ring and pinky fingertips (adult average 5.5, range 3-8.5)\n\n" +
         "Also assess each finger individually:\n" +
         "- thumb: length category (Short/Medium/Long), flexibility (Low/Medium/High), note about guitar technique impact\n" +
         "- index: length (Short/Medium/Long), straightness (Curved/Straight), barre chord suitability\n" +
@@ -49,7 +49,7 @@ public class ClaudeHandAnalysisController {
         "- pinky: length (Short/Medium/Long), reach (Weak/Moderate/Strong), note about 4th finger use\n\n" +
         "Grades: 1=Open chords, 2=Drop-2/jazz voicings, 3=Full barre/minor9ths, 4=Hendrix thumb/5-fret stretches, 5=Holdsworth wide voicings.\n\n" +
         "Return ONLY valid JSON, no markdown fences, no extra text. Keep all description strings under 60 chars:\n" +
-        "{\"measurements\":{\"thumb_to_index_cm\":13.5,\"index_to_middle_cm\":7.5,\"middle_to_ring_cm\":6.0,\"ring_to_pinky_cm\":9.5}," +
+        "{\"measurements\":{\"thumb_to_index_cm\":7.5,\"index_to_middle_cm\":4.5,\"middle_to_ring_cm\":3.5,\"ring_to_pinky_cm\":5.5}," +
         "\"biomechanical_profile\":{\"absolute_span_assessment\":\"Small|Medium|Large\",\"inferred_flexibility_splay\":\"Low|Medium|High\"," +
         "\"fingers\":{\"thumb\":{\"length\":\"Short|Medium|Long\",\"flexibility\":\"Low|Medium|High\",\"note\":\"<15 words>\"}," +
         "\"index\":{\"length\":\"Short|Medium|Long\",\"straightness\":\"Curved|Straight\",\"note\":\"<15 words>\"}," +

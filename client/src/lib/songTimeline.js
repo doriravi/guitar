@@ -10,6 +10,50 @@ import { getDiatonicChords } from './scales';
 import { enrichChords } from './lyricChords';
 import { lookupVoicings } from './voicingLookup';
 
+/**
+ * Split a lyric line into `count` fragments, one per chord change on the line,
+ * so each chord can display the words sung while it sounds.
+ *  • With `positions` (character offsets of each chord in the text — from the
+ *    catalog/ChordPro inline markers), slice the text at those offsets: fragment
+ *    k is text[positions[k] .. positions[k+1]).
+ *  • Without positions, distribute the line's words as evenly as possible across
+ *    the chords.
+ * Returns an array of `count` strings (trimmed); empty strings are fine.
+ */
+export function lyricFragments(text, count, positions) {
+  if (count <= 0) return [];
+  const t = (text || '').trim();
+  if (!t) return Array(count).fill('');
+  if (count === 1) return [t];
+
+  if (Array.isArray(positions) && positions.length === count) {
+    const frags = [];
+    for (let k = 0; k < count; k++) {
+      const start = Math.max(0, Math.min(text.length, positions[k]));
+      const end = k + 1 < count ? Math.max(start, Math.min(text.length, positions[k + 1])) : text.length;
+      frags.push(text.slice(start, end).trim());
+    }
+    // If the first chord starts after some lead-in words, glue them onto it so
+    // no lyric is dropped.
+    const leadEnd = Math.max(0, Math.min(text.length, positions[0]));
+    if (leadEnd > 0) {
+      const lead = text.slice(0, leadEnd).trim();
+      if (lead) frags[0] = (lead + ' ' + frags[0]).trim();
+    }
+    return frags;
+  }
+
+  // Even word split.
+  const words = t.split(/\s+/);
+  const frags = Array(count).fill('');
+  const per = words.length / count;
+  for (let i = 0; i < words.length; i++) {
+    const k = Math.min(count - 1, Math.floor(i / per));
+    frags[k] = frags[k] ? `${frags[k]} ${words[i]}` : words[i];
+  }
+  return frags;
+}
+
 // Build the flat per-cell chord timeline for a song (one entry per chord beat-
 // cell, NOT deduplicated). Mirrors ProgressionExplorer's chord resolution so
 // every consumer sees the same chords the song shows.
@@ -18,10 +62,16 @@ export function resolveChordCells(song) {
   if (song.lyricLines && song.lyricLines.length) {
     const seq = [];
     for (const ln of song.lyricLines) {
-      for (const name of (ln.chordNames || [])) {
+      const names = ln.chordNames || [];
+      // Split the line's lyric across its chords so each chord cell carries the
+      // words sung under it (for the Play-Along synced-lyrics display). Prefer
+      // exact chord character positions when the source has them (catalog/
+      // ChordPro); otherwise fall back to an even word split.
+      const frags = lyricFragments(ln.text || '', names.length, ln.chordPositions);
+      names.forEach((name, k) => {
         const voicings = lookupVoicings(name).slice().sort((a, b) => a.score - b.score);
-        seq.push({ chordName: name, voicings, degree: null, roman: null });
-      }
+        seq.push({ chordName: name, voicings, degree: null, roman: null, lyric: frags[k] || '' });
+      });
     }
     if (seq.length) return seq;
   }
@@ -48,10 +98,22 @@ export function resolveChordCells(song) {
     finalNames = enrichChords(song.degrees, baseNames, song.scaleType);
   }
 
-  return song.degrees.map((d, i) => {
+  // The full per-cell sequence. `lineChords` is the song's REAL structure —
+  // indices into `degrees` giving the actual chord order across every line — so
+  // expand it when present; otherwise fall back to one cell per unique degree.
+  // (Mirrors composerLibrary's songChordNames; without this, consumers that walk
+  // cells — the Song Editor, the Play-Along game, the Progression Play button —
+  // only see each unique chord once instead of the whole song.)
+  const cellFor = (d, i) => {
     const chordName = finalNames[i];
     const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
     const dia = diatonic[d];
     return { chordName, voicings, degree: d, roman: dia?.roman ?? null };
-  });
+  };
+  if (song.lineChords && song.lineChords.length) {
+    return song.lineChords
+      .map(i => (i >= 0 && i < song.degrees.length ? cellFor(song.degrees[i], i) : null))
+      .filter(Boolean);
+  }
+  return song.degrees.map((d, i) => cellFor(d, i));
 }

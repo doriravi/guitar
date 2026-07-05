@@ -25,6 +25,7 @@ import { useMic, detectPeaksConfigured } from '../lib/micDetect';
 import { playTicks, playBacking, playMetronome, stopAudio, unlockAudio } from '../lib/audio';
 import { loadCustomSongs } from '../lib/customSongs';
 import { loadCatalogSongs } from '../lib/catalogSongs';
+import { loadComposerSongs, composerSongToLyricSong } from '../lib/composerLibrary';
 import { filterSongsByReach, chordWithinReach, songAllChordNames } from '../lib/songReach';
 import { buildSessionReport } from '../lib/practiceReport';
 import { personalDifficulty } from '../lib/handProfile';
@@ -80,6 +81,7 @@ export default function PracticeGame({ cfg }) {
 
   // ── Song select state ──
   const [customSongs, setCustomSongs] = useState([]);
+  const [composerSongs, setComposerSongs] = useState([]);
   const [catalogSongs, setCatalogSongs] = useState([]);
   const [search, setSearch] = useState('');
   const [speed, setSpeed] = useState(DIFFICULTIES[0].speed);   // default: level 1 = 10%
@@ -138,16 +140,24 @@ export default function PracticeGame({ cfg }) {
     return () => { alive = false; };
   }, []);
   useEffect(() => {
-    if (phase === 'select') { setCustomSongs(loadCustomSongs()); setHistTick(t => t + 1); }
+    if (phase === 'select') {
+      setCustomSongs(loadCustomSongs());
+      setComposerSongs(loadComposerSongs().map(composerSongToLyricSong).filter(Boolean));
+      setHistTick(t => t + 1);
+    }
   }, [phase]);
 
-  // ── Song list (custom + catalog, dedup, ≥4 chord hits, reach-aware) ──
+  // ── Song list (custom + composer + catalog, dedup, ≥4 chord hits, reach-aware) ──
   const songItems = useMemo(() => {
-    const customTitles = new Set(customSongs.map(s => `${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`));
-    const merged = [
-      ...customSongs,
-      ...catalogSongs.filter(s => !customTitles.has(`${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`)),
-    ];
+    const keyOf = s => `${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`;
+    const seen = new Set();
+    const merged = [];
+    for (const s of [...customSongs, ...composerSongs, ...catalogSongs]) {
+      const k = keyOf(s);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      merged.push(s);
+    }
     const withOcc = merged
       .map(s => {
         const occ = (s.lyricLines || []).reduce((n, ln) => n + (ln.chordNames?.length || 0), 0);
@@ -176,7 +186,7 @@ export default function PracticeGame({ cfg }) {
       };
     }).sort((a, b) => (a.song.title || '').localeCompare(b.song.title || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customSongs, catalogSongs, profile, limitToReach, histTick]);
+  }, [customSongs, composerSongs, catalogSongs, profile, limitToReach, histTick]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -515,6 +525,7 @@ export default function PracticeGame({ cfg }) {
   const lastResult = game.results[game.results.length - 1] || null;
   const tl = timelineRef.current;
   const activeIdx = game.resolved;
+  const hasLyrics = !!tl?.windows.some(w => w.lyric);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -801,7 +812,13 @@ export default function PracticeGame({ cfg }) {
                     <span className="text-base font-black leading-none" style={{ color: res ? QUALITY_COLOR[res.quality] : 'var(--color-accent)' }}>
                       {w.name}
                     </span>
-                    {res && <span className="text-[9px] font-bold mt-1" style={{ color: QUALITY_COLOR[res.quality] }}>{QUALITY_LABEL[res.quality]}</span>}
+                    {w.lyric && (
+                      <span className="text-[9px] leading-tight mt-1 px-1 text-center truncate max-w-full"
+                        style={{ color: isActive ? 'var(--color-ink)' : 'var(--color-ink-faint)' }}>
+                        {w.lyric}
+                      </span>
+                    )}
+                    {res && <span className="text-[9px] font-bold mt-0.5" style={{ color: QUALITY_COLOR[res.quality] }}>{QUALITY_LABEL[res.quality]}</span>}
                   </div>
                 );
               })}
@@ -824,6 +841,41 @@ export default function PracticeGame({ cfg }) {
               </div>
             )}
           </div>
+
+          {/* synced lyrics — karaoke line: the word under the current chord is
+              lit; a few words on either side give context */}
+          {hasLyrics && (
+            <div className="rounded-xl px-4 py-3 text-center" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
+              <span className="text-[10px] uppercase tracking-widest font-semibold block mb-1.5" style={{ color: 'var(--color-ink-ghost)' }}>🎤 Sing along</span>
+              <p className="leading-relaxed" style={{ fontSize: 15 }}>
+                {(() => {
+                  const from = Math.max(0, activeIdx - 3);
+                  const to = Math.min(tl.windows.length, activeIdx + 6);
+                  const slice = tl.windows.slice(from, to);
+                  if (!slice.some(w => w.lyric)) {
+                    return <span style={{ color: 'var(--color-ink-ghost)' }}>♪ (instrumental) ♪</span>;
+                  }
+                  return slice.map((w, k) => {
+                    const idx = from + k;
+                    if (!w.lyric) return null;
+                    const active = idx === activeIdx;
+                    const past = idx < activeIdx;
+                    return (
+                      <span key={idx}
+                        style={{
+                          color: active ? 'var(--color-brand)' : past ? 'var(--color-ink-ghost)' : 'var(--color-ink-subtle)',
+                          fontWeight: active ? 800 : 500,
+                          textShadow: active ? '0 0 18px rgba(201,169,110,0.5)' : 'none',
+                          transition: 'color 0.2s',
+                        }}>
+                        {w.lyric}{' '}
+                      </span>
+                    );
+                  });
+                })()}
+              </p>
+            </div>
+          )}
 
           {/* live match meter */}
           <div className="flex items-center gap-2">
