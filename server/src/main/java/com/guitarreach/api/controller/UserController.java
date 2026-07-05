@@ -76,11 +76,13 @@ public class UserController {
     private String cookieSameSite;
 
     private void clearCookie(HttpServletResponse response, String name) {
+        // jwt_refresh was set with path /api/auth/refresh — must match to delete it
+        String path = "jwt_refresh".equals(name) ? "/api/auth/refresh" : "/";
         boolean none = "None".equalsIgnoreCase(cookieSameSite);
         ResponseCookie cookie = ResponseCookie.from(name, "")
                 .httpOnly(true)
                 .secure(cookieSecure || none)
-                .path("/")
+                .path(path)
                 .maxAge(0)
                 .sameSite(none ? "None" : cookieSameSite)
                 .build();

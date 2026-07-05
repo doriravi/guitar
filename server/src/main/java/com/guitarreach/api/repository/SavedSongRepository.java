@@ -12,4 +12,6 @@ public interface SavedSongRepository extends JpaRepository<SavedSong, Long> {
     Optional<SavedSong> findByUserIdAndClientId(Long userId, String clientId);
 
     Optional<SavedSong> findByIdAndUserId(Long id, Long userId);
+
+    void deleteByUserId(Long userId);
 }

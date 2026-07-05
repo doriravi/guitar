@@ -141,7 +141,9 @@ public class AuthService {
     }
 
     private void clearCookie(HttpServletResponse response, String name) {
-        addCookie(response, name, "", "/", 0);
+        // jwt_refresh was set with path /api/auth/refresh — must match to delete it
+        String path = "jwt_refresh".equals(name) ? "/api/auth/refresh" : "/";
+        addCookie(response, name, "", path, 0);
     }
 
     /**

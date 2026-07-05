@@ -116,8 +116,9 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   // Whether a never-logged-in visitor has moved past the marketing landing page
-  // to the sign-in form. Skipped automatically when arriving via an email link.
-  const [showSignIn, setShowSignIn] = useState(false);
+  // to the sign-in form. Skipped automatically when arriving via an email link,
+  // or via ?login=1 (used after account deletion to land straight on sign-in).
+  const [showSignIn, setShowSignIn] = useState(() => getTokenFromUrl('login') === '1');
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -284,10 +285,21 @@ export default function App() {
   async function handleDeleted() {
     await auth.logout().catch(() => {});
     try {
-      localStorage.removeItem('guitar_hand_profile');
-      localStorage.removeItem('guitar_ai_fingers');
+      // Only this account's own data — never guitar_catalog_songs_v1, the
+      // shared built-in song catalog cache, which must survive account deletion.
+      [
+        'guitar_hand_profile',
+        'guitar_ai_fingers',
+        'guitar_lang',
+        'guitar_limit_to_reach',
+        'guitar_songs',
+        'guitar_custom_songs',
+        'guitar_saved_sequences',
+        'guitar_detect_config',
+        'guitar_practice_history_v1',
+      ].forEach(key => localStorage.removeItem(key));
     } catch {}
-    window.location.reload();
+    window.location.href = '/?login=1';
   }
 
   function handleSaveAIFingers(fingers) {

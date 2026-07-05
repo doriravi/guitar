@@ -1,10 +1,10 @@
 import { buildDifficultyTable } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 export default function DifficultyTable() {
   const [maxFret, setMaxFret] = useState(7);
-  const rows = buildDifficultyTable(maxFret);
+  const rows = useMemo(() => buildDifficultyTable(maxFret), [maxFret]);
 
   return (
     <div className="p-4">

@@ -567,7 +567,7 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
 
       {/* Reference image */}
       <div className="mb-5 rounded-xl overflow-hidden border border-surface-700">
-        <img src="/Gemini_Generated_Image_3zi053zi053zi053.png" alt="Hand span diagram" className="w-full object-cover" />
+        <img src="/hand-span-diagram.jpg" alt="Hand span diagram" className="w-full object-cover" />
       </div>
 
       {/* How to measure */}
