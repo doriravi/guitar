@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { usePwaInstall } from '../lib/usePwaInstall'
 
 /**
  * PWA glue, rendered once near the app root. Two independent pieces:
  *
  *  1. Update toast — when a new service worker has cached a fresh build, offer
  *     a one-tap "Update" that activates it and reloads.
- *  2. Install button — on browsers that fire `beforeinstallprompt` (Chrome/Edge
+ *  2. Install prompt — on browsers that fire `beforeinstallprompt` (Chrome/Edge
  *     on Android & desktop, Windows), surface a native "Install app" button.
- *     iOS/iPadOS Safari doesn't fire this event; those users install via the
- *     Share → "Add to Home Screen" flow, so we show a one-time hint instead.
+ *     iOS/iPadOS Safari installs via Share → "Add to Home Screen", so we show a
+ *     one-time hint there instead. The shared install state also powers the
+ *     "Install app" entry in the app's side menu (see usePwaInstall).
  *
  * Purely additive: if the browser supports none of this, the component renders
  * nothing and the app behaves exactly as before.
@@ -20,37 +22,14 @@ export default function PWAPrompt() {
     updateServiceWorker,
   } = useRegisterSW()
 
-  const [installEvent, setInstallEvent] = useState(null)
+  const { canInstall, ios, promptInstall } = usePwaInstall()
+  const [installDismissed, setInstallDismissed] = useState(false)
   const [iosHint, setIosHint] = useState(false)
 
   useEffect(() => {
-    const onPrompt = (e) => {
-      e.preventDefault()
-      setInstallEvent(e)
-    }
-    window.addEventListener('beforeinstallprompt', onPrompt)
-    window.addEventListener('appinstalled', () => setInstallEvent(null))
-
-    // iOS standalone-install hint: only iPhone/iPad Safari, not already
-    // installed, and not dismissed before.
-    const ua = window.navigator.userAgent
-    const isIOS = /iphone|ipad|ipod/i.test(ua) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true
     const dismissed = localStorage.getItem('fretfit_ios_install_hint') === '1'
-    if (isIOS && !isStandalone && !dismissed) setIosHint(true)
-
-    return () => window.removeEventListener('beforeinstallprompt', onPrompt)
-  }, [])
-
-  const install = async () => {
-    if (!installEvent) return
-    installEvent.prompt()
-    await installEvent.userChoice
-    setInstallEvent(null)
-  }
+    if (ios && !dismissed) setIosHint(true)
+  }, [ios])
 
   const dismissIos = () => {
     localStorage.setItem('fretfit_ios_install_hint', '1')
@@ -105,12 +84,12 @@ export default function PWAPrompt() {
     )
   }
 
-  if (installEvent) {
+  if (canInstall && !installDismissed) {
     return (
       <div style={wrap} role="dialog" aria-label="Install app">
         <span>📲 Install FretFit as an app</span>
-        <button style={btn} onClick={install}>Install</button>
-        <button style={ghost} onClick={() => setInstallEvent(null)}>Not now</button>
+        <button style={btn} onClick={promptInstall}>Install</button>
+        <button style={ghost} onClick={() => setInstallDismissed(true)}>Not now</button>
       </div>
     )
   }
