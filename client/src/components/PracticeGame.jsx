@@ -35,6 +35,7 @@ import { useHandProfile, useReachLimit } from '../App';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
+import Neck3D from './Neck3D';
 
 const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
 const NOW_X = 110;               // px position of the now-line inside the lane
@@ -87,6 +88,7 @@ export default function PracticeGame({ cfg }) {
   const [speed, setSpeed] = useState(DIFFICULTIES[0].speed);   // default: level 1 = 10%
   const [drumsOn, setDrumsOn] = useState(false);
   const [metronomeOn, setMetronomeOn] = useState(true);
+  const [view3D, setView3D] = useState(false);
   const [rampMsg, setRampMsg] = useState(null);   // transient toast: { level, pct }
   const [levelUp, setLevelUp] = useState(null);   // giant 5s "Good luck!" interlude: { level, pct }
   const [level, setLevel] = useState(1);          // current game level (1..MAX_LEVEL)
@@ -596,6 +598,14 @@ export default function PracticeGame({ cfg }) {
                     : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
                   🥁 Drums
                 </button>
+                <button onClick={() => setView3D(v => !v)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                  title="Show the current chord on a rotating 3D neck instead of a flat diagram"
+                  style={view3D
+                    ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
+                    : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                  🧊 3D Neck
+                </button>
               </div>
             </div>
             <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
@@ -890,7 +900,14 @@ export default function PracticeGame({ cfg }) {
             {tl.windows[activeIdx] && (
               <div className="flex flex-col items-center">
                 <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-brand)' }}>Now</span>
-                <FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />
+                {view3D ? (
+                  <div style={{ width: 160, height: 140 }}>
+                    <Neck3D notes={tl.windows[activeIdx].notes} />
+                    <p className="text-center text-xs font-semibold -mt-1" style={{ color: 'var(--color-ink)' }}>{tl.windows[activeIdx].name}</p>
+                  </div>
+                ) : (
+                  <FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />
+                )}
               </div>
             )}
             {tl.windows[activeIdx + 1] && (

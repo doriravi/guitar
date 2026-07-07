@@ -2,10 +2,18 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { useT } from '../lib/i18n';
 
 const TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
-const MCP = { index: 5, pinky: 17 };
+const MCP = { thumb: 2, index: 5, middle: 9, ring: 13, pinky: 17 };
 // Fallback palm width (cm, index-knuckle to pinky-knuckle) used only when
-// metric world landmarks are unavailable. True adult average ≈ 8 cm.
+// metric world landmarks AND card calibration are both unavailable. True
+// adult average ≈ 8 cm. Kept only as a last-resort fallback — see
+// `indexLenToPalmRatio` for the preferred anatomical-ratio fallback.
 const PALM_REF_CM = 8.0;
+// Index-finger length (MCP→tip) to palm-width (index-MCP↔pinky-MCP) ratio.
+// This proportion is anatomically far more stable across hand sizes than an
+// absolute palm-width assumption — small and large hands scale together, so
+// measuring one on-screen and knowing the other's usual ratio gives a much
+// better per-user cm/pixel estimate than a fixed 8cm guess.
+const INDEX_LEN_TO_PALM_WIDTH_RATIO = 1.02;
 
 // MediaPipe's world landmarks are metric 3D (meters) fitted to an internal
 // average-hand model, so they already read close to true centimeters. The old
@@ -40,38 +48,104 @@ function dist3D(a, b) {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
 }
 
+// Each tip's associated knuckle (MCP), used to measure that finger's
+// z-tilt (how much it's lifted toward/away from the camera vs the palm
+// plane) so we can correct for perspective foreshortening.
+const TIP_TO_MCP = { [TIP.thumb]: MCP.thumb, [TIP.index]: MCP.index, [TIP.middle]: MCP.middle, [TIP.ring]: MCP.ring, [TIP.pinky]: MCP.pinky };
+
+/**
+ * Z-axis tilt correction (upgrade 1.A): a fingertip distance measured in the
+ * XY (camera) plane under-reports the true 3D gap whenever a finger is bent
+ * or angled toward/away from the lens — the tip's z sits closer to (or
+ * farther from) the camera than its knuckle, foreshortening the on-screen
+ * span. MediaPipe's world landmarks are metric, so the raw z-delta between a
+ * tip and its own knuckle (`z_tip - z_knuckle`) is a real, per-finger measure
+ * of that lean. We correct the flat XY gap by folding the two fingers'
+ * average z-lean back in as a third dimension — recovering the true 3D reach
+ * instead of trusting MediaPipe's depth-scale-prone absolute XYZ distance.
+ */
+function tiltCorrectedGapCm(world, tipA, tipB) {
+  const a = world[tipA], b = world[tipB];
+  const mcpA = world[TIP_TO_MCP[tipA]], mcpB = world[TIP_TO_MCP[tipB]];
+  const flatCm = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2) * 100;
+  // Per-finger lean relative to its own knuckle — cancels whole-hand tilt
+  // (which is roughly common to both fingers) and isolates the individual
+  // finger's bend/reach toward the camera.
+  const leanA = a.z - mcpA.z;
+  const leanB = b.z - mcpB.z;
+  const relLeanCm = (leanA - leanB) * 100;
+  return Math.sqrt(flatCm ** 2 + relLeanCm ** 2);
+}
+
 /**
  * Convert a single frame's landmarks to the 4 finger gaps in cm.
  *
- * Prefers MediaPipe's metric `multiHandWorldLandmarks` (real 3D in meters,
- * centered at the hand) — these give true centimeters with no palm-width
- * assumption and correct for hand tilt/foreshortening via the z-axis. When
- * world landmarks are missing, falls back to the old 2D path that scales by an
- * assumed palm width.
+ * Prefers MediaPipe's metric `multiHandWorldLandmarks`, but rather than
+ * trusting the model's absolute XYZ distance directly (its overall depth
+ * *scale* is prone to error for hands that are larger/smaller than its
+ * internal average-hand prior), we take the flat XY gap — reliable in
+ * relative terms — and add back per-finger z-tilt as a correction for
+ * perspective foreshortening (see `tiltCorrectedGapCm`). When world
+ * landmarks are missing, falls back to `resolvePlanarScale` (card
+ * calibration → index/palm skeletal ratio → fixed palm width, in that
+ * preference order).
  *
  * @param {Array} lm     - normalized image landmarks (multiHandLandmarks)
  * @param {Array|null} world - metric world landmarks (multiHandWorldLandmarks)
+ * @param {number|null} cardCmPerUnit - cm-per-normalized-unit from a tapped card, if active
+ * @param {number} worldScaleCorrection - learned (or default) multiplier correcting MediaPipe's absolute depth scale, from a prior card calibration
  */
-function landmarksToMeasurements(lm, world) {
+function landmarksToMeasurements(lm, world, cardCmPerUnit = null, worldScaleCorrection = WORLD_SCALE_CORRECTION) {
   if (world && world.length >= 21) {
-    const k = 100 * WORLD_SCALE_CORRECTION; // meters→cm, plus under-report correction
+    const k = worldScaleCorrection;
     return {
-      thumbToIndex:  dist3D(world[TIP.thumb],  world[TIP.index])  * k,
-      indexToMiddle: dist3D(world[TIP.index],  world[TIP.middle]) * k,
-      middleToRing:  dist3D(world[TIP.middle], world[TIP.ring])   * k,
-      ringToLittle:  dist3D(world[TIP.ring],   world[TIP.pinky])  * k,
+      thumbToIndex:  tiltCorrectedGapCm(world, TIP.thumb,  TIP.index)  * k,
+      indexToMiddle: tiltCorrectedGapCm(world, TIP.index,  TIP.middle) * k,
+      middleToRing:  tiltCorrectedGapCm(world, TIP.middle, TIP.ring)   * k,
+      ringToLittle:  tiltCorrectedGapCm(world, TIP.ring,   TIP.pinky)  * k,
     };
   }
-  // Fallback: 2D image landmarks scaled by assumed palm width.
-  const palmPx = dist(lm[MCP.index], lm[MCP.pinky]);
-  if (palmPx < 1e-6) return null;
-  const scale = PALM_REF_CM / palmPx;
+  // Fallback: 2D image landmarks scaled by the best available planar scale.
+  const scale = resolvePlanarScale(lm, cardCmPerUnit);
+  if (scale == null) return null;
   return {
     thumbToIndex:  dist(lm[TIP.thumb],  lm[TIP.index])  * scale,
     indexToMiddle: dist(lm[TIP.index],  lm[TIP.middle]) * scale,
     middleToRing:  dist(lm[TIP.middle], lm[TIP.ring])   * scale,
     ringToLittle:  dist(lm[TIP.ring],   lm[TIP.pinky])  * scale,
   };
+}
+
+// Adult-average index finger length, MCP knuckle to tip (cm) — the one
+// absolute anatomical reference the ratio fallback anchors to.
+const INDEX_LEN_REF_CM = 8.15;
+
+/**
+ * Skeletal-ratio fallback (upgrade 1.B): when there's no metric world data
+ * and no card in frame, don't assume every hand has an 8cm palm width.
+ * Instead anchor the scale to index-finger length (MCP→tip), which is more
+ * reliably captured on-screen than palm width (it isn't blocked by an
+ * imaged-flat palm) and — critically — cross-check it against this specific
+ * hand's own index-length-to-palm-width ratio before trusting it: if the
+ * ratio is wildly outside the normal anatomical band, the index reading is
+ * probably foreshortened (finger not fully flat to camera) and we fall back
+ * to the fixed palm-width guess instead of trusting a bad per-user estimate.
+ */
+function resolvePlanarScale(lm, cardCmPerUnit) {
+  if (cardCmPerUnit != null) return cardCmPerUnit;
+  const indexLenPx = dist(lm[MCP.index], lm[TIP.index]);
+  const palmPx = dist(lm[MCP.index], lm[MCP.pinky]);
+  if (palmPx < 1e-6) return null;
+  if (indexLenPx > 1e-6) {
+    const ratio = indexLenPx / palmPx;
+    // Plausibility gate: real hands run close to INDEX_LEN_TO_PALM_WIDTH_RATIO
+    // (~1.02); accept a wide band around it, reject outliers from a
+    // foreshortened/occluded index finger.
+    if (ratio > INDEX_LEN_TO_PALM_WIDTH_RATIO * 0.6 && ratio < INDEX_LEN_TO_PALM_WIDTH_RATIO * 1.6) {
+      return INDEX_LEN_REF_CM / indexLenPx;
+    }
+  }
+  return PALM_REF_CM / palmPx;
 }
 
 /**
@@ -118,6 +192,47 @@ function percentile(arr, p) {
   const s = [...arr].sort((a, b) => a - b);
   const i = Math.min(s.length - 1, Math.floor(p * (s.length - 1)));
   return s[i];
+}
+
+function stdDev(values) {
+  if (values.length < 2) return Infinity; // can't judge stability from <2 samples
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+const STABILITY_WINDOW_MS = 500;
+const STABILITY_MAX_SIGMA_CM = 0.05;
+
+/**
+ * Moving-window stability gate (upgrade 1.C): the 90th-percentile peak over
+ * the *whole* recording buffer can be skewed if the user hesitates or drifts
+ * slowly mid-stretch — a slow "creeping" motion can register several
+ * different but all-plausible-looking values, none of which is really the
+ * held peak. Instead, for each gap, we walk the buffered samples and mark
+ * each one "accepted" only when the trailing 500ms window ending at that
+ * sample has a standard deviation below `STABILITY_MAX_SIGMA_CM` — i.e. the
+ * hand was genuinely holding still there, not still moving into position or
+ * jittering from tracking noise. The final pool (every accepted sample) then
+ * gets the same 90th-percentile treatment as before. Falls back to the full
+ * unfiltered buffer when nothing has stabilized yet, so the live bars still
+ * show progress instead of sitting at zero.
+ */
+function stableGatedPeaks(buffers, stabilityBuffers) {
+  const out = {};
+  for (const k of GAP_KEYS) {
+    const samples = stabilityBuffers[k];
+    const stablePool = [];
+    let winStart = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const t = samples[i].t;
+      while (samples[winStart].t < t - STABILITY_WINDOW_MS) winStart++;
+      const win = samples.slice(winStart, i + 1).map(s => s.v);
+      if (win.length >= 3 && stdDev(win) < STABILITY_MAX_SIGMA_CM) stablePool.push(samples[i].v);
+    }
+    out[k] = stablePool.length ? percentile(stablePool, 0.9) : percentile(buffers[k], 0.9);
+  }
+  return out;
 }
 
 function clampMeasurements(m) {
@@ -435,6 +550,18 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const buffersRef   = useRef({ thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] });
   // Card-calibration buffers: raw 2D gaps (normalized units) collected in parallel.
   const gaps2dBufferRef = useRef({ thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] });
+  // Stability buffers for upgrade 1.C — rolling window of {t, value} samples
+  // per gap, used to gate the peak pool on a low-variance ("hand is fully
+  // still and extended") window instead of trusting every buffered frame.
+  const stabilityBufferRef = useRef({ thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] });
+  // World-landmark palm-width samples during the *card-calibrated* recording,
+  // paired against the card's true palm-width reading — lets us derive a
+  // one-time correction factor for MediaPipe's absolute depth scale (upgrade
+  // 1.A) that then improves every future world-landmark-only measurement in
+  // this session.
+  const worldPalmDuringCardRef = useRef([]);
+  const worldScaleCorrectionRef = useRef(1.0); // learned multiplier, replaces the static WORLD_SCALE_CORRECTION once calibrated
+  const [worldCalibrated, setWorldCalibrated] = useState(false);
 
   const [phase, setPhase]         = useState('idle');
   const [statusMsg, setStatus]    = useState('');
@@ -513,22 +640,28 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
           // While recording, accumulate per-frame gaps for the peak-stretch measure.
           if (recordingRef.current) {
-            const m = landmarksToMeasurements(lm, world);
+            const now = performance.now();
+            const m = landmarksToMeasurements(lm, world, null, worldScaleCorrectionRef.current);
             if (m) {
               const buf = buffersRef.current;
-              for (const k of GAP_KEYS) buf[k].push(m[k]);
-              // Live running p90 drives the on-screen max bars.
-              setLivePeaks({
-                thumbToIndex:  percentile(buf.thumbToIndex,  0.9),
-                indexToMiddle: percentile(buf.indexToMiddle, 0.9),
-                middleToRing:  percentile(buf.middleToRing,  0.9),
-                ringToLittle:  percentile(buf.ringToLittle,  0.9),
-              });
+              const stab = stabilityBufferRef.current;
+              for (const k of GAP_KEYS) {
+                buf[k].push(m[k]);
+                stab[k].push({ t: now, v: m[k] });
+              }
+              // Live running p90 (of the stability-gated pool — see
+              // `stableGatedPeaks`, upgrade 1.C) drives the on-screen max bars.
+              setLivePeaks(stableGatedPeaks(buf, stab));
             }
-            // In card mode, also buffer raw 2D gaps to be scaled by the card later.
+            // In card mode, also buffer raw 2D gaps to be scaled by the card
+            // later, plus the world-landmark palm width alongside it so we
+            // can later derive a MediaPipe depth-scale correction (1.A).
             const g2 = landmarksToGaps2D(lm);
             const b2 = gaps2dBufferRef.current;
             for (const k of GAP_KEYS) b2[k].push(g2[k]);
+            if (cardMode && world && world.length >= 21) {
+              worldPalmDuringCardRef.current.push(dist3D(world[MCP.index], world[MCP.pinky]) * 100);
+            }
           }
         } else {
           latestLm.current = null;
@@ -603,7 +736,10 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
       return;
     }
 
-    setCaptured(clampMeasurements(peakOf(buf)));
+    // Stability-gated peak (1.C) — prefer the filtered "hand was genuinely
+    // still" pool; peakOf(buf) remains only as an empty-pool fallback inside
+    // stableGatedPeaks itself.
+    setCaptured(clampMeasurements(stableGatedPeaks(buf, stabilityBufferRef.current)));
     setLivePeaks(null);
     setPhase('done');
     stop();
@@ -622,6 +758,30 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     const cm = {};
     for (const k of GAP_KEYS) cm[k] = peak2d[k] * cmPerUnit;
     setCaptured(clampMeasurements(cm));
+
+    // Upgrade 1.A: the card gives ground-truth scale for this frame, so we
+    // can now check how far MediaPipe's own absolute depth scale was off and
+    // learn a correction factor for future card-free (world-landmark)
+    // measurements in this session — this hand's true palm width (via the
+    // card-derived cm-per-unit scale) vs. what the world landmarks implied.
+    const lm = latestLm.current;
+    const trueCardPalmCm = lm ? dist(lm[MCP.index], lm[MCP.pinky]) * cmPerUnit : 0;
+    const worldPalmSamples = worldPalmDuringCardRef.current;
+    if (worldPalmSamples.length >= 3 && trueCardPalmCm > 1) {
+      const medianWorldPalmCm = percentile(worldPalmSamples, 0.5);
+      if (medianWorldPalmCm > 1e-3) {
+        const factor = trueCardPalmCm / medianWorldPalmCm;
+        // Clamp to a sane band — a wildly outsized factor almost certainly
+        // means a bad card read or a frame with an unstable hand, not a
+        // real depth-scale bias, so don't let it corrupt future readings.
+        if (factor > 0.5 && factor < 2.0) {
+          worldScaleCorrectionRef.current = factor;
+          setWorldCalibrated(true);
+        }
+      }
+    }
+    worldPalmDuringCardRef.current = [];
+
     setFrozenFrame(null);
     setPhase('done');
   }, [tr]);
@@ -630,6 +790,8 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const startRecording = useCallback(() => {
     buffersRef.current = { thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] };
     gaps2dBufferRef.current = { thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] };
+    stabilityBufferRef.current = { thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] };
+    worldPalmDuringCardRef.current = [];
     setLivePeaks(null);
     recordingRef.current = true;
     setPhase('recording');
@@ -980,9 +1142,16 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
       {phase === 'done' && captured && (
         <div className="p-5">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span>✅</span>
             <span className="text-sm font-semibold" style={{ color: 'var(--color-success)' }}>{tr.measurementComplete}</span>
+            {worldCalibrated && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                title="A prior card measurement calibrated this session's depth-scale correction — camera-only readings after that are more accurate."
+                style={{ background: 'rgba(56,189,248,0.12)', color: 'var(--color-info)' }}>
+                💳 card-calibrated
+              </span>
+            )}
           </div>
           <div className="space-y-2 mb-4">
             {GAP_LABELS.map(({ key, label, color }) => (
