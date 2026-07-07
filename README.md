@@ -172,7 +172,7 @@ guitar/
 ├── docs/                       project docs
 ├── Dockerfile                  multi-stage Maven → JRE 21 (backend, prod)
 ├── railway.json                backend deploy (Railway)
-├── vercel.json                 frontend deploy (Vercel, SPA rewrite)
+├── client/railway.json         frontend deploy (Railway, Nixpacks + `serve dist`)
 ├── nginx-*.yaml                unused k8s experiments
 └── CLAUDE.md                   guidance for AI coding assistants
 ```
@@ -334,11 +334,16 @@ The active language is provided through `LangContext`.
 
 ## Deployment
 
-- **Frontend → Vercel** ([`vercel.json`](vercel.json)): Vite build + SPA rewrite.
-  `VITE_API_URL` points it at the backend.
+Both services run on **Railway**, as two separate services in the same project:
+
+- **Frontend → Railway** ([`client/railway.json`](client/railway.json)): Nixpacks
+  build (`npm install && npm run build`), served via `npm start` (`serve dist`).
+  `VITE_API_URL` points it at the backend service's Railway URL.
 - **Backend → Railway** via the multi-stage [`Dockerfile`](Dockerfile)
   (Maven build → JRE 21, `prod` profile). Health check at `/actuator/health`.
-  See [`railway.json`](railway.json).
+  See [`railway.json`](railway.json). Its `FRONTEND_URL` env var must point at
+  the frontend service's Railway URL — `EmailService` builds verification and
+  password-reset links from it. `CorsConfig` allows any `*.up.railway.app` origin.
 - **tab-service** hosting is deferred (run locally when needed).
 - `nginx-*.yaml` are unused Kubernetes experiments.
 
