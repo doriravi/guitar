@@ -32,6 +32,8 @@ export const t = {
     institutionComingSoon: 'Institutional sign-in is coming soon. Please contact your group administrator for access.',
     providerNotConfigured: 'This sign-in option is not available yet.',
     providerSdkBlocked: 'Sign-in could not load. Disable any ad/tracking blocker for this site and try again.',
+    inAppBrowserBlocked: 'Sign-in doesn’t work inside this app’s browser. Tap the ••• (or share) menu and choose “Open in Safari / Browser”, or use email sign-in below.',
+    inAppBrowserHint: 'For Google/Facebook sign-in, open this page in your real browser: tap the ••• or share menu, then “Open in Safari / Browser”. Email sign-in works here.',
     facebookCancelled: 'Facebook sign-in was cancelled.',
     welcomeBack: 'Welcome back', createYourAccount: 'Create your account',
     enterPasswordFor: 'Enter your password for', choosePasswordFor: 'Choose a password for',

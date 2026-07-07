@@ -9,6 +9,15 @@ function tk(tr, key, fallback) {
   return tr[key] != null ? tr[key] : fallback;
 }
 
+// Detect embedded "in-app" browsers (LinkedIn, Facebook, Instagram, etc.).
+// These webviews block third-party cookies/scripts, so Google & Facebook
+// sign-in SDKs fail to load — the user must open the page in the real browser.
+function isInAppBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /LinkedInApp|FBAN|FBAV|FB_IAB|Instagram|Twitter|Line|Snapchat|Pinterest|MicroMessenger/i.test(ua);
+}
+
 export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack, lang, onLangSelect, fullPage = false }) {
   const tr = useT(lang);
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -200,10 +209,14 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
       return;
     }
     if (!g) {
-      // SDK never loaded — almost always an ad-/tracking-blocker or extension
-      // blocking accounts.google.com. Tell the user the real cause.
-      setError(tk(tr, 'providerSdkBlocked',
-        'Google sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
+      // SDK never loaded. The #1 cause in the wild is an in-app browser
+      // (LinkedIn/Facebook/etc.) blocking accounts.google.com; the #2 is an
+      // ad-/tracking-blocker. Show whichever message actually applies.
+      setError(isInAppBrowser()
+        ? tk(tr, 'inAppBrowserBlocked',
+            'Sign-in doesn’t work inside this app’s browser. Tap the ••• (or share) menu and choose “Open in Safari / Browser”, or use email sign-in below.')
+        : tk(tr, 'providerSdkBlocked',
+            'Google sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
       return;
     }
     try {
@@ -222,8 +235,11 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
       return;
     }
     if (!window.FB) {
-      setError(tk(tr, 'providerSdkBlocked',
-        'Facebook sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
+      setError(isInAppBrowser()
+        ? tk(tr, 'inAppBrowserBlocked',
+            'Sign-in doesn’t work inside this app’s browser. Tap the ••• (or share) menu and choose “Open in Safari / Browser”, or use email sign-in below.')
+        : tk(tr, 'providerSdkBlocked',
+            'Facebook sign-in could not load. Disable any ad/tracking blocker for this site and try again.'));
       return;
     }
     window.FB.login((resp) => {
@@ -352,6 +368,20 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {isInAppBrowser() && (
+          <div
+            className="mb-5 rounded-lg px-4 py-3 text-center text-sm leading-snug"
+            style={{
+              background: 'rgba(201,169,110,0.12)',
+              border: '1px solid rgba(201,169,110,0.35)',
+              color: 'var(--color-ink)',
+            }}
+          >
+            {tk(tr, 'inAppBrowserHint',
+              'For Google/Facebook sign-in, open this page in your real browser: tap the ••• or share menu, then “Open in Safari / Browser”. Email sign-in works here.')}
           </div>
         )}
 
