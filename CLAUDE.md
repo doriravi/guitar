@@ -17,7 +17,20 @@ npm run dev          # Vite dev server on :5173 (proxies /api → :8080)
 npm run build        # production build → client/dist
 npm run preview      # serve the built bundle
 npm run lint         # ESLint
+npm run gen-icons    # regenerate PWA icons from scripts/icon.svg (needs sharp)
 ```
+
+### PWA — the frontend is an installable app on all platforms
+The client is a PWA (via `vite-plugin-pwa`, configured in [client/vite.config.js](client/vite.config.js)),
+so it installs to the home screen on Android/iOS/iPadOS and as a desktop app on
+Windows/macOS. The manifest + service worker are generated at build time; icons
+live in `client/public/` (`pwa-*.png`, `maskable-512x512.png`, `apple-touch-icon.png`,
+`favicon.png`) and are produced from `client/scripts/icon.svg` by `npm run gen-icons`.
+iOS home-screen behavior additionally relies on the `apple-mobile-web-app-*` meta
+tags in [client/index.html](client/index.html). [client/src/components/PWAPrompt.jsx](client/src/components/PWAPrompt.jsx)
+handles the update toast + install button (and the iOS "Add to Home Screen" hint).
+The service worker never intercepts `/api` calls (see `navigateFallbackDenylist` /
+`runtimeCaching` in the Vite config) — auth and backend requests always hit the network.
 
 ### Backend (`server/`)
 ```bash
@@ -101,5 +114,6 @@ Standard Spring Boot layering under `com.guitarreach.api`: `controller → servi
 - **Audio → Tab:** [TabTranscriptionController](server/src/main/java/com/guitarreach/api/controller/TabTranscriptionController.java) proxies an uploaded guitar clip (multipart) to the **`tab-service/`** Python sidecar — a FastAPI wrapper around [fingerstyle-tab-mcp](https://github.com/blooper20/fingerstyle-tab-mcp) (Basic Pitch + Demucs + music21). The sidecar returns ASCII tab **plus structured `{string,fret}` events** (string convention 0=low E … 5=high e, matching the app), which the frontend (`TabTranscriber.jsx`) scores with the existing reach engine. Same graceful-degradation contract as Gemini: 503 when `tab.service.url` / `TAB_SERVICE_URL` is unset. Run locally with `cd tab-service && uvicorn app:app --port 8000`; production hosting is deferred — see [tab-service/README.md](tab-service/README.md).
 
 ### Deployment
-- Frontend → **Vercel** ([vercel.json](vercel.json): Vite build, SPA rewrite). `VITE_API_URL` points it at the backend.
-- Backend → **Railway** via [Dockerfile](Dockerfile) (multi-stage Maven→JRE 21, `prod` profile). Health check at `/actuator/health`. `nginx-*.yaml` are unused k8s experiments.
+Both services run on **Railway**, as two separate services in the same project:
+- Frontend → `client/railway.json` (Nixpacks: `npm install && npm run build`, served via `npm start` → `serve dist`). `VITE_API_URL` points it at the backend service's Railway URL.
+- Backend → `server/railway.json` + [Dockerfile](Dockerfile) (multi-stage Maven→JRE 21, `prod` profile). Health check at `/actuator/health`. The backend's `FRONTEND_URL` env var must point at the frontend service's Railway URL — `EmailService` builds verify/reset-password links from it. `CorsConfig` already allows any `*.up.railway.app` origin. `nginx-*.yaml` are unused k8s experiments.
