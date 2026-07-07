@@ -175,8 +175,23 @@
     .wrap{padding:0;min-height:100dvh}
     .stage{border-radius:0;min-height:100dvh}
     .frame{aspect-ratio:auto;min-height:100dvh;height:100dvh}
-    .scene{padding:72px 22px 120px;min-height:0}
-    .inner{grid-template-columns:1fr;gap:28px;text-align:center;justify-items:center}
+    /* Anchor scene content to the TOP (not vertically centered) and leave room
+       for the top bar, so the eyebrow/heading never rides up under the
+       chaptertag. Allow the scene to scroll if its content is taller than the
+       viewport instead of overlapping. */
+    .scene{padding:96px 20px 132px;min-height:0;align-items:flex-start;
+      overflow-y:auto;-webkit-overflow-scrolling:touch}
+    /* Give the top bar a solid backdrop so any content scrolling underneath it
+       can't visually collide with the chaptertag. */
+    .topbar{background:linear-gradient(180deg,#151009 62%,transparent);padding:14px 18px;gap:12px}
+    /* Narrow phones can't fit both the brand tagline and the full chapter title
+       on one row — trim them so the two ends never collide. */
+    .brand i{display:none}
+    .brand{font-size:15px}
+    .chaptertag{font-size:10px;letter-spacing:1px;min-width:0}
+    .chaptertag #chT{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+    .inner{grid-template-columns:1fr;gap:24px;text-align:center;justify-items:center}
+    h2.line{font-size:clamp(21px,6vw,30px)}
     .sub{margin-left:auto;margin-right:auto}
     .chordcard,.compose,.lib,.fix{align-items:center}
     .time{min-width:0}
