@@ -34,8 +34,36 @@ public class ClaudeHandAnalysisController {
     private static final String ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
     private static final String MODEL = "claude-haiku-4-5";
 
+    // The photo may carry a burned-in overlay (skeleton + cm ruler) from the
+    // browser's own hand tracker (upgrade 2.A) — when present, the model is
+    // told explicitly to use it as ground truth instead of guessing scale
+    // from an unconstrained image.
+    private static final String OVERLAY_HINT =
+        "\n\nThe photo may have a cyan hand-tracking skeleton and a yellow centimeter ruler burned into the image " +
+        "(drawn along the bottom edge, with tick marks and labeled numbers). If present, use the ruler as ground truth for scale " +
+        "— read off exactly where each fingertip and the visible tick marks align (e.g. \"the pinky tip sits at the 7cm mark\") " +
+        "rather than estimating proportions from the photo alone. This significantly improves the accuracy of your span/reach measurements.\n";
+
+    // Fretting-hand (typically left, for a right-handed player) vs. picking/
+    // strumming hand (typically right) demand different biomechanics: the
+    // fretting hand needs finger independence and wide inter-fingertip
+    // splay to hold chord shapes; the picking hand's dexterity requirements
+    // (pick grip, alternate picking, fingerstyle plucking) are unrelated to
+    // chord-reach span and should not be graded on the same rubric.
+    private static final String FRETTING_HAND_CONTEXT =
+        "\n\nThis is the player's FRETTING hand (the hand that presses the strings against the fretboard to form chords). " +
+        "Evaluate it specifically for finger independence, lateral splay between fingertips, and span reach — the qualities that " +
+        "determine which chord shapes and stretches this hand can physically form. This is the correct hand to grade for the chord " +
+        "capability levels below.\n";
+    private static final String PICKING_HAND_CONTEXT =
+        "\n\nThis is the player's PICKING/STRUMMING hand (the hand that plucks or strums the strings, not the one fretting chords). " +
+        "Chord-reach span and fretting-finger independence are NOT relevant to this hand's job. Instead, note in `recommended_focus` " +
+        "that reach/chord-capability grading applies to the OTHER (fretting) hand, and keep this hand's `chord_capability_grades` " +
+        "conservative/neutral (Grade 1 Optimal, higher grades \"Challenging\" with anatomical_reasoning noting this is the picking hand) " +
+        "rather than implying it limits chord reach.\n";
+
     private static final String SYSTEM_PROMPT =
-        "You are a guitar biomechanics expert. Analyze this left hand photo and estimate the player's finger gap measurements and chord reach capability.\n\n" +
+        "You are a guitar biomechanics expert. Analyze this hand photo and estimate the player's finger gap measurements and chord reach capability.\n\n" +
         "Measure the visible spread distances between adjacent fingertips when the hand is splayed:\n" +
         "- thumb_to_index_cm: distance in cm between thumb tip and index tip (adult average 7.5, range 5-10)\n" +
         "- index_to_middle_cm: distance in cm between index and middle fingertips (adult average 4.5, range 2.5-7)\n" +
@@ -81,12 +109,20 @@ public class ClaudeHandAnalysisController {
                 .body("{\"error\":\"imageB64 is required\"}");
         }
 
+        // Handedness (2.B): "left" | "right" | absent. Left = the fretting
+        // hand for a standard right-handed player, so treat any unrecognized
+        // value the same as absent (fretting-hand grading, the app's default
+        // and most common case) rather than rejecting the request.
+        String handedness = body.getOrDefault("handedness", "");
+        String handContext = "right".equalsIgnoreCase(handedness) ? PICKING_HAND_CONTEXT : FRETTING_HAND_CONTEXT;
+        String systemPrompt = SYSTEM_PROMPT + handContext + OVERLAY_HINT;
+
         try {
             // Build the Messages API payload with Jackson so all strings are escaped.
             String payload = objectMapper.writeValueAsString(Map.of(
                 "model", MODEL,
                 "max_tokens", 3000,
-                "system", SYSTEM_PROMPT,
+                "system", systemPrompt,
                 "messages", new Object[] {
                     Map.of("role", "user", "content", new Object[] {
                         Map.of("type", "image", "source", Map.of(

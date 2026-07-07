@@ -210,10 +210,10 @@ export const advise = {
 // captured photo (base64 JPEG) and gets back the parsed JSON report. Errors
 // (503 no key, 502 model trouble) throw so the wizard can show its error phase.
 export const handAnalysis = {
-  claude: (imageB64) =>
+  claude: (imageB64, handedness) =>
     apiFetch('/api/analyze-hand/claude', {
       method: 'POST',
-      body: JSON.stringify({ imageB64 }),
+      body: JSON.stringify({ imageB64, handedness }),
     }),
 };
 

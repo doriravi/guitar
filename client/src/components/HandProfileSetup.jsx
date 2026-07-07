@@ -206,15 +206,108 @@ function aiReportToProfile(report) {
 
 function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
 
+// ── Minimal MediaPipe overlay for the AI capture (upgrade 2.A) ──────────────
+// A stripped-down copy of CameraHandMeasure's tracking/drawing so a
+// skeleton + real-world cm ruler can be burned into the exact frame sent to
+// Claude — giving the vision model a physical reference grid instead of a
+// bare photo, so its span/reach judgments anchor to visible measurements
+// rather than guessing scale from an unconstrained image.
+const HANDS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';
+let handsScriptPromise = null;
+function loadHandsScript() {
+  if (handsScriptPromise) return handsScriptPromise;
+  handsScriptPromise = new Promise((resolve, reject) => {
+    if (window.Hands) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = HANDS_CDN;
+    s.crossOrigin = 'anonymous';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load hand-tracking model'));
+    document.head.appendChild(s);
+  });
+  return handsScriptPromise;
+}
+
+const AI_TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
+const AI_MCP = { index: 5, pinky: 17 };
+const AI_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8], [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16], [0,17],[17,18],[18,19],[19,20], [5,9],[9,13],[13,17],
+];
+
+function aiDist3D(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
+}
+
+// Burn the tracked skeleton + a real-world cm ruler onto the still frame, so
+// the exact bytes sent to Claude carry a visible scale reference.
+function burnOverlay(ctx, W, H, lm, world) {
+  ctx.save();
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = 0.85;
+  for (const [a, b] of AI_CONNECTIONS) {
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x * W, lm[a].y * H);
+    ctx.lineTo(lm[b].x * W, lm[b].y * H);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#facc15';
+  for (const idx of [AI_TIP.thumb, AI_TIP.index, AI_TIP.middle, AI_TIP.ring, AI_TIP.pinky]) {
+    ctx.beginPath();
+    ctx.arc(lm[idx].x * W, lm[idx].y * H, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // cm ruler along the bottom, scaled from the metric world landmarks —
+  // gives Claude an explicit "the pinky reaches the Ncm mark" anchor.
+  if (world && world.length >= 21) {
+    const worldCm = aiDist3D(world[AI_MCP.index], world[AI_MCP.pinky]) * 100;
+    const px = Math.hypot((lm[AI_MCP.index].x - lm[AI_MCP.pinky].x) * W, (lm[AI_MCP.index].y - lm[AI_MCP.pinky].y) * H);
+    const pxPerCm = worldCm > 1e-3 ? px / worldCm : null;
+    if (pxPerCm && pxPerCm > 0) {
+      const marginX = 16, baseY = H - 22;
+      const maxCm = Math.floor((W - marginX * 2) / pxPerCm);
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(marginX - 6, baseY - 20, Math.min(W - marginX * 2, maxCm * pxPerCm) + 12, 34);
+      ctx.strokeStyle = '#facc15';
+      ctx.fillStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.moveTo(marginX, baseY); ctx.lineTo(marginX + maxCm * pxPerCm, baseY); ctx.stroke();
+      for (let cm = 0; cm <= maxCm; cm++) {
+        const x = marginX + cm * pxPerCm;
+        ctx.beginPath(); ctx.moveTo(x, baseY); ctx.lineTo(x, baseY - 12); ctx.stroke();
+        if (cm % 2 === 0) {
+          ctx.font = 'bold 10px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(cm), x, baseY - 14);
+        }
+      }
+      ctx.restore();
+    }
+  }
+}
+
 // ── AI Hand Analysis (Claude vision) ─────────────────────────────────────────
 
 function AIHandAnalysis({ lang, onMeasured }) {
   const [phase, setPhase]       = useState('idle'); // idle | capturing | analysing | done | error
   const [report, setReport]     = useState(null);
   const [errMsg, setErrMsg]     = useState('');
+  const [handedness, setHandedness] = useState('left'); // which hand the user is photographing — defaults to fretting hand
+  const [trackerReady, setTrackerReady] = useState(false); // overlay model loaded & tracking this frame
   const videoRef  = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const handsRef  = useRef(null);
+  const rafRef    = useRef(null);
+  const latestLm  = useRef(null);
+  const latestWorld = useRef(null);
 
   const startCamera = async () => {
     try {
@@ -229,13 +322,55 @@ function AIHandAnalysis({ lang, onMeasured }) {
     }
   };
 
-  // attach stream once video element is in the DOM (after phase → 'capturing')
+  // attach stream + start the (optional, best-effort) overlay tracker once
+  // the video element is in the DOM. If the model fails to load, capture
+  // still works — it just ships a plain (unburned) photo.
   useEffect(() => {
     if (phase !== 'capturing') return;
     const v = videoRef.current;
     if (!v || !streamRef.current) return;
     v.srcObject = streamRef.current;
     v.play().catch(() => {});
+
+    let alive = true;
+    loadHandsScript().then(() => {
+      if (!alive) return;
+      const hands = new window.Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+      hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.5 });
+      hands.onResults(results => {
+        if (results.multiHandLandmarks?.length) {
+          latestLm.current = results.multiHandLandmarks[0];
+          latestWorld.current = results.multiHandWorldLandmarks?.[0] ?? null;
+          setTrackerReady(true);
+          // MediaPipe labels handedness from the camera's (un-mirrored) point
+          // of view; the preview is CSS-mirrored for the user, so what
+          // MediaPipe calls "Left" is the hand the user sees on their own
+          // right in the mirror — flip so our label matches the user's
+          // actual hand, which is what the fretting-hand prompt cares about.
+          const label = results.multiHandedness?.[0]?.label;
+          if (label) setHandedness(label === 'Left' ? 'right' : 'left');
+        } else {
+          latestLm.current = null;
+          latestWorld.current = null;
+        }
+      });
+      handsRef.current = hands;
+      const loop = async () => {
+        if (videoRef.current && handsRef.current && videoRef.current.readyState >= 2) {
+          await handsRef.current.send({ image: videoRef.current });
+        }
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    }).catch(() => {}); // overlay is best-effort; capture still works without it
+
+    return () => {
+      alive = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      handsRef.current?.close?.();
+      handsRef.current = null;
+      rafRef.current = null;
+    };
   }, [phase]);
 
   const stopStream = () => {
@@ -249,14 +384,22 @@ function AIHandAnalysis({ lang, onMeasured }) {
     if (!v || !c) return;
     c.width  = v.videoWidth  || 640;
     c.height = v.videoHeight || 480;
-    c.getContext('2d').drawImage(v, 0, 0);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(v, 0, 0);
+    // Burn the skeleton + cm ruler into the captured frame (upgrade 2.A) —
+    // only if the tracker caught this hand in its very last frame, so we
+    // never overlay stale landmarks onto a photo taken after the hand moved.
+    if (latestLm.current) burnOverlay(ctx, c.width, c.height, latestLm.current, latestWorld.current);
     stopStream();
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    handsRef.current?.close?.();
     setPhase('analysing');
     const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     try {
       // The Anthropic key and biomechanics prompt live on the backend
-      // (ClaudeHandAnalysisController) — the browser only ships the photo.
-      const parsed = await handAnalysis.claude(b64);
+      // (ClaudeHandAnalysisController) — the browser only ships the photo
+      // (now with the overlay burned in) plus which hand it is (2.B).
+      const parsed = await handAnalysis.claude(b64, handedness);
       if (!parsed || !parsed.biomechanical_profile) {
         throw new Error('Analysis returned no report. Please retake the photo and try again.');
       }
@@ -269,7 +412,7 @@ function AIHandAnalysis({ lang, onMeasured }) {
     }
   };
 
-  const reset = () => { setPhase('idle'); setReport(null); setErrMsg(''); stopStream(); };
+  const reset = () => { setPhase('idle'); setReport(null); setErrMsg(''); setTrackerReady(false); stopStream(); };
 
   const STATUS_ICON = { 'Optimal': '✅', 'Challenging': '⚠️', 'Structurally Restricted': '❌' };
   const STATUS_COLOR = { 'Optimal': '#4ade80', 'Challenging': '#c9a96e', 'Structurally Restricted': '#f87171' };
@@ -304,9 +447,29 @@ function AIHandAnalysis({ lang, onMeasured }) {
           <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
             <video ref={videoRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} playsInline muted />
             <canvas ref={canvasRef} className="hidden" />
+            <div className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+              style={{ background: 'rgba(0,0,0,0.75)', color: trackerReady ? '#4ade80' : '#f87171' }}>
+              <div className="w-2 h-2 rounded-full" style={{ background: trackerReady ? '#4ade80' : '#f87171' }} />
+              {trackerReady ? 'Hand tracked — ruler overlay ready' : 'Locating hand…'}
+            </div>
           </div>
-          <div className="p-4 flex items-center justify-between gap-4">
-            <p className="text-xs" style={{ color: '#5a5a5a' }}>Splay your left hand wide in frame, then capture.</p>
+          <div className="px-4 pt-3 flex items-center gap-2">
+            <span className="text-xs font-semibold" style={{ color: '#5a5a5a' }}>Which hand is this?</span>
+            <div className="flex gap-1.5">
+              {[['left', 'Left (fretting)'], ['right', 'Right (picking)']].map(([val, label]) => (
+                <button key={val} onClick={() => setHandedness(val)}
+                  className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+                  style={handedness === val
+                    ? { background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)' }
+                    : { background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px]" style={{ color: '#3a3a3a' }}>(auto-detected once tracked; tap to override)</span>
+          </div>
+          <div className="p-4 pt-3 flex items-center justify-between gap-4">
+            <p className="text-xs" style={{ color: '#5a5a5a' }}>Splay your {handedness} hand wide in frame, then capture.</p>
             <div className="flex gap-2 shrink-0">
               <button onClick={reset} className="px-4 py-2 rounded-xl text-sm font-semibold" style={{ background: '#1e1e1e', color: '#5a5a5a', border: '1px solid #2a2a2a' }}>
                 Cancel

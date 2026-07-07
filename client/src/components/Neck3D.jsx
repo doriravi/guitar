@@ -3,6 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, RoundedBox, Environment, ContactShadows, Lightformer } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
+import { optimalFingering } from '../lib/fretboard';
 
 // ─── Geometry constants ───────────────────────────────────────────────────────
 // Neck lies along X. 6 strings along Z (low E z=+, high e z=-), frets across X.
@@ -175,7 +176,25 @@ const F_EASY = {
   fingers: [{ string: 2, fret: 3 }, { string: 3, fret: 2 }, { string: 4, fret: 1 }],
 };
 
-function Scene({ easy }) {
+// Real chord notes (from the reach engine's `notes` array, string 0-5 = low
+// E..high e) → finger markers + optional barre, clamped to the neck's visible
+// fret window so any chord shape (even ones starting past fret N_FRETS) reads
+// sensibly on the 3D model.
+function fingersFromNotes(notes) {
+  if (!Array.isArray(notes) || !notes.length) return { fingers: [], barreFret: null };
+  const fing = optimalFingering(notes);
+  if (!fing) return { fingers: [], barreFret: null };
+  const minFret = Math.min(...notes.map(n => n.fret).filter(f => f > 0));
+  const shift = minFret > N_FRETS ? minFret - 1 : 0;   // slide high shapes into view
+  const fingers = fing.assignment
+    .filter(a => !a.barre)
+    .map(a => ({ string: a.string, fret: a.fret - shift }))
+    .filter(f => f.fret >= 1 && f.fret <= N_FRETS);
+  const barreFret = fing.barreFret != null ? fing.barreFret - shift : null;
+  return { fingers, barreFret: (barreFret != null && barreFret >= 1 && barreFret <= N_FRETS) ? barreFret : null };
+}
+
+function Scene({ easy, chord }) {
   const group = useRef();
   useFrame((state) => {
     if (group.current) {
@@ -206,9 +225,18 @@ function Scene({ easy }) {
 
       <group ref={group} rotation={[0.34, 0, 0.03]}>
         <Neck />
-        <Barre fret={1} color={RED} visible={!easy} />
-        {F_BARRE.fingers.map((f, i) => <Finger key={`b${i}`} {...f} color={RED} visible={!easy} />)}
-        {F_EASY.fingers.map((f, i) => <Finger key={`e${i}`} {...f} color={JADE} visible={easy} />)}
+        {chord ? (
+          <>
+            <Barre fret={chord.barreFret ?? 1} color={BRASS} visible={chord.barreFret != null} />
+            {chord.fingers.map((f, i) => <Finger key={i} {...f} color={JADE} visible />)}
+          </>
+        ) : (
+          <>
+            <Barre fret={1} color={RED} visible={!easy} />
+            {F_BARRE.fingers.map((f, i) => <Finger key={`b${i}`} {...f} color={RED} visible={!easy} />)}
+            {F_EASY.fingers.map((f, i) => <Finger key={`e${i}`} {...f} color={JADE} visible={easy} />)}
+          </>
+        )}
       </group>
 
       {/* soft grounding shadow */}
@@ -223,7 +251,11 @@ function Scene({ easy }) {
   );
 }
 
-export default function Neck3D({ easy }) {
+// `notes` (optional): the reach-engine note list for a real chord, e.g. what
+// PracticeGame passes for the chord currently under the now-line. When
+// omitted, falls back to the original F-major demo (`easy` toggles shape).
+export default function Neck3D({ easy, notes }) {
+  const chord = useMemo(() => (notes ? fingersFromNotes(notes) : null), [notes]);
   return (
     <Canvas
       shadows
@@ -232,7 +264,7 @@ export default function Neck3D({ easy }) {
       gl={{ antialias: true, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       style={{ width: '100%', height: '100%' }}
     >
-      <Scene easy={easy} />
+      <Scene easy={easy} chord={chord} />
       <OrbitControls enablePan={false} enableZoom={false}
         minPolarAngle={Math.PI / 4.5} maxPolarAngle={Math.PI / 2.05} />
     </Canvas>
