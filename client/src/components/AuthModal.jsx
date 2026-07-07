@@ -297,6 +297,20 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
           >← {tk(tr, 'back', 'Back')}</button>
         )}
 
+        {/* Full video tutorial — shown on the full-page lobby (the modal's
+            close button already occupies this corner). */}
+        {fullPage && (
+          <a
+            href="https://drive.google.com/file/d/1N9Bv-56p_XO7b_Xd7neLFw4_0sbVzJ7l/view?usp=sharing"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute right-6 top-6 text-xs underline"
+            style={{ color: 'var(--color-brand)' }}
+          >
+            📺 {tk(tr, 'fullTutorial', 'Full tutorial')}
+          </a>
+        )}
+
         {/* Language picker — lives on the lobby so the user chooses their language
             before/at registration. Defaults to English. */}
         {onLangSelect && (

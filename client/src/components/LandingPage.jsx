@@ -77,6 +77,14 @@ export default function LandingPage({ onGetStarted, langSlot }) {
       {/* Overlay controls — sit above the iframe, top-right. */}
       <div className="lp-embed-controls">
         {langSlot}
+        <a
+          href="https://drive.google.com/file/d/1N9Bv-56p_XO7b_Xd7neLFw4_0sbVzJ7l/view?usp=sharing"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="lp-embed-tutorial"
+        >
+          📺 Full tutorial
+        </a>
         <button className="lp-embed-cta" onClick={onGetStarted}>Get started</button>
       </div>
     </div>

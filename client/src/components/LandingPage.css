@@ -61,6 +61,25 @@
   box-shadow: 0 10px 28px -8px rgba(94, 234, 212, 0.85);
 }
 .lp-embed-cta:active { transform: translateY(0); }
+
+.lp-embed-tutorial {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: #e8dcc0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 8px 16px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.lp-embed-tutorial:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
 /* Give the CTA a little life: a gentle bob + a sheen sweeping across it. */
 .lp-embed-cta { animation: lp-cta-bob 2.8s ease-in-out infinite; overflow: hidden; position: relative; }
 .lp-embed-cta::after {
@@ -163,6 +182,7 @@
 @media (max-width: 520px) {
   .lp-embed-controls { top: 10px; right: 10px; gap: 7px; }
   .lp-embed-cta { font-size: 13px; padding: 8px 16px; }
+  .lp-embed-tutorial { font-size: 12px; padding: 7px 12px; }
 }
 
 /* Respect reduced-motion: keep it calm — hide flyers, stop CTA motion. */
