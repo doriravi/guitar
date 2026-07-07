@@ -8,7 +8,7 @@ import './LandingPage.css';
 //   • a "Get started" button + language picker (top-right)
 //   • the explainer's in-frame "Open the app" CTA posts a message back to us,
 //     which we route to onGetStarted (the in-app sign-in flow).
-export default function LandingPage({ onGetStarted, langSlot }) {
+export default function LandingPage({ onGetStarted, onTryGuest, langSlot }) {
   // The embedded explainer signals "open the app" via postMessage (see the
   // script appended to explainer.html). Route it to the in-app sign-in flow.
   useEffect(() => {
@@ -86,6 +86,11 @@ export default function LandingPage({ onGetStarted, langSlot }) {
           📺 Full tutorial
         </a>
         <button className="lp-embed-cta" onClick={onGetStarted}>Get started</button>
+        {onTryGuest && (
+          <button className="lp-embed-guest" onClick={onTryGuest} title="No account needed — nothing is saved">
+            Try as guest
+          </button>
+        )}
       </div>
     </div>
   );

@@ -156,6 +156,9 @@ export default function App() {
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [limitToReach, setLimitToReach] = useState(loadLimitToReach);
   const [currentUser, setCurrentUser] = useState(null);
+  // Guest mode: use the app without an account. Nothing is persisted — the hand
+  // profile and any edits live only in this tab's memory and vanish on close.
+  const [guestMode, setGuestMode] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
@@ -296,7 +299,11 @@ export default function App() {
   async function handleSaveProfile(profile) {
     setHandProfile(profile);
     setSaveError(false);
-    try { localStorage.setItem('guitar_hand_profile', JSON.stringify(profile)); } catch {}
+    // Guests keep everything in memory only — never touch localStorage or the
+    // backend, so nothing survives closing the tab.
+    if (!guestMode) {
+      try { localStorage.setItem('guitar_hand_profile', JSON.stringify(profile)); } catch {}
+    }
     // Saving a real (non-default) measurement clears the onboarding gate.
     if (!isDefaultProfile(profile)) setNeedsOnboarding(false);
     if (currentUser) {
@@ -316,6 +323,20 @@ export default function App() {
     syncProfileOnLogin(opts.isNew)
       .then(hasProfile => { setNeedsOnboarding(!hasProfile); })
       .catch(() => {});
+  }
+
+  // Enter the app without an account. Everything stays in this tab's memory
+  // only — start from a clean default profile and persist nothing.
+  function enterGuestMode() {
+    setHandProfile(DEFAULT_PROFILE);
+    setGuestMode(true);
+    setShowSignIn(false);
+  }
+
+  // Leave guest mode to sign in / create an account (from the persistent notice).
+  function exitGuestMode() {
+    setGuestMode(false);
+    setShowSignIn(true);
   }
 
   async function handleLogout() {
@@ -348,7 +369,10 @@ export default function App() {
 
   function handleSaveAIFingers(fingers) {
     setAIFingers(fingers);
-    try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
+    // Guests: keep in memory only (see enterGuestMode).
+    if (!guestMode) {
+      try { localStorage.setItem('guitar_ai_fingers', JSON.stringify(fingers)); } catch {}
+    }
   }
 
   // Shared app header (logo + language selector + account/sign-out). Used by
@@ -408,7 +432,7 @@ export default function App() {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser && !guestMode) {
     // Never-logged-in visitors land on the marketing page first; the CTA reveals
     // the sign-in form. Email-link flows (reset/forgot) skip straight to the form.
     const inEmailFlow = showResetModal || showForgot;
@@ -417,6 +441,7 @@ export default function App() {
         <LangContext.Provider value={lang}>
           <LandingPage
             onGetStarted={() => setShowSignIn(true)}
+            onTryGuest={enterGuestMode}
             langSlot={
               <select
                 value={lang}
@@ -456,6 +481,7 @@ export default function App() {
               onSuccess={handleAuthSuccess}
               onForgotPassword={() => setShowForgot(true)}
               onBack={() => setShowSignIn(false)}
+              onGuest={enterGuestMode}
               lang={lang}
               onLangSelect={handleLangSelect}
             />
@@ -609,6 +635,27 @@ export default function App() {
         </button>
 
         <main className="max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
+
+          {/* Guest-mode notice: persistent reminder that nothing is saved. */}
+          {guestMode && (
+            <div className="mb-4 px-4 py-2.5 rounded-xl text-xs sm:text-sm flex items-center gap-3 flex-wrap"
+              style={{
+                background: 'rgba(201,169,110,0.10)',
+                border: '1px solid rgba(201,169,110,0.30)',
+                color: 'var(--color-ink)',
+              }}>
+              <span className="text-base leading-none">👋</span>
+              <span className="flex-1 min-w-[180px] leading-snug">
+                {tr.guestNotice ||
+                  "You're exploring as a guest — your hand profile and edits stay in this tab only and are lost when you close it."}
+              </span>
+              <button onClick={exitGuestMode}
+                className="text-xs px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap"
+                style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+                {tr.guestSaveCta || 'Sign up to save'}
+              </button>
+            </div>
+          )}
 
           {/* Email verify banner */}
           {verifyMsg && (

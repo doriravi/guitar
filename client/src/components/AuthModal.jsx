@@ -18,7 +18,7 @@ function isInAppBrowser() {
   return /LinkedInApp|FBAN|FBAV|FB_IAB|Instagram|Twitter|Line|Snapchat|Pinterest|MicroMessenger/i.test(ua);
 }
 
-export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack, lang, onLangSelect, fullPage = false }) {
+export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack, onGuest, lang, onLangSelect, fullPage = false }) {
   const tr = useT(lang);
   const [showLangMenu, setShowLangMenu] = useState(false);
 
@@ -484,6 +484,22 @@ export default function AuthModal({ onSuccess, onClose, onForgotPassword, onBack
               </button>{' '}
               {tk(tr, 'throughYourInstitution', 'through your institution')}
             </p>
+
+            {onGuest && (
+              <div className="mt-6 pt-5 text-center" style={{ borderTop: '1px solid var(--color-surface-600)' }}>
+                <button
+                  onClick={onGuest}
+                  className="text-sm font-semibold underline"
+                  style={{ color: 'var(--color-ink-muted)' }}
+                >
+                  {tk(tr, 'continueAsGuest', 'Continue as guest — no account needed')}
+                </button>
+                <p className="mt-1.5 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                  {tk(tr, 'guestDataWarning',
+                    'Nothing is saved — your data stays in this tab and is lost when you close it.')}
+                </p>
+              </div>
+            )}
           </>
         )}
 
