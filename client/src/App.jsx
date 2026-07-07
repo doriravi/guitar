@@ -20,6 +20,7 @@ import { auth, handProfile as handProfileApi, user as userApi } from './lib/api'
 import { syncSongsOnLogin } from './lib/customSongs';
 import { unlockAudio } from './lib/audio';
 import { useT, LANGUAGES } from './lib/i18n';
+import { usePwaInstall } from './lib/usePwaInstall';
 
 function isDefaultProfile(p) {
   return Object.keys(DEFAULT_PROFILE).every(k => p[k] === DEFAULT_PROFILE[k]);
@@ -65,6 +66,49 @@ function getTokenFromUrl(param) {
 // to keep the ☰ Menu button highlighted while a side tab (e.g. Tuner) is open.
 function SIDE_TABS_ACTIVE(tabs, activeId) {
   return tabs.some(t => t.side && t.id === activeId);
+}
+
+// Side-menu entry that lets users install the PWA on demand, in case the
+// browser's own install prompt was dismissed or never surfaced. On Android/
+// desktop it fires the native install dialog; on iOS/iPadOS it reveals the
+// Share → "Add to Home Screen" instructions. Hidden when already installed
+// and the browser offers no install path.
+function InstallMenuItem({ tr, onClose }) {
+  const { canInstall, ios, installed, promptInstall } = usePwaInstall();
+  const [showIosHelp, setShowIosHelp] = useState(false);
+
+  if (installed || (!canInstall && !ios)) return null;
+
+  const label = tr.installApp || 'Install app';
+
+  const handle = async () => {
+    if (canInstall) {
+      await promptInstall();
+      onClose();
+    } else {
+      setShowIosHelp(v => !v);
+    }
+  };
+
+  return (
+    <div className="mt-auto pt-2" style={{ borderTop: '1px solid var(--color-surface-600)' }}>
+      <button
+        onClick={handle}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all text-left"
+        style={{ color: 'var(--color-brand)' }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-surface-700)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span className="text-base leading-none">📲</span>
+        <span>{label}</span>
+      </button>
+      {showIosHelp && (
+        <p className="px-3 pb-2 text-xs leading-relaxed" style={{ color: 'var(--color-ink-muted)' }}>
+          {tr.installIosHint || 'Tap the Share button, then “Add to Home Screen”.'}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function getTabs(tr) {
@@ -633,6 +677,7 @@ export default function App() {
                     <span>{tab.label}</span>
                   </button>
                 ))}
+                <InstallMenuItem tr={tr} onClose={() => setSideMenuOpen(false)} />
               </aside>
             </div>
           )}

@@ -2,6 +2,7 @@ export const t = {
   en: {
     // App / Nav
     appSubtitle: 'Difficulty scores for your hand',
+    installApp: 'Install app', installIosHint: 'Tap the Share button, then “Add to Home Screen”.',
     tabHand: 'My Hand', tabStrings: 'Composer', tabPlay: 'Play', tabScale: 'Scales', tabChordFinder: 'Chord Finder', tabTuner: 'Tuner',
     tabListen: 'Listen', tabAudioTab: 'Audio → Tab', tabChords: 'Chords', tabTriplets: 'Triplets', tabProgressions: 'Progressions',
     tabPlayAlong: 'Play-Along', tabRecorder: 'Recorder', tabMicPractice: 'Practice', tabMicTune: 'Mic Tune',
