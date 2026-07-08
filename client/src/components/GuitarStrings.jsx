@@ -1783,8 +1783,8 @@ function MusicEditorMode({ diffMax, tr }) {
           it anywhere, and carries its own Play/Stop button wired to playAll.
           Lazy-loaded + gated via Lazy3D (renders nothing when 3D is off / no GPU
           / reduced-motion, leaving just the empty panel with its Play button). */}
-      <FloatingPanel storageKey="composer-field" width={280} height={170}
-        defaultPos={{ x: 24, y: 110 }} title={tr.play || 'Play'}>
+      <FloatingPanel storageKey="composer-field-v2" width={280} height={170}
+        defaultCorner="bottom-left" title={tr.play || 'Play'}>
         {/* Field fills the panel (decorative, non-interactive). */}
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
           <Lazy3D load={loadParticleField} fallback={null} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // A draggable, screen-floating panel. Renders fixed-position so it can be placed
 // ANYWHERE over the app; the user drags it by the grip handle (dragging from the
@@ -18,26 +19,55 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function loadPos(key, fallback) {
+// Load a saved position, but REJECT one that isn't actually visible in the
+// current viewport (a stale value from a larger window, or a pre-fix negative
+// coord, would otherwise hide the panel off-screen — the "I don't see it" bug).
+// The panel must be at least partly on-screen or we fall back to the default.
+function loadPos(key, fallback, width, height) {
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
       const p = JSON.parse(raw);
-      if (typeof p.x === 'number' && typeof p.y === 'number') return p;
+      if (typeof p.x === 'number' && typeof p.y === 'number') {
+        const vw = window.innerWidth || 1024;
+        const vh = window.innerHeight || 768;
+        const MARGIN = 24; // require this many px of the panel to be visible
+        const onScreen =
+          p.x + width - MARGIN > 0 && p.x < vw - MARGIN &&
+          p.y + height - MARGIN > 0 && p.y < vh - MARGIN;
+        if (onScreen) return p;
+      }
     }
   } catch { /* ignore */ }
   return fallback;
+}
+
+// Compute a corner-anchored default from the current viewport, so the panel
+// starts in a "dead" area (out of the way of the header/tabs/editor) regardless
+// of window size. Bottom-left by default — clear of the bottom-right mascot.
+function cornerPos(corner, width, height) {
+  const vw = window.innerWidth || 1024;
+  const vh = window.innerHeight || 768;
+  const M = 20; // margin from the edges
+  switch (corner) {
+    case 'top-right':     return { x: vw - width - M, y: M + 64 };
+    case 'bottom-right':  return { x: vw - width - M, y: vh - height - M };
+    case 'top-left':      return { x: M, y: M + 64 };
+    case 'bottom-left':
+    default:              return { x: M, y: vh - height - M };
+  }
 }
 
 export default function FloatingPanel({
   storageKey,
   width = 260,
   height = 150,
-  defaultPos = { x: 24, y: 96 },
+  defaultCorner = 'bottom-left',
   title = '',
   children,
 }) {
-  const [pos, setPos] = useState(() => loadPos(`floatpanel_${storageKey}`, defaultPos));
+  const [pos, setPos] = useState(() =>
+    loadPos(`floatpanel_${storageKey}`, cornerPos(defaultCorner, width, height), width, height));
   const [dragging, setDragging] = useState(false);
   const ref = useRef(null);
   const off = useRef({ x: 0, y: 0 }); // pointer offset within the panel at grab
@@ -80,7 +110,11 @@ export default function FloatingPanel({
     try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
   };
 
-  return (
+  // Portal to <body> so NO ancestor's transform/filter can trap this fixed panel
+  // (a transformed ancestor makes position:fixed behave like absolute, which was
+  // pushing the panel off-screen with page scroll — the "weird spot / can't see
+  // it" bug). Anchored to the viewport here, drag coordinates stay accurate.
+  const panel = (
     <div
       ref={ref}
       className="rounded-2xl overflow-hidden border border-surface-700 shadow-2xl"
@@ -90,7 +124,7 @@ export default function FloatingPanel({
         top: pos.y,
         width,
         height,
-        zIndex: 50,
+        zIndex: 70,   // above the app header and the game-assistant overlay (z 60)
         background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)',
         touchAction: 'none',            // let us own touch gestures (drag)
         cursor: dragging ? 'grabbing' : 'default',
@@ -122,4 +156,6 @@ export default function FloatingPanel({
       {children}
     </div>
   );
+
+  return createPortal(panel, document.body);
 }
