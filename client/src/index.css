@@ -129,3 +129,78 @@ thead th {
   table { font-size: 0.72rem; }
   thead th, tbody td { padding-left: 0.5rem; padding-right: 0.5rem; }
 }
+
+/* ── Animations ──────────────────────────────────────────────────────────────
+   Subtle, premium motion. All wrapped in a prefers-reduced-motion guard below
+   so the app stays perfectly usable (and jank-free) for users who opt out. */
+
+@keyframes ui-fade-slide-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Springy pop for chord-diagram finger dots */
+@keyframes ui-dot-pop {
+  0%   { opacity: 0; transform: scale(0.2); }
+  70%  { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Tab / page content entrance. Applied fresh on every tab switch via a React
+   `key`, so the new panel eases in instead of hard-cutting. */
+.tab-panel-enter {
+  animation: ui-fade-slide-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Generic entrance utility for cards / sections. */
+.animate-in {
+  animation: ui-fade-slide-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Interactive lift+press feedback. Add `ui-press` to any button/chip/card. */
+.ui-press {
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.14s ease,
+              filter 0.14s ease;
+}
+.ui-press:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.ui-press:active {
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.98);
+}
+
+/* Chord-diagram finger dots animate on mount, staggered by string index. */
+.fret-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ui-dot-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Reduced-motion: drop the positional/scale movement but keep a gentle
+   opacity fade (opacity changes are motion-safe and non-vestibular). This way
+   the UI still feels alive for reduced-motion users without any sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel-enter,
+  .animate-in {
+    animation: ui-fade-in 0.25s ease both;
+  }
+  .fret-dot {
+    animation: ui-fade-in 0.25s ease both;
+  }
+  .ui-press:hover {
+    filter: brightness(1.06);
+    transform: none;
+  }
+  .ui-press:active {
+    filter: brightness(0.98);
+    transform: none;
+  }
+}

@@ -1793,6 +1793,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                             href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
                             target="_blank" rel="noopener noreferrer"
                             className="hover:underline"
+                            onMouseEnter={chord.voicings?.[0] ? e => showTooltip(e, chord.voicings[0]) : undefined}
+                            onMouseLeave={chord.voicings?.[0] ? hideTooltip : undefined}
                           >
                             {chord.chordName}
                           </a>

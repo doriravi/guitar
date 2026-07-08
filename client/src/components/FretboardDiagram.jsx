@@ -123,7 +123,7 @@ export default function FretboardDiagram({ chord, showFingers = false, marks = n
           const finger = fingerByString[s];
           const mc = markFor(s);
           return (
-            <g key={s}>
+            <g key={s} className="fret-dot" style={{ animationDelay: `${s * 45}ms` }}>
               {mc && <circle cx={cx} cy={cy} r={CELL_H * 0.36 + 2.5} fill="none" stroke={mc} strokeWidth="1.6" opacity="0.55" />}
               <circle cx={cx} cy={cy} r={CELL_H * 0.36} fill={mc || '#888'} />
               {finger != null && (

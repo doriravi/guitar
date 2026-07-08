@@ -679,7 +679,7 @@ export default function App() {
                 key={tab.id}
                 data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
                 onClick={() => setActiveTab(tab.id)}
-                className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-0 sm:gap-2 px-1 sm:px-3 py-2 sm:py-2.5 rounded-lg text-xs font-semibold transition-all"
+                className="ui-press flex-1 flex flex-col sm:flex-row items-center justify-center gap-0 sm:gap-2 px-1 sm:px-3 py-2 sm:py-2.5 rounded-lg text-xs font-semibold transition-all"
                 style={activeTab === tab.id ? {
                   background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                 } : { color: 'var(--color-ink-faint)' }}
@@ -729,8 +729,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Content */}
-          <div className="rounded-2xl overflow-hidden bg-surface-850 border border-surface-700">
+          {/* Content — keyed by activeTab so each panel re-mounts and eases in */}
+          <div key={activeTab} className="tab-panel-enter rounded-2xl overflow-hidden bg-surface-850 border border-surface-700">
             {activeTab === 'start'        && <StartHere lang={lang} onGoToHand={() => setActiveTab('hand')} />}
             {activeTab === 'hand'         && <HandProfileSetup profile={handProfile} onSave={handleSaveProfile} onSaveAIFingers={handleSaveAIFingers} saveError={saveError} lang={lang} />}
             {activeTab === 'strings'      && <GuitarStrings lang={lang} mode="editor" />}

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo } from 'react';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
+import ChordTip from './ChordTip';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
@@ -1207,9 +1208,15 @@ function ProgressionPicker({ onInsert, diffMax, musicKey, progName, setProgName,
               minWidth: 54,
             }}>
             <span className="text-[9px] text-ink-faint">{r.roman}</span>
-            <span className={`text-xs font-bold ${r.voicing ? 'text-ink' : 'text-danger'}`}>
-              {r.chordName ?? '—'}
-            </span>
+            {r.chordName ? (
+              <ChordTip name={r.chordName}>
+                <span className={`text-xs font-bold cursor-help ${r.voicing ? 'text-ink' : 'text-danger'}`}>
+                  {r.chordName}
+                </span>
+              </ChordTip>
+            ) : (
+              <span className="text-xs font-bold text-danger">—</span>
+            )}
             {r.voicing && (
               <span className="font-mono text-[9px] text-ink-ghost">{r.voicing.tab}</span>
             )}
@@ -1309,7 +1316,9 @@ function ChordPicker({ onApply, diffMax, musicKey, tr }) {
                 onClick={() => { onApply(v); setOpen(false); setSelectedName(''); setSearch(''); }}
                 className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all flex flex-col items-center gap-0.5 bg-surface-700 border border-surface-550 text-accent"
                 style={{ minWidth: 70 }}>
-                <span className="font-bold text-ink">{v.name}</span>
+                <ChordTip name={v.name}>
+                  <span className="font-bold text-ink cursor-help">{v.name}</span>
+                </ChordTip>
                 <span className="text-ink-faint">{v.type}</span>
                 <span className="font-mono text-[10px] text-ink-ghost">{v.tab}</span>
               </button>

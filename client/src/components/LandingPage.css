@@ -99,8 +99,23 @@
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* Staggered entrance for the overlay controls on first load. Each control
+   fades + drops in, left → right. The CTA composes its entrance with its
+   ongoing bob (entrance runs once, then the infinite bob continues). */
+@keyframes lp-control-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.lp-embed-tutorial { animation: lp-control-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both; }
+.lp-embed-guest    { animation: lp-control-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both; }
+
 /* Give the CTA a little life: a gentle bob + a sheen sweeping across it. */
-.lp-embed-cta { animation: lp-cta-bob 2.8s ease-in-out infinite; overflow: hidden; position: relative; }
+.lp-embed-cta {
+  animation:
+    lp-control-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.25s both,
+    lp-cta-bob 2.8s ease-in-out 0.75s infinite;
+  overflow: hidden; position: relative;
+}
 .lp-embed-cta::after {
   content: '';
   position: absolute; top: 0; left: -60%;
@@ -208,6 +223,8 @@
 /* Respect reduced-motion: keep it calm — hide flyers, stop CTA motion. */
 @media (prefers-reduced-motion: reduce) {
   .lp-fx { display: none; }
-  .lp-embed-cta { animation: none; }
+  .lp-embed-cta,
+  .lp-embed-tutorial,
+  .lp-embed-guest { animation: none; }
   .lp-embed-cta::after { display: none; }
 }

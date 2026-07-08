@@ -6,7 +6,9 @@
 // Pure presentational SVG built from lib/notation.js. Sized to scroll horizontally
 // inside its own container when a song has many chords.
 
+import { useState } from 'react';
 import { tabToPitches, diatonicStep, isSharp, TREBLE_BOTTOM_STEP } from '../lib/notation';
+import FretboardDiagram from './FretboardDiagram';
 
 const STEP_H = 5;            // px per diatonic step (half a staff space)
 const LINE_GAP = STEP_H * 2; // px between staff lines
@@ -22,8 +24,23 @@ const LEFT = 34;             // room for the clef
 // bottom line. We measure every note's step relative to E4 (TREBLE_BOTTOM_STEP)
 // and convert to a y where the bottom line sits at yBottom.
 export default function NoteStaff({ chords, activeIndex = null }) {
+  // Hover chord map: the chord-name label shows the fretted SHAPE on hover, like
+  // everywhere else in the app. Keeps the source chord (tab/notes) for the diagram.
+  const [tip, setTip] = useState(null); // { chord, x, y }
+  const showTip = (e, chord) => {
+    if (!chord?.tab) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const tipW = 150;
+    setTip({
+      chord,
+      x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
+      y: Math.max(8, r.top - 10),
+    });
+  };
+  const hideTip = () => setTip(null);
+
   const cols = (chords || [])
-    .map((c, i) => ({ i, name: c.name || c.chordName || '', notes: tabToPitches(c.tab || '') }))
+    .map((c, i) => ({ i, name: c.name || c.chordName || '', tab: c.tab || '', notes: tabToPitches(c.tab || ''), src: c }))
     .filter(c => c.notes.length);
 
   if (!cols.length) {
@@ -45,6 +62,7 @@ export default function NoteStaff({ chords, activeIndex = null }) {
   const staffOffsets = [0, 2, 4, 6, 8];
 
   return (
+    <>
     <svg width={width} height={height} style={{ display: 'block' }} role="img"
       aria-label="Note sheet of the song chords">
       {/* Staff lines */}
@@ -73,8 +91,11 @@ export default function NoteStaff({ chords, activeIndex = null }) {
                 fill="rgba(129,140,248,0.16)" />
             )}
 
-            {/* Chord name above the staff */}
+            {/* Chord name above the staff — hover shows the fretted shape */}
             <text x={x} y={LABEL_H - 3} textAnchor="middle" fontSize="11" fontWeight="bold"
+              style={{ cursor: 'help' }}
+              onMouseEnter={(e) => showTip(e, col.src)}
+              onMouseLeave={hideTip}
               fill={active ? 'var(--color-accent, #818cf8)' : 'var(--color-brand, #c9a96e)'}>
               {col.name}
             </text>
@@ -106,6 +127,13 @@ export default function NoteStaff({ chords, activeIndex = null }) {
         );
       })}
     </svg>
+    {tip && (
+      <div className="fixed z-50 rounded-xl p-3 pointer-events-none"
+        style={{ left: tip.x, top: tip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+        <FretboardDiagram chord={{ name: tip.chord.name || tip.chord.chordName || '', tab: tip.chord.tab, notes: tip.chord.notes }} />
+      </div>
+    )}
+    </>
   );
 }
 

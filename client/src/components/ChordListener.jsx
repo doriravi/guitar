@@ -17,6 +17,7 @@ import {
 import { playProgression, stopAudio } from '../lib/audio';
 import PracticeGame from './PracticeGame';
 import FretboardDiagram from './FretboardDiagram';
+import ChordTip from './ChordTip';
 import DifficultyBadge from './DifficultyBadge';
 import { useT } from '../lib/i18n';
 
@@ -896,14 +897,16 @@ function PracticeMode({ cfg, tr }) {
               <div key={g.label} className="flex flex-wrap gap-1 items-center">
                 <span className="text-xs mr-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{g.label}:</span>
                 {g.chords.map(chord => (
-                  <button key={chord.name + chord.type}
-                    onClick={() => { setTargetChord(chord); setStringResults(null); setAutoDetected(null); }}
-                    className="px-2 py-1 rounded-lg text-xs font-semibold transition-all"
-                    style={targetChord === chord
-                      ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
-                      : { background: 'var(--color-surface-850)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
-                    {chord.name}
-                  </button>
+                  <ChordTip key={chord.name + chord.type} name={chord.name}>
+                    <button
+                      onClick={() => { setTargetChord(chord); setStringResults(null); setAutoDetected(null); }}
+                      className="px-2 py-1 rounded-lg text-xs font-semibold transition-all"
+                      style={targetChord === chord
+                        ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
+                        : { background: 'var(--color-surface-850)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                      {chord.name}
+                    </button>
+                  </ChordTip>
                 ))}
               </div>
             ))}
