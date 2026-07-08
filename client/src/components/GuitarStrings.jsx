@@ -1780,22 +1780,14 @@ function MusicEditorMode({ diffMax, tr }) {
           plays (taps our own audio bus, not the mic) — particles surge per
           frequency band so the field follows each strum / the whole song. It
           floats over the app (fixed position, drag by the grip) so you can place
-          it anywhere, and carries its own Play/Stop button wired to playAll.
-          Lazy-loaded + gated via Lazy3D (renders nothing when 3D is off / no GPU
-          / reduced-motion, leaving just the empty panel with its Play button). */}
+          it anywhere. Lazy-loaded + gated via Lazy3D (renders nothing when 3D is
+          off / no GPU / reduced-motion). Use the main transport's Play to hear
+          it react. */}
       <FloatingPanel storageKey="composer-field-v2" width={280} height={170}
-        defaultCorner="bottom-left" title={tr.play || 'Play'}>
+        defaultCorner="bottom-left" title="Composer">
         {/* Field fills the panel (decorative, non-interactive). */}
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
           <Lazy3D load={loadParticleField} fallback={null} />
-        </div>
-        {/* Play / Stop — drives the same playback as the main transport. */}
-        <div className="absolute inset-x-0 bottom-0 flex justify-center pb-2.5" style={{ zIndex: 10 }}>
-          <button
-            onClick={playAll}
-            className={`ui-press flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold text-surface-base shadow-lg transition-all ${isPlaying ? 'bg-danger' : 'bg-brand'}`}>
-            {isPlaying ? '■ Stop' : '▶ Play'}
-          </button>
         </div>
       </FloatingPanel>
 
