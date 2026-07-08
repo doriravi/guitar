@@ -3,7 +3,14 @@ import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
+import SplineHero from './SplineHero';
 import { useT } from '../lib/i18n';
+
+// Decorative Spline scene shown at the top of the Composer. Cursor-reactive only
+// (Spline can't react to audio). Starts as a public demo scene — to self-host,
+// export your own from spline.design into client/public/spline/ and point this
+// at e.g. '/spline/composer.splinecode'.
+const COMPOSER_SPLINE_SCENE = 'https://prod.spline.design/6Wq1Q7YGyM-iab9i/scene.splinecode';
 import { useHandProfile, useAIFingers } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
@@ -1745,6 +1752,24 @@ function MusicEditorMode({ diffMax, tr }) {
 
   return (
     <div>
+      {/* Decorative Spline 3D hero — cursor-reactive flourish for the Composer.
+          Lazy-loaded + gated; falls back to a simple brand gradient banner when
+          3D is off / no GPU / reduced-motion. */}
+      <div
+        className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700"
+        style={{ height: 160, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
+      >
+        <SplineHero
+          scene={COMPOSER_SPLINE_SCENE}
+          style={{ width: '100%', height: '100%' }}
+          fallback={null}
+        />
+        <span className="absolute bottom-2 left-3 text-[11px] font-semibold uppercase tracking-widest pointer-events-none"
+          style={{ color: 'var(--color-ink-faint)' }}>
+          🎛️ Composer
+        </span>
+      </div>
+
       {/* Key selector */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
