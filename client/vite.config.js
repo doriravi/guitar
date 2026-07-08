@@ -37,6 +37,11 @@ export default defineConfig({
         // Precache the built app shell. Cap file size so the bundled intro.mp4
         // (~3 MB) and other large media aren't force-precached.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
+        // Keep the heavy Three.js chunk OUT of precache — it's lazy-loaded only
+        // when a 3D surface opens, and matches the StaleWhileRevalidate rule
+        // below, so it caches on first fetch without bloating the install size
+        // for users who never open one.
+        globIgnores: ['**/three-vendor-*.js'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         navigateFallback: '/index.html',
         // Never let the SW intercept API/auth calls — always hit the network.
@@ -60,6 +65,27 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Route all Three.js / react-three code into ONE shared chunk. Combined
+        // with the dynamic import() of each 3D surface (via <Lazy3D>), this keeps
+        // three out of the main bundle and lets every 3D surface share the same
+        // lazily-fetched chunk. manualChunks alone wouldn't defer it — the
+        // dynamic import is what removes it from initial load.
+        manualChunks(id) {
+          if (
+            id.includes('node_modules/three') ||
+            id.includes('node_modules/@react-three') ||
+            id.includes('node_modules/postprocessing') ||
+            id.includes('node_modules/maath')
+          ) {
+            return 'three-vendor';
+          }
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {

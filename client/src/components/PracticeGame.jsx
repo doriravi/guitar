@@ -35,7 +35,11 @@ import { useHandProfile, useReachLimit } from '../App';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
-import Neck3D from './Neck3D';
+import Lazy3D from './Lazy3D';
+
+// Static-literal dynamic import so Rollup splits Neck3D (and all of three) into
+// the shared three-vendor chunk; only fetched when the 3D neck is actually shown.
+const loadNeck3D = () => import('./Neck3D');
 
 const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
 const NOW_X = 110;               // px position of the now-line inside the lane
@@ -902,7 +906,11 @@ export default function PracticeGame({ cfg }) {
                 <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-brand)' }}>Now</span>
                 {view3D ? (
                   <div style={{ width: 160, height: 140 }}>
-                    <Neck3D notes={tl.windows[activeIdx].notes} />
+                    <Lazy3D
+                      load={loadNeck3D}
+                      componentProps={{ notes: tl.windows[activeIdx].notes }}
+                      fallback={<FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />}
+                    />
                     <p className="text-center text-xs font-semibold -mt-1" style={{ color: 'var(--color-ink)' }}>{tl.windows[activeIdx].name}</p>
                   </div>
                 ) : (
