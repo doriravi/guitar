@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { detectPitchYIN, hzToNote } from '../lib/pitchDetect';
 import { useT } from '../lib/i18n';
+import Lazy3D from './Lazy3D';
+
+// Static-literal dynamic import → shares the lazily-fetched three-vendor chunk.
+// Keeping this here (not a top-level `three` import) is what keeps the tuner —
+// which App.jsx imports statically — out of the main bundle.
+const loadTunerVisualizer = () => import('./three/TunerVisualizer');
 
 // Standard open-string frequencies for reference indicator
 const OPEN_STRINGS = [
@@ -168,6 +174,9 @@ export default function OscilloscopeTuner({ lang }) {
   const timeRef     = useRef(null);
   const yinRef      = useRef(null);
   const lastDrawRef = useRef(0);
+  // Plain refs the GPU visualizer reads from (keeps this file free of any three
+  // import). timeRef holds the live waveform; metaRef the scalar drivers.
+  const metaRef     = useRef({ cents: 0, volume: 0 });
 
   const stopListening = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -222,9 +231,12 @@ export default function OscilloscopeTuner({ lang }) {
       let rms = 0;
       for (let i = 0; i < timeRef.current.length; i++) rms += timeRef.current[i] ** 2;
       rms = Math.sqrt(rms / timeRef.current.length);
-      setVolume(Math.min(1, rms * 10));
+      const vol = Math.min(1, rms * 10);
+      setVolume(vol);
+      metaRef.current.volume = vol; // drive the GPU visualizer's brightness
 
-      // Oscilloscope — draw at ~30fps
+      // Oscilloscope — draw at ~30fps. Only the 2D fallback canvas needs this;
+      // the GPU visualizer pulls timeRef itself on its own render loop.
       if (ts - lastDrawRef.current > 33) {
         lastDrawRef.current = ts;
         const canvas = canvasRef.current;
@@ -235,7 +247,9 @@ export default function OscilloscopeTuner({ lang }) {
       if (rms > 0.01) {
         const hz = detectPitchYIN(timeRef.current, audioCtxRef.current.sampleRate);
         if (hz && hz > 60 && hz < 1400) {
-          setNote(hzToNote(hz));
+          const n = hzToNote(hz);
+          setNote(n);
+          metaRef.current.cents = n.cents; // drive the GPU visualizer's tint
         } else if (rms < 0.015) {
           setNote(null);
         }
@@ -334,13 +348,23 @@ export default function OscilloscopeTuner({ lang }) {
               </span>
             )}
           </div>
-          <canvas
-            ref={canvasRef}
-            width={800}
-            height={180}
-            className="w-full block"
-            style={{ background: '#0a0a12' }}
-          />
+          {/* GPU waveform when 3D is available; the 2D canvas is the fallback
+              (also used under reduced-motion / no-GPU / while the chunk loads). */}
+          <div style={{ width: '100%', height: 180 }}>
+            <Lazy3D
+              load={loadTunerVisualizer}
+              componentProps={{ dataRef: timeRef, metaRef }}
+              fallback={
+                <canvas
+                  ref={canvasRef}
+                  width={800}
+                  height={180}
+                  className="w-full block"
+                  style={{ background: '#0a0a12', height: 180 }}
+                />
+              }
+            />
+          </div>
           {!listening && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ position: 'relative', height: 0, marginTop: -90 }}>
               <span className="text-xs" style={{ color: '#2a2a3a' }}>{tr.pressStart}</span>
