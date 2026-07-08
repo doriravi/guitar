@@ -3,17 +3,16 @@ import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
-import SplineHero from './SplineHero';
+import Lazy3D from './Lazy3D';
 import { useT } from '../lib/i18n';
 
-// Decorative Spline scene shown at the top of the Composer. Cursor-reactive only
-// (Spline can't react to audio). Self-hosted under public/spline/ so it renders
-// offline in the installed PWA with no third-party fetch. Swap this file (or point
-// this constant at your own Public URL / another /spline/*.splinecode) to change
-// the scene — the <SplineHero> integration + lazy-loading are already wired.
-// The styled placeholder still shows behind it and whenever 3D is off / no GPU /
-// reduced-motion, so the strip never looks empty.
-const COMPOSER_SPLINE_SCENE = '/spline/composer.splinecode';
+// The Composer header shows an instanced GPU particle field that reacts to the
+// music the editor PLAYS (every strum / the whole song on Play), not the mic —
+// it taps getComposerAnalyser() off our own audio bus. Lazy-loaded + code-split
+// (three stays out of the main bundle) and gated: on reduced-motion / no real
+// WebGPU it renders nothing and the styled placeholder below carries the strip.
+// Static-literal specifier so Vite can split it (see Lazy3D / vite.config.js).
+const loadParticleField = () => import('./three/ParticleField3D');
 import { useHandProfile, useAIFingers } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
@@ -70,6 +69,7 @@ function semitoneAt(stringIdx, fret) {
 
 let _ctx = null;
 let _unlocked = false;
+let _analyser = null;   // taps ctx._out so visualizers can "hear" what WE synthesize
 function getCtx() {
   if (!_ctx || _ctx.state === 'closed') {
     const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -79,6 +79,7 @@ function getCtx() {
     comp.attack.value = 0.002;  comp.release.value = 0.25;
     comp.connect(_ctx.destination);
     _ctx._out = comp;
+    _analyser = null;   // stale analyser belonged to the closed context
     _unlocked = false;
   }
   // iOS: prime once with a silent buffer inside the user gesture so audio
@@ -93,6 +94,25 @@ function getCtx() {
   }
   if (_ctx.state === 'suspended') _ctx.resume();
   return _ctx;
+}
+
+// Analyser tapped off the Composer's master bus (ctx._out). Everything the editor
+// plays — every strum, the whole song on Play — flows through _out, so this reads
+// exactly what the app is sounding, with NO microphone involved. Connecting _out →
+// analyser is a parallel branch (analyser has no output wired on), so it never
+// changes what reaches the speakers. Lazily created and reused. Returned to the
+// particle visualizer, which pulls time-/frequency-domain data from it each frame.
+// (Exported so ParticleField3D can subscribe without owning any audio itself.)
+export function getComposerAnalyser() {
+  const ctx = getCtx();
+  if (!_analyser) {
+    const a = ctx.createAnalyser();
+    a.fftSize = 1024;             // 512 frequency bins, 1024 time-domain samples
+    a.smoothingTimeConstant = 0.8; // gentle so the field breathes, not jitters
+    try { ctx._out.connect(a); } catch { /* ignore double-connect */ }
+    _analyser = a;
+  }
+  return _analyser;
 }
 
 function pluck(hz, decay = 2.2) {
@@ -1755,16 +1775,17 @@ function MusicEditorMode({ diffMax, tr }) {
 
   return (
     <div>
-      {/* Decorative Spline 3D hero — cursor-reactive flourish for the Composer.
-          Lazy-loaded + gated (COMPOSER_SPLINE_SCENE, self-hosted .splinecode).
-          The scene renders on top; the styled placeholder below shows behind it
-          and whenever 3D is off / no GPU / reduced-motion, so the strip is never
-          an empty box. Swap the .splinecode file to change the scene. */}
+      {/* Instanced GPU particle field that LISTENS to the music the editor plays
+          (taps our own audio bus, not the mic) — particles surge per frequency
+          band so the field follows each strum / the whole song on Play. Lazy-
+          loaded + gated (real WebGPU only). The styled placeholder below shows
+          behind it and whenever 3D is off / no GPU / reduced-motion, so the strip
+          is never an empty box. */}
       <div
         className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700 flex items-center justify-center"
         style={{ height: 200, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
       >
-        {/* Placeholder shown behind/until a real scene renders. */}
+        {/* Placeholder shown behind the field, and alone when 3D is unavailable. */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-center px-4">
           <span className="text-3xl opacity-70">🎛️</span>
           <span className="text-sm font-bold" style={{ color: 'var(--color-ink)' }}>Composer</span>
@@ -1772,13 +1793,10 @@ function MusicEditorMode({ diffMax, tr }) {
             Lay out your song beat by beat, hear it back, and read it as sheet music.
           </span>
         </div>
-        {COMPOSER_SPLINE_SCENE && (
-          <SplineHero
-            scene={COMPOSER_SPLINE_SCENE}
-            style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }}
-            fallback={null}
-          />
-        )}
+        {/* The field sits above the placeholder; press Play to see it react. */}
+        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
+          <Lazy3D load={loadParticleField} fallback={null} />
+        </div>
       </div>
 
       {/* Key selector */}

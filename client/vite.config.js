@@ -41,7 +41,7 @@ export default defineConfig({
         // when a 3D surface opens, and matches the StaleWhileRevalidate rule
         // below, so it caches on first fetch without bloating the install size
         // for users who never open one.
-        globIgnores: ['**/three-vendor-*.js', '**/react-spline-*.js'],
+        globIgnores: ['**/three-vendor-*.js'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         navigateFallback: '/index.html',
         // Never let the SW intercept API/auth calls — always hit the network.
