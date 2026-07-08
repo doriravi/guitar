@@ -7,13 +7,13 @@ import SplineHero from './SplineHero';
 import { useT } from '../lib/i18n';
 
 // Decorative Spline scene shown at the top of the Composer. Cursor-reactive only
-// (Spline can't react to audio). EMPTY until a real scene is provided — the
-// public demo scene renders blank in this container, so we show a styled
-// placeholder instead. To activate: export a scene from spline.design
-// (Export → Public URL), OR download its .splinecode into client/public/spline/,
-// then set this to that URL (e.g. '/spline/composer.splinecode'). The <SplineHero>
-// integration + lazy-loading are already wired — this is the only line to change.
-const COMPOSER_SPLINE_SCENE = '';
+// (Spline can't react to audio). Self-hosted under public/spline/ so it renders
+// offline in the installed PWA with no third-party fetch. Swap this file (or point
+// this constant at your own Public URL / another /spline/*.splinecode) to change
+// the scene — the <SplineHero> integration + lazy-loading are already wired.
+// The styled placeholder still shows behind it and whenever 3D is off / no GPU /
+// reduced-motion, so the strip never looks empty.
+const COMPOSER_SPLINE_SCENE = '/spline/composer.splinecode';
 import { useHandProfile, useAIFingers } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
@@ -1756,11 +1756,10 @@ function MusicEditorMode({ diffMax, tr }) {
   return (
     <div>
       {/* Decorative Spline 3D hero — cursor-reactive flourish for the Composer.
-          Lazy-loaded + gated. A custom scene is added later (export from
-          spline.design → set COMPOSER_SPLINE_SCENE to your Public URL or a
-          self-hosted /spline/*.splinecode). Until then, and whenever 3D is off /
-          no GPU / reduced-motion, the strip shows a styled placeholder rather
-          than an empty box. */}
+          Lazy-loaded + gated (COMPOSER_SPLINE_SCENE, self-hosted .splinecode).
+          The scene renders on top; the styled placeholder below shows behind it
+          and whenever 3D is off / no GPU / reduced-motion, so the strip is never
+          an empty box. Swap the .splinecode file to change the scene. */}
       <div
         className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700 flex items-center justify-center"
         style={{ height: 200, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
