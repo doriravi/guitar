@@ -15,7 +15,11 @@ import SongImporter from './components/SongImporter';
 import AccountSettings from './components/AccountSettings';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
+import Lazy3D from './components/Lazy3D';
 import { DEFAULT_PROFILE } from './lib/handProfile';
+
+// Static-literal dynamic import → shares the lazily-fetched three-vendor chunk.
+const loadAmbient = () => import('./components/three/AmbientBackground');
 import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
 import { syncSongsOnLogin } from './lib/customSongs';
 import { unlockAudio } from './lib/audio';
@@ -380,7 +384,7 @@ export default function App() {
   // truth for the header.
   function renderHeader() {
     return (
-      <header className="border-b border-surface-700">
+      <header className="relative z-10 border-b border-surface-700 bg-surface-base">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
           <span className="text-xl sm:text-2xl">🎸</span>
           <div className="flex-1">
@@ -564,6 +568,16 @@ export default function App() {
     <ReachLimitContext.Provider value={limitToReach}>
       <div className="min-h-screen bg-surface-base">
 
+        {/* Ambient 3D backdrop — a subtle shader layer behind all content.
+            Fixed, non-interactive, mounted ONCE here (above the key={activeTab}
+            panel boundary) so it never remounts on tab switches. Gated + code-
+            split via Lazy3D; when 3D is off it renders nothing and the plain
+            bg-surface-base shows through. Cards are opaque, so it only reads in
+            the gutters — never behind text. */}
+        <div aria-hidden="true" style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+          <Lazy3D load={loadAmbient} fallback={null} />
+        </div>
+
         {showAuth && !showForgot && (
           <AuthModal
             onSuccess={handleAuthSuccess}
@@ -634,7 +648,7 @@ export default function App() {
           <span className="hidden sm:inline">{tr.menu || 'Menu'}</span>
         </button>
 
-        <main className="max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
+        <main className="relative z-10 max-w-4xl mx-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-20">
 
           {/* Guest-mode notice: persistent reminder that nothing is saved. */}
           {guestMode && (
