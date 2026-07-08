@@ -90,9 +90,10 @@ function Field() {
 
     // ── Point size: base + swell with this band's energy and global level.
     //    (Perspective attenuation is applied by PointsNodeMaterial when sizeAttenuation.)
-    const sizeNode = float(2.2)
-      .add(bandEnergy.mul(9.0))
-      .add(uLevel.mul(3.0))
+    //    Slightly larger dots read with more presence against the dark panel.
+    const sizeNode = float(2.8)
+      .add(bandEnergy.mul(11.0))
+      .add(uLevel.mul(3.5))
       .mul(seed.mul(0.6).add(0.7)); // size variety per particle
 
     // ── Color: gold→violet→teal across the frequency axis, brightened by energy.
@@ -104,11 +105,12 @@ function Field() {
     const colorNode = Fn(() => {
       const lowMid = mix(GOLD, VIOLET, smoothstep(float(0.0), float(0.5), bin));
       const hue = mix(lowMid, TEAL, smoothstep(float(0.5), float(1.0), bin));
-      // Base glow keeps particles faintly visible when silent; energy lights them.
-      const bright = float(0.22).add(bandEnergy.mul(1.3)).add(uLevel.mul(0.4));
-      const col = hue.mul(clamp(bright, float(0.0), float(1.6)));
-      const alpha = clamp(bandEnergy.mul(2.0).add(0.4), float(0.2), float(1.0))
-        .add(uLevel.mul(0.3));
+      // Higher base glow + energy gain so particles read with strong contrast
+      // against the dark panel; peaks push into HDR (>1) for a bright bloom-y core.
+      const bright = float(0.4).add(bandEnergy.mul(1.8)).add(uLevel.mul(0.55));
+      const col = hue.mul(clamp(bright, float(0.0), float(2.2)));
+      const alpha = clamp(bandEnergy.mul(2.4).add(0.6), float(0.35), float(1.0))
+        .add(uLevel.mul(0.35));
       return vec4(col, clamp(alpha, float(0.0), float(1.0)));
     })();
 

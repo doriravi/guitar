@@ -64,6 +64,9 @@ export default function FloatingPanel({
   height = 150,
   defaultCorner = 'bottom-left',
   title = '',
+  // Panel backdrop. Default is a near-black vignette so bright (additive) content
+  // like the particle field reads with high contrast; callers can override.
+  background = 'radial-gradient(120% 120% at 50% 30%, #0b0b0d 0%, #050506 70%, #020203 100%)',
   children,
 }) {
   const [pos, setPos] = useState(() =>
@@ -117,7 +120,7 @@ export default function FloatingPanel({
   const panel = (
     <div
       ref={ref}
-      className="rounded-2xl overflow-hidden border border-surface-700 shadow-2xl"
+      className="rounded-2xl overflow-hidden"
       style={{
         position: 'fixed',
         left: pos.x,
@@ -125,7 +128,12 @@ export default function FloatingPanel({
         width,
         height,
         zIndex: 70,   // above the app header and the game-assistant overlay (z 60)
-        background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)',
+        background,
+        // High-contrast separation from the page: a bright brand-tinted border,
+        // a deep drop shadow, and a soft brand glow ring so the panel pops.
+        border: '1px solid rgba(201,169,110,0.55)',
+        boxShadow:
+          '0 12px 40px rgba(0,0,0,0.65), 0 0 0 1px rgba(0,0,0,0.6), 0 0 22px rgba(201,169,110,0.28)',
         touchAction: 'none',            // let us own touch gestures (drag)
         cursor: dragging ? 'grabbing' : 'default',
         userSelect: 'none',
