@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { Fn, uv, vec3, vec4, time, mx_noise_float, float } from 'three/tsl';
 import { makeWebGPURenderer } from '../../lib/makeWebGPURenderer';
+import { hasRealWebGPU } from '../../lib/gpu';
 
 // Subtle, app-wide 3D backdrop. A single full-screen quad with a fragment-only
 // TSL shader — the cheapest possible GPU surface (no lights, no shadows, no
@@ -44,9 +45,12 @@ function AmbientPlane() {
       const n2 = mx_noise_float(vec3(p.x.mul(2.0).sub(t), p.y.mul(2.0).add(t), t.mul(1.3)))
         .mul(0.5).add(0.5);
 
+      // Very low intensities — verified against real renders, the effect must be
+      // a whisper in the gutters, never a wash. Both fields biased dark (pow) so
+      // only the brightest noise peaks tint at all.
       let col = base;
-      col = col.mix(accent, n1.mul(float(0.10)));   // ≤10% accent
-      col = col.mix(brand, n2.pow(float(2.0)).mul(float(0.09))); // ≤9% brass, biased dark
+      col = col.mix(accent, n1.pow(float(2.0)).mul(float(0.035)));  // ≤3.5% accent
+      col = col.mix(brand, n2.pow(float(3.0)).mul(float(0.035)));   // ≤3.5% brass, strongly dark-biased
       return vec4(col, float(1.0));
     })();
 
@@ -64,6 +68,18 @@ function AmbientPlane() {
 }
 
 export default function AmbientBackground() {
+  // Only render on a REAL WebGPU adapter. On the software-WebGL fallback the
+  // MaterialX-noise shader degrades to a flat wash that floods the page, so we'd
+  // rather show nothing (the plain surface background) than a broken backdrop.
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    hasRealWebGPU().then(v => { if (live) setOk(v); });
+    return () => { live = false; };
+  }, []);
+
+  if (!ok) return null;
+
   return (
     <Canvas
       // Orthographic camera framing the [-1,1] quad exactly — no perspective

@@ -35,15 +35,33 @@ export function prefersReducedMotion() {
   }
 }
 
-// True when the Three.js WebGPU renderer can be used. This only checks the API
-// surface (navigator.gpu); the renderer itself still falls back to WebGL at
-// init time on adapters that advertise but can't actually create a device.
+// True when the WebGPU API surface exists (navigator.gpu). Note this does NOT
+// guarantee a working adapter — some environments (e.g. software-WebGL fallback)
+// expose navigator.gpu but requestAdapter() returns null. Use hasRealWebGPU()
+// for the stronger, async check.
 export function hasWebGPU() {
   try {
     return typeof navigator !== 'undefined' && 'gpu' in navigator;
   } catch {
     return false;
   }
+}
+
+// Stronger async check: a real, usable WebGPU adapter exists. Cached. Surfaces
+// that look bad on the WebGL fallback (the ambient/hero shaders) gate on this so
+// they simply don't render when only software rendering is available, rather
+// than showing a degraded wash.
+let _realWebGPU;
+export async function hasRealWebGPU() {
+  if (_realWebGPU !== undefined) return _realWebGPU;
+  try {
+    if (!('gpu' in navigator)) return (_realWebGPU = false);
+    const adapter = await navigator.gpu.requestAdapter();
+    _realWebGPU = !!adapter;
+  } catch {
+    _realWebGPU = false;
+  }
+  return _realWebGPU;
 }
 
 // True when *some* GPU path exists (WebGPU or WebGL). Cached because creating a

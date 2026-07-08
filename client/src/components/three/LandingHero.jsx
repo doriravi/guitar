@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
@@ -6,6 +6,7 @@ import {
   mx_noise_float, sin, abs, smoothstep, mix, clamp, length,
 } from 'three/tsl';
 import { makeWebGPURenderer } from '../../lib/makeWebGPURenderer';
+import { hasRealWebGPU } from '../../lib/gpu';
 
 // Landing-page hero: a full-bleed flowing "aurora" of light in the brand palette,
 // the backmost layer behind the explainer film. Pure fragment-shader (TSL) — no
@@ -62,6 +63,18 @@ function Aurora() {
 }
 
 export default function LandingHero() {
+  // Real WebGPU only — on software-WebGL the noise shader washes out. When
+  // unavailable we render nothing here; the landing's film + SVG FX still carry
+  // the page (and ParticleField remains the Lazy3D fallback when 3D is fully off).
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    hasRealWebGPU().then(v => { if (live) setOk(v); });
+    return () => { live = false; };
+  }, []);
+
+  if (!ok) return null;
+
   return (
     <Canvas
       orthographic
