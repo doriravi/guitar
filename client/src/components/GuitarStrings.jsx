@@ -7,10 +7,13 @@ import SplineHero from './SplineHero';
 import { useT } from '../lib/i18n';
 
 // Decorative Spline scene shown at the top of the Composer. Cursor-reactive only
-// (Spline can't react to audio). Starts as a public demo scene — to self-host,
-// export your own from spline.design into client/public/spline/ and point this
-// at e.g. '/spline/composer.splinecode'.
-const COMPOSER_SPLINE_SCENE = 'https://prod.spline.design/6Wq1Q7YGyM-iab9i/scene.splinecode';
+// (Spline can't react to audio). EMPTY until a real scene is provided — the
+// public demo scene renders blank in this container, so we show a styled
+// placeholder instead. To activate: export a scene from spline.design
+// (Export → Public URL), OR download its .splinecode into client/public/spline/,
+// then set this to that URL (e.g. '/spline/composer.splinecode'). The <SplineHero>
+// integration + lazy-loading are already wired — this is the only line to change.
+const COMPOSER_SPLINE_SCENE = '';
 import { useHandProfile, useAIFingers } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
@@ -1753,21 +1756,30 @@ function MusicEditorMode({ diffMax, tr }) {
   return (
     <div>
       {/* Decorative Spline 3D hero — cursor-reactive flourish for the Composer.
-          Lazy-loaded + gated; falls back to a simple brand gradient banner when
-          3D is off / no GPU / reduced-motion. */}
+          Lazy-loaded + gated. A custom scene is added later (export from
+          spline.design → set COMPOSER_SPLINE_SCENE to your Public URL or a
+          self-hosted /spline/*.splinecode). Until then, and whenever 3D is off /
+          no GPU / reduced-motion, the strip shows a styled placeholder rather
+          than an empty box. */}
       <div
-        className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700"
-        style={{ height: 160, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
+        className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700 flex items-center justify-center"
+        style={{ height: 200, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
       >
-        <SplineHero
-          scene={COMPOSER_SPLINE_SCENE}
-          style={{ width: '100%', height: '100%' }}
-          fallback={null}
-        />
-        <span className="absolute bottom-2 left-3 text-[11px] font-semibold uppercase tracking-widest pointer-events-none"
-          style={{ color: 'var(--color-ink-faint)' }}>
-          🎛️ Composer
-        </span>
+        {/* Placeholder shown behind/until a real scene renders. */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-center px-4">
+          <span className="text-3xl opacity-70">🎛️</span>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-ink)' }}>Composer</span>
+          <span className="text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>
+            Lay out your song beat by beat, hear it back, and read it as sheet music.
+          </span>
+        </div>
+        {COMPOSER_SPLINE_SCENE && (
+          <SplineHero
+            scene={COMPOSER_SPLINE_SCENE}
+            style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }}
+            fallback={null}
+          />
+        )}
       </div>
 
       {/* Key selector */}
