@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
 import './LandingPage.css';
+import Lazy3D from './Lazy3D';
+
+// Static-literal dynamic import → shares the lazily-fetched three-vendor chunk,
+// so the pre-auth landing page loads fast and the 3D hero swaps in when ready.
+const loadLandingHero = () => import('./three/LandingHero');
 
 // The landing page is a self-contained animated explainer served as a static
 // asset (client/public/explainer.html — canvas FX, embedded intro video, and
@@ -29,10 +34,15 @@ export default function LandingPage({ onGetStarted, onTryGuest, langSlot }) {
 
   return (
     <div className="lp-embed-root">
-      {/* Ambient particle field — the very back layer, behind everything.
-          420 particles on a single canvas. Non-interactive; never covers the
-          framed content (it sits below it in the stack). */}
-      <ParticleField count={420} />
+      {/* Hero — the very back layer, full-bleed behind the framed explainer.
+          A GPU/TSL aurora; falls back to the 2D ParticleField helix under
+          reduced-motion / no-GPU / low-end (and while the 3D chunk loads), so
+          the first impression is never blank. Non-interactive; sits below the
+          frame in the stack, so it never covers the content or intercepts the
+          "Get started" / postMessage handoff below. */}
+      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+        <Lazy3D load={loadLandingHero} fallback={<ParticleField count={420} />} />
+      </div>
 
       {/* Background music FX — behind the frame. Non-interactive. */}
       <div className="lp-fx" aria-hidden="true">
