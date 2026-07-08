@@ -4,6 +4,7 @@ import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
 import Lazy3D from './Lazy3D';
+import FloatingPanel from './FloatingPanel';
 import { useT } from '../lib/i18n';
 
 // The Composer header shows an instanced GPU particle field that reacts to the
@@ -1775,29 +1776,28 @@ function MusicEditorMode({ diffMax, tr }) {
 
   return (
     <div>
-      {/* Instanced GPU particle field that LISTENS to the music the editor plays
-          (taps our own audio bus, not the mic) — particles surge per frequency
-          band so the field follows each strum / the whole song on Play. Lazy-
-          loaded + gated (real WebGPU only). The styled placeholder below shows
-          behind it and whenever 3D is off / no GPU / reduced-motion, so the strip
-          is never an empty box. */}
-      <div
-        className="relative mb-4 rounded-2xl overflow-hidden border border-surface-700 flex items-center justify-center"
-        style={{ height: 200, background: 'radial-gradient(120% 120% at 20% 0%, rgba(201,169,110,0.18), rgba(167,139,250,0.10) 45%, var(--color-surface-850) 80%)' }}
-      >
-        {/* Placeholder shown behind the field, and alone when 3D is unavailable. */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none text-center px-4">
-          <span className="text-3xl opacity-70">🎛️</span>
-          <span className="text-sm font-bold" style={{ color: 'var(--color-ink)' }}>Composer</span>
-          <span className="text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>
-            Lay out your song beat by beat, hear it back, and read it as sheet music.
-          </span>
-        </div>
-        {/* The field sits above the placeholder; press Play to see it react. */}
+      {/* Floating, draggable particle field that LISTENS to the music the editor
+          plays (taps our own audio bus, not the mic) — particles surge per
+          frequency band so the field follows each strum / the whole song. It
+          floats over the app (fixed position, drag by the grip) so you can place
+          it anywhere, and carries its own Play/Stop button wired to playAll.
+          Lazy-loaded + gated via Lazy3D (renders nothing when 3D is off / no GPU
+          / reduced-motion, leaving just the empty panel with its Play button). */}
+      <FloatingPanel storageKey="composer-field" width={280} height={170}
+        defaultPos={{ x: 24, y: 110 }} title={tr.play || 'Play'}>
+        {/* Field fills the panel (decorative, non-interactive). */}
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 1 }}>
           <Lazy3D load={loadParticleField} fallback={null} />
         </div>
-      </div>
+        {/* Play / Stop — drives the same playback as the main transport. */}
+        <div className="absolute inset-x-0 bottom-0 flex justify-center pb-2.5" style={{ zIndex: 10 }}>
+          <button
+            onClick={playAll}
+            className={`ui-press flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold text-surface-base shadow-lg transition-all ${isPlaying ? 'bg-danger' : 'bg-brand'}`}>
+            {isPlaying ? '■ Stop' : '▶ Play'}
+          </button>
+        </div>
+      </FloatingPanel>
 
       {/* Key selector */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
