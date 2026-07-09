@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import DifficultyBadge from './DifficultyBadge';
@@ -152,6 +152,100 @@ function strum(frets, capo = 0) {
   });
 }
 
+// A sustained, pitch-bendable pluck for drag-to-stretch. Returns a handle whose
+// bend(semitones) glides the pitch and release() lets it ring out and settle.
+// Used while a finger/mouse drags a string: the further you pull, the sharper it
+// bends (like physically stretching the string), snapping back on release.
+function bendPluck(baseHz) {
+  const ctx = getCtx();
+  const now = ctx.currentTime;
+  const env = ctx.createGain();
+  env.connect(ctx._out);
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(0.24, now + 0.004);
+  // gentle natural decay while held; release() shortens the tail
+  env.gain.setTargetAtTime(0.10, now + 0.05, 1.2);
+
+  const partials = [[1,'triangle',0.55],[2,'sine',0.24],[3,'sine',0.10]];
+  const oscs = partials.map(([h, type, a]) => {
+    const osc = ctx.createOscillator(); const g = ctx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(baseHz * h, now); g.gain.value = a;
+    osc.connect(g); g.connect(env); osc.start(now);
+    return { osc, h };
+  });
+
+  return {
+    // ratio = current frequency multiplier (1 = at rest, >1 = bent sharp)
+    bend(ratio) {
+      const t = getCtx().currentTime;
+      oscs.forEach(({ osc, h }) => osc.frequency.setTargetAtTime(baseHz * h * ratio, t, 0.02));
+    },
+    release() {
+      const t = getCtx().currentTime;
+      // snap the pitch home, then let it ring out briefly
+      oscs.forEach(({ osc, h }) => {
+        osc.frequency.setTargetAtTime(baseHz * h, t, 0.04);
+        osc.stop(t + 1.4);
+      });
+      env.gain.cancelScheduledValues(t);
+      env.gain.setValueAtTime(env.gain.value, t);
+      env.gain.exponentialRampToValueAtTime(0.001, t + 1.3);
+    },
+  };
+}
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+// Records exactly what the Composer sounds by tapping the master bus (ctx._out)
+// with a MediaStreamDestination — the same signal the analyser reads, so NO
+// microphone is involved. MediaRecorder captures it to a compressed blob the
+// user can download. `isRecordingSupported()` gates the UI on browser support.
+
+let _recDest = null;   // persistent MediaStreamAudioDestinationNode on the bus
+
+function isRecordingSupported() {
+  return typeof window !== 'undefined' &&
+    typeof window.MediaRecorder !== 'undefined';
+}
+
+// Pick a container/codec the browser will actually record.
+function pickRecMime() {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+  return types.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+}
+
+// Begin recording the master bus. Returns a live recorder handle, or null if
+// unsupported. onStop(blob, mime) fires once with the finished audio.
+function startBusRecording(onStop) {
+  if (!isRecordingSupported()) return null;
+  const ctx = getCtx();
+  if (!_recDest) {
+    _recDest = ctx.createMediaStreamDestination();
+    ctx._out.connect(_recDest);   // parallel tap; speakers are unaffected
+  }
+  const mime = pickRecMime();
+  let rec;
+  try {
+    rec = new MediaRecorder(_recDest.stream, mime ? { mimeType: mime } : undefined);
+  } catch {
+    return null;
+  }
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const type = rec.mimeType || mime || 'audio/webm';
+    onStop(new Blob(chunks, { type }), type);
+  };
+  rec.start();
+  return rec;
+}
+
+// File extension for a saved recording, from its MIME type.
+function recExt(mime) {
+  if (mime.includes('ogg')) return 'ogg';
+  if (mime.includes('mp4')) return 'm4a';
+  return 'webm';
+}
+
 // ── Chord voicing from tab ────────────────────────────────────────────────────
 
 function tabToFrets(tab) {
@@ -175,15 +269,91 @@ function beatDifficulty(frets, capo = 0) {
 // Shared visual component used by all three modes.
 // dotStyle(s, f) → null | { bg, color, glow, label }
 
-function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0 }) {
+function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0, vibrateApiRef }) {
   // Horizontal center of a fret column, as a CSS calc(). The left label+open
   // area is a fixed 84px; the remaining width is split into FRET_COUNT columns.
   const fretCenter = (fretNum) =>
     `calc(84px + (100% - 84px) * ${(fretNum - 0.5) / FRET_COUNT})`;
   const showCapo = capo > 0 && capo <= FRET_COUNT;
 
+  // Refs to each string's body element, so a pluck can imperatively restart the
+  // vibration animation on just that string (no React re-render per pluck).
+  const stringEls = useRef([]);
+  const vibrate = useCallback((s) => {
+    const el = stringEls.current[s];
+    if (!el) return;
+    el.classList.remove('string-vibrate');
+    // force reflow so re-adding the class restarts the animation
+    void el.offsetWidth;
+    el.classList.add('string-vibrate');
+  }, []);
+  // Expose vibrate(s) to the parent mode via the shared ref.
+  if (vibrateApiRef) vibrateApiRef.current = vibrate;
+
+  // ── Drag-to-stretch ──────────────────────────────────────────────────────────
+  // Press a string and drag up/down to physically bend it: the string curves
+  // toward the pointer (max displacement at the pointer, tapering to the nut and
+  // the neck's far end) and its pitch bends sharp in proportion. Release snaps it
+  // back with the settle animation. All per-frame work is imperative (style/audio
+  // on refs) so there's no React churn while dragging.
+  const dragRef = useRef(null); // { s, el, x0, baseHz, tone, maxPull, width }
+
+  const MAX_PULL_PX = 26;     // how far a string can visually stretch
+  const MAX_BEND_SEMI = 2.5;  // full pull ≈ a whole-step-plus bend
+
+  const endDrag = useCallback(() => {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    // release the tone (rings out, pitch home) and let the string settle
+    try { d.tone?.release(); } catch { /* ignore */ }
+    if (d.el) {
+      // clear the drag transform so the string returns to rest, then play the
+      // snap-back wobble (the animation drives its own transform for its duration)
+      d.el.style.transition = '';
+      d.el.style.transform = 'translateY(-50%)';
+      d.el.classList.remove('string-vibrate');
+      void d.el.offsetWidth;
+      d.el.classList.add('string-vibrate');
+    }
+  }, []);
+
+  const moveDrag = useCallback((clientX, clientY) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const rect = d.el.getBoundingClientRect();
+    const cy = rect.top + rect.height / 2;
+    const rawDy = clientY - cy;
+    const pull = Math.max(-MAX_PULL_PX, Math.min(MAX_PULL_PX, rawDy));
+    // fraction of the neck width where the pointer is (0 at nut … 1 at far end)
+    const fx = Math.max(0.04, Math.min(0.96, (clientX - rect.left) / rect.width));
+    // The string's ends are anchored (nut + bridge), so a grab near an end bends
+    // less than one grabbed mid-neck. Taper the displacement by that profile and
+    // translate the string toward the pointer.
+    const endTaper = Math.sin(fx * Math.PI); // 0 at ends, 1 at center
+    d.el.style.transition = 'none';
+    d.el.style.transform = `translateY(calc(-50% + ${pull * endTaper}px))`;
+    // pitch bend: only pulling sharp (either direction stretches → higher)
+    const bendFrac = (Math.abs(pull) / MAX_PULL_PX) * endTaper;
+    const ratio = 2 ** ((bendFrac * MAX_BEND_SEMI) / 12);
+    d.tone?.bend(ratio);
+  }, []);
+
+  const startDrag = useCallback((s, e) => {
+    // begin a bend from the string's open pitch (capo-shifted)
+    const baseHz = OPEN_HZ[s] * 2 ** (capo / 12);
+    const el = stringEls.current[s];
+    if (!el) return;
+    el.classList.remove('string-vibrate'); // cancel any settling
+    let tone = null;
+    try { tone = bendPluck(baseHz); } catch { /* audio may be blocked */ }
+    dragRef.current = { s, el, baseHz, tone };
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+    moveDrag(e.clientX, e.clientY);
+  }, [capo, moveDrag]);
+
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: '#1a1010', border: '1px solid #2a1a1a' }}>
+    <div className="rounded-2xl overflow-hidden" style={{ background: '#0d0908', border: '1px solid #2a1a1a' }}>
       {/* Fret number header */}
       <div className="flex" style={{ borderBottom: '1px solid var(--color-surface-550)' }}>
         <div style={{ width: 44 }} className="shrink-0" />
@@ -200,6 +370,74 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0 }) {
       {/* Capo bar — a clamp across all strings at the capo fret. Wraps the string
           rows so the absolute bar can span their full height. */}
       <div className="relative">
+
+        {/* ── Realistic neck: grained rosewood body, bone nut, crowned metallic
+            fret wires, abalone inlays, and ambient lighting. All decorative
+            (pointer-events-none) and layered BEHIND the interactive string/fret
+            buttons so tap-to-edit still works. The neck starts at 84px (after the
+            label + open-note gutter). ── */}
+        <div className="absolute z-0 pointer-events-none overflow-hidden"
+          style={{ left: 84, right: 0, top: 0, bottom: 0 }}>
+          {/* base rosewood tone (vertical form: lit center, darker edges) */}
+          <div className="absolute inset-0" style={{
+            background: 'linear-gradient(180deg, #33210f 0%, #4d3620 22%, #573d24 50%, #4a3018 78%, #2c1c0d 100%)',
+          }} />
+          {/* directional wood grain — fine streaks running along the neck, in two
+              scales, with warm/dark variation so it doesn't read as a flat panel */}
+          <div className="absolute inset-0" style={{
+            opacity: 0.5, mixBlendMode: 'overlay',
+            background: [
+              'repeating-linear-gradient(88deg, rgba(28,16,6,0.9) 0px, rgba(28,16,6,0) 2px 5px, rgba(120,84,44,0.5) 6px 7px, rgba(28,16,6,0) 8px 11px)',
+              'repeating-linear-gradient(91deg, rgba(20,11,4,0.7) 0px, rgba(20,11,4,0) 3px 9px, rgba(96,66,34,0.35) 10px 12px, rgba(20,11,4,0) 13px 22px)',
+            ].join(', '),
+          }} />
+          {/* a few darker heartwood streaks for character */}
+          <div className="absolute inset-0" style={{
+            opacity: 0.4,
+            background: 'repeating-linear-gradient(89.3deg, transparent 0 34px, rgba(18,10,4,0.55) 34px 36px, transparent 36px 70px)',
+          }} />
+          {/* ambient top-down sheen + edge vignette to give the neck real form */}
+          <div className="absolute inset-0" style={{
+            background: 'radial-gradient(120% 80% at 50% 0%, rgba(255,214,150,0.14), rgba(0,0,0,0) 55%), linear-gradient(180deg, rgba(0,0,0,0) 60%, rgba(0,0,0,0.45) 100%)',
+          }} />
+          <div className="absolute inset-0" style={{
+            boxShadow: 'inset 0 0 40px rgba(0,0,0,0.55), inset 0 2px 6px rgba(0,0,0,0.4)',
+          }} />
+
+          {/* bone nut at the open→fret-1 boundary — grained, with a top bevel */}
+          <div className="absolute" style={{
+            left: -4, top: 0, bottom: 0, width: 7,
+            background: 'linear-gradient(90deg, #d9cdae 0%, #f5ecd7 40%, #efe4cc 60%, #b7a37c 100%)',
+            boxShadow: '2px 0 4px rgba(0,0,0,0.55), inset 0 0 3px rgba(120,104,70,0.5)',
+          }} />
+
+          {/* crowned metallic fret wires — a bright rounded top with a dark
+              shadow line on each side, so each fret sits proud of the wood */}
+          {Array.from({ length: FRET_COUNT }, (_, f) => (
+            <div key={f} className="absolute top-0 bottom-0" style={{
+              left: `calc(100% * ${(f + 1) / FRET_COUNT} - 2px)`,
+              width: 4,
+              background: 'linear-gradient(90deg, rgba(0,0,0,0.55) 0%, #7d7f85 22%, #f4f5f7 50%, #a9abb0 74%, rgba(0,0,0,0.55) 100%)',
+              boxShadow: '0 0 3px rgba(0,0,0,0.5)',
+              borderRadius: 2,
+            }} />
+          ))}
+
+          {/* abalone/pearl inlay dots (3,5,7,9 single; 12 double) */}
+          {[3,5,7,9,12].map(fn => (
+            <div key={fn} className="absolute -translate-x-1/2 -translate-y-1/2 flex gap-2"
+              style={{ left: `calc(100% * ${(fn - 0.5) / FRET_COUNT})`, top: '50%' }}>
+              {(fn === 12 ? [0,1] : [0]).map(k => (
+                <div key={k} className="rounded-full" style={{
+                  width: 10, height: 10,
+                  background: 'radial-gradient(circle at 32% 28%, #ffffff 0%, #eae2cf 30%, #cbb9c9 55%, #9fb2c0 78%, #7d8a72 100%)',
+                  boxShadow: 'inset 0 0 2px rgba(0,0,0,0.35), inset 0 -1px 2px rgba(80,60,90,0.4), 0 1px 2px rgba(0,0,0,0.4)',
+                }} />
+              ))}
+            </div>
+          ))}
+        </div>
+
         {showCapo && (
           <div className="absolute z-20 pointer-events-none flex items-center justify-center"
             style={{
@@ -221,7 +459,7 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0 }) {
         const openDot = dotStyle(s, 0);
         return (
           <div key={s} className="flex items-center relative"
-            style={{ borderBottom: s < 5 ? '1px solid #1e1010' : 'none', minHeight: 52 }}>
+            style={{ minHeight: 52 }}>
 
             {/* String label */}
             <button onClick={() => onOpenClick?.(s)}
@@ -243,34 +481,76 @@ function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0 }) {
               </button>
             </div>
 
-            {/* String line */}
-            <div className="absolute pointer-events-none"
-              style={{ left: 84, right: 0, top: '50%', height: STRING_THICK[s],
+            {/* String — a real round wire above the wood. Layers, back to front:
+                (1) a soft cast shadow on the neck below the string;
+                (2) the string body: identity color graded top→bottom for volume;
+                (3) wound texture (fine diagonal ridges) on the thicker bass strings;
+                (4) a crisp specular highlight running along the top. */}
+            {/* cast shadow */}
+            <div className="absolute z-[1] pointer-events-none"
+              style={{ left: 84, right: 0, top: 'calc(50% + 2px)', height: STRING_THICK[s] + 2,
                 transform: 'translateY(-50%)',
-                background: `linear-gradient(to right, ${STRING_COLORS[s]}cc, ${STRING_COLORS[s]}33)`,
+                background: 'rgba(0,0,0,0.55)', filter: 'blur(1px)',
                 borderRadius: 9999 }} />
+            {/* string body — vibrates on pluck (class toggled imperatively) */}
+            <div ref={el => { stringEls.current[s] = el; }}
+              onAnimationEnd={e => e.currentTarget.classList.remove('string-vibrate')}
+              className="absolute z-[1] pointer-events-none"
+              style={{ left: 84, right: 0, top: '50%', height: STRING_THICK[s],
+                transform: 'translateY(-50%)', transformOrigin: 'center',
+                background: `linear-gradient(to bottom, #ffffff33, ${STRING_COLORS[s]} 30%, ${STRING_COLORS[s]}bb 60%, ${STRING_COLORS[s]}55 100%)`,
+                boxShadow: `0 0 5px ${STRING_COLORS[s]}66`,
+                borderRadius: 9999 }} />
+            {/* wound texture — only on the three bass strings (thicker gauge) */}
+            {s <= 2 && (
+              <div className="absolute z-[1] pointer-events-none"
+                style={{ left: 84, right: 0, top: '50%', height: STRING_THICK[s],
+                  transform: 'translateY(-50%)', borderRadius: 9999, opacity: 0.45,
+                  mixBlendMode: 'overlay',
+                  background: 'repeating-linear-gradient(72deg, rgba(255,255,255,0.9) 0 1px, rgba(0,0,0,0.6) 1px 2.5px)' }} />
+            )}
+            {/* specular highlight along the top of the wire */}
+            <div className="absolute z-[1] pointer-events-none"
+              style={{ left: 84, right: 0, top: `calc(50% - ${STRING_THICK[s] / 2 - 0.5}px)`, height: 1,
+                transform: 'translateY(-50%)',
+                background: 'linear-gradient(to right, rgba(255,255,255,0.85), rgba(255,255,255,0.35))',
+                borderRadius: 9999 }} />
+
+            {/* Drag-to-stretch capture band — a tall transparent strip over the
+                string. Sits ABOVE the visual string (z-2) but BELOW the fret dots
+                (z-10), so tapping a fret still edits while dragging the string
+                bends it. touch-action:none lets us own the vertical drag gesture. */}
+            <div
+              className="absolute z-[2]"
+              style={{ left: 84, right: 0, top: '50%', height: 30, transform: 'translateY(-50%)',
+                cursor: 'ns-resize', touchAction: 'none' }}
+              onPointerDown={e => { e.preventDefault(); startDrag(s, e); }}
+              onPointerMove={e => { if (dragRef.current?.s === s) moveDrag(e.clientX, e.clientY); }}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            />
 
             {/* Fret buttons */}
             {Array.from({ length: FRET_COUNT }, (_, f) => {
               const fretNum = f + 1;
               const dot = dotStyle(s, fretNum);
-              const isMark = MARKER_FRETS.includes(fretNum);
               return (
                 <div key={f} className="flex-1 flex items-center justify-center relative"
                   style={{ minWidth: 0, height: 52 }}>
-                  <div className="absolute left-0 top-0 bottom-0 pointer-events-none"
-                    style={{ width: 1.5, background: '#3a2a2a', opacity: 0.6 }} />
                   <button onClick={() => onFretClick?.(s, fretNum)}
                     className="relative z-10 flex items-center justify-center rounded-full transition-all text-xs font-bold"
                     style={{
                       width: 28, height: 28,
-                      background: dot ? dot.bg : isMark ? '#1e1616' : 'transparent',
-                      color: dot ? dot.color : isMark ? '#3a3a3a' : 'transparent',
+                      // Placed notes render as glossy gold pearls (unless dotStyle
+                      // supplies its own bg, e.g. per-string identity color); empty
+                      // frets stay invisible so only the wood + inlays show through.
+                      background: dot ? dot.bg : 'transparent',
+                      color: dot ? dot.color : 'transparent',
                       boxShadow: dot?.glow ?? 'none',
                       transform: dot ? 'scale(1.05)' : 'scale(1)',
-                      border: dot ? 'none' : isMark ? '1px solid #2a2020' : 'none',
+                      border: 'none',
                     }}>
-                    {dot?.label ?? (isMark ? '·' : '')}
+                    {dot?.label ?? ''}
                   </button>
                 </div>
               );
@@ -947,7 +1227,18 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
 
   return (
     <div className="rounded-xl mb-3 overflow-x-auto"
-      style={{ background: '#faf8f3', border: '1px solid #2a2a2a' }}>
+      style={{
+        // Aged yellow manuscript paper: warm base + soft edge vignette + faint
+        // mottling so it reads as real parchment rather than a flat swatch.
+        background: [
+          'radial-gradient(140% 120% at 50% 0%, rgba(255,252,235,0.7), rgba(0,0,0,0) 60%)',
+          'radial-gradient(120% 140% at 100% 100%, rgba(150,120,60,0.18), rgba(0,0,0,0) 55%)',
+          'radial-gradient(110% 130% at 0% 100%, rgba(150,120,60,0.14), rgba(0,0,0,0) 55%)',
+          'linear-gradient(180deg, #f7ecc4 0%, #f1e2af 55%, #ecd9a0 100%)',
+        ].join(', '),
+        border: '1px solid #cbb884',
+        boxShadow: 'inset 0 0 24px rgba(120,94,40,0.15)',
+      }}>
       <div className="flex items-center gap-2 px-3 pt-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#8a7a5a' }}>
           {tr.notationSheet}
@@ -957,10 +1248,10 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
         {/* Staff lines */}
         {lineDias.map((d, i) => (
           <line key={i} x1={8} y1={yFor(d)} x2={width - 6} y2={yFor(d)}
-            stroke="#3a3a3a" strokeWidth={1} />
+            stroke="#5a4326" strokeWidth={1} />
         ))}
         {/* Treble clef glyph */}
-        <text x={10} y={yFor(lineDias[3]) + 10} fontSize={44} fill="#1a1a1a"
+        <text x={10} y={yFor(lineDias[3]) + 10} fontSize={44} fill="#3a2a12"
           style={{ fontFamily: 'serif' }}>𝄞</text>
 
         {/* Key signature */}
@@ -968,7 +1259,7 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
           const dia = (key.acc === 'sharp' ? SHARP_DIA : FLAT_DIA)[letter];
           return (
             <text key={letter} x={SIG_X0 + 4 + i * SIG_STEP} y={yFor(dia) + 4}
-              fontSize={15} textAnchor="middle" fill="#1a1a1a" style={{ fontFamily: 'serif' }}>
+              fontSize={15} textAnchor="middle" fill="#3a2a12" style={{ fontFamily: 'serif' }}>
               {sigGlyph}
             </text>
           );
@@ -1002,7 +1293,7 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
                     {/* Ledger lines */}
                     {ledgersFor(n.dia).map((ld, li) => (
                       <line key={li} x1={cx - 8} y1={yFor(ld)} x2={cx + 8} y2={yFor(ld)}
-                        stroke="#3a3a3a" strokeWidth={1} />
+                        stroke="#5a4326" strokeWidth={1} />
                     ))}
                     {/* Accidental */}
                     {n.glyph && (
@@ -1627,6 +1918,47 @@ function MusicEditorMode({ diffMax, tr }) {
   const beatsRef = useRef(beats);
   beatsRef.current = beats;
 
+  // vibrate(s) is populated by <Fretboard/> — lets handlers wobble a string.
+  const vibrateApiRef = useRef(null);
+  const vibe = (s) => vibrateApiRef.current?.(s);
+  const vibeStrum = (frets) => frets.forEach((f, s) => { if (f !== null) vibe(s); });
+
+  // Recording the Composer's output to a downloadable clip.
+  const [recording, setRecording] = useState(false);
+  const [recElapsed, setRecElapsed] = useState(0);
+  const [lastClip, setLastClip] = useState(null); // { url, ext, name }
+  const recRef = useRef(null);
+  const recTimerRef = useRef(null);
+  const recSupported = isRecordingSupported();
+
+  const toggleRecord = () => {
+    if (recording) {
+      recRef.current?.stop();
+      clearInterval(recTimerRef.current);
+      setRecording(false);
+      return;
+    }
+    // Free any previous clip's object URL before starting a new take.
+    setLastClip(prev => { if (prev) URL.revokeObjectURL(prev.url); return null; });
+    const rec = startBusRecording((blob, mime) => {
+      const ext = recExt(mime);
+      setLastClip({ url: URL.createObjectURL(blob), ext,
+        name: `composer-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.${ext}` });
+    });
+    if (!rec) return;
+    recRef.current = rec;
+    setRecElapsed(0);
+    const startedAt = Date.now();
+    recTimerRef.current = setInterval(() => setRecElapsed((Date.now() - startedAt) / 1000), 100);
+    setRecording(true);
+  };
+
+  // Stop the recorder + free the last clip's URL on unmount.
+  useEffect(() => () => {
+    try { recRef.current?.stop(); } catch { /* ignore */ }
+    clearInterval(recTimerRef.current);
+  }, []);
+
   // Current beat being edited
   const editBeat = beats[editIdx] ?? beats[0];
 
@@ -1659,6 +1991,7 @@ function MusicEditorMode({ diffMax, tr }) {
 
   const handleFret = useCallback((s, f) => {
     pluck(OPEN_HZ[s] * 2 ** ((f + capo) / 12));
+    vibe(s);
     setBeats(prev => {
       const next = prev.map((b, i) => {
         if (i !== editIdx) return b;
@@ -1672,6 +2005,7 @@ function MusicEditorMode({ diffMax, tr }) {
 
   const handleOpen = useCallback((s) => {
     pluck(OPEN_HZ[s] * 2 ** (capo / 12), 2.6);
+    vibe(s);
     setBeats(prev => {
       const next = prev.map((b, i) => {
         if (i !== editIdx) return b;
@@ -1711,6 +2045,7 @@ function MusicEditorMode({ diffMax, tr }) {
       }
       setPlayIdx(i);
       strum(currentBeats[i].frets, capoRef.current);
+      vibeStrum(currentBeats[i].frets);
       i++;
       playTimer.current = setTimeout(tick, msPerBeat);
     };
@@ -1932,22 +2267,56 @@ function MusicEditorMode({ diffMax, tr }) {
           })()}
           <span className="text-xs text-ink-ghost">— tap frets to modify</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
           <button
             onClick={clearBeat}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-750 text-ink-subtle border border-surface-650">
             Clear beat
           </button>
           <button
-            onClick={() => strum(editBeat?.frets ?? EMPTY_BEAT(), capo)}
+            onClick={() => { const f = editBeat?.frets ?? EMPTY_BEAT(); strum(f, capo); vibeStrum(f); }}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-750 text-brand"
             style={{ border: '1px solid rgba(201,169,110,0.25)' }}>
             🎸 Strum
           </button>
+          {recSupported && (
+            <button
+              onClick={toggleRecord}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+              style={recording
+                ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.4)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-650)' }}
+              title={recording ? 'Stop recording' : 'Record what you play to a downloadable clip'}>
+              <span aria-hidden style={{
+                display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
+                background: recording ? 'var(--color-danger)' : '#c0392b',
+                animation: recording ? 'pgPulse 1s ease-in-out infinite' : 'none',
+              }} />
+              {recording ? `Stop · ${recElapsed.toFixed(1)}s` : 'Record'}
+            </button>
+          )}
+          {lastClip && !recording && (
+            <a
+              href={lastClip.url}
+              download={lastClip.name}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+              style={{ background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }}
+              title="Download your recording">
+              ⬇ Save clip
+            </a>
+          )}
         </div>
       </div>
 
-      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} capo={capo} />
+      {/* Inline playback of the last recording, so you can hear it back here. */}
+      {lastClip && !recording && (
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-[11px] text-ink-faint shrink-0">Last take</span>
+          <audio src={lastClip.url} controls className="h-8 w-full max-w-md" style={{ colorScheme: 'dark' }} />
+        </div>
+      )}
+
+      <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} capo={capo} vibrateApiRef={vibrateApiRef} />
 
       {/* Playback indicator */}
       {isPlaying && playIdx !== null && (
@@ -1976,24 +2345,31 @@ function DiffSlider({ diffMax, setDiffMax, tr }) {
         <span className="text-xs font-semibold uppercase tracking-wide whitespace-nowrap text-ink-faint">
           {tr.maxDifficulty}
         </span>
-        <div className="relative flex-1">
+        <div className="relative flex-1 flex items-center">
+          {/* Recommended-for-your-hand marker — a slim pin seated INTO the groove
+              (behind the knob) so it reads as an etched setpoint, not a second
+              thumb. Click it to jump the slider to the recommended difficulty. */}
           <input
             type="range" min={1} max={10} value={diffMax}
             onChange={e => setDiffMax(Number(e.target.value))}
-            className="w-full block"
-            style={{ background: `linear-gradient(to right, ${color} ${pct}%, var(--color-surface-550) ${pct}%)` }}
+            className="w-full block relative z-0"
+            style={{ background: `linear-gradient(to right, ${color} ${pct}%, transparent ${pct}%)` }}
           />
-          {/* Recommended-for-your-hand marker */}
+          {/* Recommended-for-your-hand marker — a slim etched pin ON the groove
+              (above the track, but thin/short so it doesn't read as a second
+              thumb). Click it to jump the slider to the recommended difficulty. */}
           <button
             type="button"
             onClick={() => setDiffMax(recommended)}
             title={`${tr.recommendedForHand}: ${recommended}`}
-            className="absolute -top-1 w-3 h-3 rounded-full pointer-events-auto"
+            aria-label={`${tr.recommendedForHand}: ${recommended}`}
+            className="absolute z-20 pointer-events-auto"
             style={{
-              left: `calc(${recPct}% - 6px)`,
+              left: `calc(${recPct}% - 1.5px)`,
+              top: '50%', transform: 'translateY(-50%)',
+              width: 3, height: 14, borderRadius: 9999,
               background: 'var(--color-accent)',
-              border: '2px solid var(--color-surface-800)',
-              boxShadow: '0 0 6px rgba(167,139,250,0.7)',
+              boxShadow: '0 0 6px rgba(167,139,250,0.85), inset 0 0 1px rgba(255,255,255,0.6)',
             }}
           />
         </div>

@@ -28,7 +28,15 @@
       "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode)",
       "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/lib/scales.js' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode)",
       "PowerShell(\\(Invoke-WebRequest 'http://localhost:5173/src/components/GuitarStrings.jsx' -UseBasicParsing\\).StatusCode; \\(Invoke-WebRequest 'http://localhost:5173/src/lib/composerLibrary.js' -UseBasicParsing\\).StatusCode)",
-      "PowerShell($deadline = \\(Get-Date\\).AddSeconds\\(30\\); do { $up = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue; if \\($up\\) { break }; Start-Sleep -Milliseconds 500 } while \\(\\(Get-Date\\) -lt $deadline\\); if \\($up\\) { \\(Invoke-WebRequest http://localhost:5173/ -Headers @{Accept='text/html'} -UseBasicParsing\\).StatusCode } else { 'port 5173 not listening' })"
+      "PowerShell($deadline = \\(Get-Date\\).AddSeconds\\(30\\); do { $up = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue; if \\($up\\) { break }; Start-Sleep -Milliseconds 500 } while \\(\\(Get-Date\\) -lt $deadline\\); if \\($up\\) { \\(Invoke-WebRequest http://localhost:5173/ -Headers @{Accept='text/html'} -UseBasicParsing\\).StatusCode } else { 'port 5173 not listening' })",
+      "Bash(npm run *)",
+      "Bash(curl -s \"http://localhost:5173/src/lib/gpu.js\")",
+      "Bash(curl -s \"http://localhost:5173/src/components/Lazy3D.jsx\")",
+      "Bash(curl -s \"http://localhost:5173/src/components/PracticeGame.jsx\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npm view *)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

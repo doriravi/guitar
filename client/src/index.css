@@ -6,10 +6,15 @@
    Mirrors the color tokens in tailwind.config.js (see src/DESIGN_SYSTEM.md).
    Use var(--...) for inline styles that can't use Tailwind utility classes. */
 :root {
-  /* Brand / primary accent */
-  --color-brand: #c9a96e;
-  --color-brand-hover: #b8913a;
-  --color-brand-soft: #8a7a5a;
+  /* Brand / primary accent — luminous "stage gold" (see DESIGN_SYSTEM.md).
+     `brand` is the bright, saturated highlight; `hover`/`soft` step down.
+     `--brand-glow` is the ambient halo used behind active/lit elements. */
+  --color-brand: #e9c46a;
+  --color-brand-hover: #d4a63c;
+  --color-brand-soft: #a08a4e;
+  --color-brand-deep: #c9962e;
+  --brand-glow: rgba(233, 196, 106, 0.45);
+  --brand-glow-soft: rgba(233, 196, 106, 0.18);
 
   /* Surface layers (dark → light) */
   --color-surface-base: #0f0f0f;
@@ -33,7 +38,7 @@
   --color-string-e6: #a78bfa;
   --color-string-a: #38bdf8;
   --color-string-d: #34d399;
-  --color-string-g: #c9a96e;
+  --color-string-g: #e9c46a;
   --color-string-b: #fb923c;
   --color-string-e1: #f87171;
 
@@ -70,48 +75,100 @@
 ::-webkit-scrollbar-thumb { background: var(--color-surface-550); border-radius: 9999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-ghost); }
 
-/* Range slider — larger thumb for touch */
+/* ── Range slider — a physical fader ───────────────────────────────────────────
+   The track reads as a recessed groove (inner shadow, subtle top-lit rim) and
+   the thumb is a dimensional knob: a brushed-gold cap with a specular highlight,
+   a seated bevel, and a cast shadow — so it looks like a real control you grab.
+   Components may still set the input's `background` to a fill gradient (e.g. the
+   difficulty slider); the groove overlay is drawn with translucent layers so
+   that colored fill shows through beneath it. */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
-  height: 28px; /* tall touch target */
+  height: 30px; /* tall touch target */
 }
+
+/* Shared groove look. On WebKit the runnable-track paints OVER the input's own
+   background, so we keep it translucent to let a fill gradient read through. */
 input[type='range']::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 10px;
   border-radius: 9999px;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 45%),
+    linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%);
+  box-shadow:
+    inset 0 2px 4px rgba(0,0,0,0.6),
+    inset 0 -1px 0 rgba(255,255,255,0.08),
+    0 1px 0 rgba(255,255,255,0.04);
+  border: 1px solid rgba(0,0,0,0.4);
 }
 input[type='range']::-moz-range-track {
-  height: 4px;
+  height: 10px;
   border-radius: 9999px;
-  background: var(--color-surface-550);
+  background: var(--color-surface-750);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(255,255,255,0.06);
+  border: 1px solid rgba(0,0,0,0.4);
 }
+/* Firefox draws a separate filled-progress region we can theme in gold. */
+input[type='range']::-moz-range-progress {
+  height: 10px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, var(--color-brand), var(--color-brand-deep));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+}
+
+/* The knob — brushed-gold cap, seated with a bevel + cast shadow. */
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--color-brand);
-  border: none;
+  margin-top: -8px; /* center 24px knob on the 10px track */
+  background:
+    radial-gradient(circle at 34% 28%, #fff5d8 0%, #f0cf7a 24%, #d4a63c 62%, #a97d24 100%);
+  border: 1px solid #7a5a14;
   cursor: pointer;
-  margin-top: -9px;
-  box-shadow: 0 0 0 3px rgba(201,169,110,0.2);
-  transition: box-shadow 0.15s, transform 0.15s;
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.75),
+    inset 0 -2px 3px rgba(122,90,20,0.6),
+    0 2px 4px rgba(0,0,0,0.55),
+    0 0 0 0 var(--brand-glow, rgba(233,196,106,0.45));
+  transition: box-shadow 0.15s ease, transform 0.12s ease;
 }
-input[type='range']::-webkit-slider-thumb:hover,
+input[type='range']::-webkit-slider-thumb:hover {
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.8),
+    inset 0 -2px 3px rgba(122,90,20,0.6),
+    0 3px 6px rgba(0,0,0,0.55),
+    0 0 12px 2px var(--brand-glow, rgba(233,196,106,0.45));
+}
 input[type='range']::-webkit-slider-thumb:active {
-  box-shadow: 0 0 0 6px rgba(201,169,110,0.3);
-  transform: scale(1.1);
+  transform: scale(1.08);
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.6),
+    inset 0 2px 4px rgba(122,90,20,0.7),
+    0 1px 2px rgba(0,0,0,0.6),
+    0 0 16px 3px var(--brand-glow, rgba(233,196,106,0.45));
 }
 input[type='range']::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--color-brand);
-  border: none;
+  background:
+    radial-gradient(circle at 34% 28%, #fff5d8 0%, #f0cf7a 24%, #d4a63c 62%, #a97d24 100%);
+  border: 1px solid #7a5a14;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.75),
+    inset 0 -2px 3px rgba(122,90,20,0.6),
+    0 2px 4px rgba(0,0,0,0.55);
+}
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
 }
 
 /* Table header */
@@ -128,6 +185,42 @@ thead th {
 @media (max-width: 640px) {
   table { font-size: 0.72rem; }
   thead th, tbody td { padding-left: 0.5rem; padding-right: 0.5rem; }
+}
+
+/* ── Gold glow — the signature treatment ──────────────────────────────────────
+   The reference's identity is lit brass: gold elements emit a soft halo. These
+   utilities centralize that so components opt in (`ui-glow`, `ui-glow-strong`)
+   instead of hand-rolling box-shadows. Pair with a brand background/fill. */
+.ui-glow {
+  box-shadow: 0 0 0 1px var(--brand-glow-soft),
+              0 4px 20px -2px var(--brand-glow-soft);
+}
+.ui-glow-strong {
+  box-shadow: 0 0 0 1px var(--brand-glow),
+              0 0 24px -2px var(--brand-glow),
+              0 8px 28px -6px var(--brand-glow-soft);
+}
+/* Text/icon glow for lit gold labels. */
+.ui-text-glow {
+  text-shadow: 0 0 12px var(--brand-glow-soft);
+}
+
+/* ── String vibration ─────────────────────────────────────────────────────────
+   A plucked guitar string oscillates and settles. We fake the classic damped
+   wobble by squashing/stretching the string's vertical scale over ~0.5s. The
+   string element must set transform-origin to its own center. `.string-vibrate`
+   is (re)applied imperatively on each pluck; re-triggering restarts it. */
+@keyframes string-vibrate {
+  0%   { transform: translateY(-50%) scaleY(2.6); filter: brightness(1.7); }
+  12%  { transform: translateY(-50%) scaleY(0.4); }
+  26%  { transform: translateY(-50%) scaleY(2.1); filter: brightness(1.45); }
+  42%  { transform: translateY(-50%) scaleY(0.6); }
+  60%  { transform: translateY(-50%) scaleY(1.6); filter: brightness(1.2); }
+  78%  { transform: translateY(-50%) scaleY(0.85); }
+  100% { transform: translateY(-50%) scaleY(1);   filter: brightness(1); }
+}
+.string-vibrate {
+  animation: string-vibrate 0.5s cubic-bezier(0.3, 0, 0.4, 1);
 }
 
 /* ── Animations ──────────────────────────────────────────────────────────────
@@ -194,6 +287,14 @@ thead th {
   }
   .fret-dot {
     animation: ui-fade-in 0.25s ease both;
+  }
+  /* Vibration is vestibular motion — replace it with a brief brightness pulse. */
+  .string-vibrate {
+    animation: string-pulse 0.4s ease both;
+  }
+  @keyframes string-pulse {
+    0%, 100% { filter: brightness(1); transform: translateY(-50%); }
+    40%      { filter: brightness(1.7); transform: translateY(-50%); }
   }
   .ui-press:hover {
     filter: brightness(1.06);

@@ -793,11 +793,26 @@ export default function PracticeGame({ cfg }) {
             })}
           </div>
 
-          {/* Lane */}
-          <div className="relative rounded-xl overflow-hidden" style={{ height: 96, background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
-            {/* now-line */}
+          {/* Lane — styled as a realistic rosewood neck: warm wood gradient,
+              horizontal steel strings, and metallic fret wires. Purely visual;
+              the conveyor mechanics below are unchanged. */}
+          <div className="relative rounded-xl overflow-hidden" style={{
+            height: 96,
+            border: '1px solid var(--color-surface-700)',
+            backgroundColor: '#2a1a10',
+            backgroundImage: [
+              // 6 steel strings, thicker toward the bass (top)
+              'repeating-linear-gradient(0deg, transparent 0 13px, rgba(216,212,204,0.55) 13px 14.4px, transparent 14.4px 16px)',
+              // fret wires every ~one bar, with a bright top edge (metallic)
+              `repeating-linear-gradient(90deg, transparent 0 ${4 * PX_PER_BEAT - 1.5}px, rgba(255,255,255,0.28) ${4 * PX_PER_BEAT - 1.5}px ${4 * PX_PER_BEAT - 1}px, rgba(150,152,158,0.9) ${4 * PX_PER_BEAT - 1}px ${4 * PX_PER_BEAT + 1}px, transparent ${4 * PX_PER_BEAT + 1}px ${4 * PX_PER_BEAT}px)`,
+              // wood grain / depth shading
+              'linear-gradient(180deg, #4a3222 0%, #3a2517 50%, #2a1a10 100%)',
+            ].join(', '),
+          }}>
+            {/* now-line — lit gold with a soft halo */}
             <div className="absolute top-0 bottom-0 z-10" style={{
-              left: NOW_X, width: 2, background: 'var(--color-brand)',
+              left: NOW_X, width: 2.5, background: 'var(--color-brand)',
+              boxShadow: '0 0 12px var(--brand-glow), 0 0 4px var(--brand-glow)',
               animation: `pgPulse ${tl.meta.spb}s ease-in-out infinite`,
             }} />
             {/* judgment floater */}
@@ -816,19 +831,28 @@ export default function PracticeGame({ cfg }) {
                   <div key={i} className="absolute rounded-lg flex flex-col items-center justify-center"
                     style={{
                       left: i * 4 * PX_PER_BEAT, width: 4 * PX_PER_BEAT - 8, top: 10, bottom: 10,
-                      background: isActive ? 'rgba(201,169,110,0.08)' : 'var(--color-surface-800)',
-                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? 'var(--color-brand)' : 'var(--color-surface-650)'}`,
+                      // Un-judged cells read as glossy gold markers riding the neck;
+                      // once judged they take their result color as a flat tint.
+                      background: res
+                        ? 'var(--color-surface-800)'
+                        : isActive
+                          ? 'radial-gradient(120% 120% at 35% 25%, #fff3cf 0%, #f0cf7a 32%, #d4a63c 70%, #a97d24 100%)'
+                          : 'radial-gradient(120% 120% at 35% 25%, rgba(240,207,122,0.85) 0%, rgba(212,166,60,0.8) 60%, rgba(169,125,36,0.75) 100%)',
+                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? '#fff3cf' : 'rgba(122,90,20,0.9)'}`,
+                      boxShadow: res ? 'none' : isActive
+                        ? '0 0 16px var(--brand-glow), inset 0 1px 2px rgba(255,255,255,0.5)'
+                        : '0 2px 8px rgba(0,0,0,0.35), inset 0 1px 2px rgba(255,255,255,0.35)',
                       opacity: res ? (res.quality === 'miss' || res.quality === 'silent' ? 0.4 : 0.75) : 1,
                       animation: res
                         ? (res.quality === 'miss' ? 'pgShake 0.3s' : res.quality === 'perfect' || res.quality === 'good' ? 'pgPop 0.24s' : 'none')
                         : 'none',
                     }}>
-                    <span className="text-base font-black leading-none" style={{ color: res ? QUALITY_COLOR[res.quality] : 'var(--color-accent)' }}>
+                    <span className="text-base font-black leading-none" style={{ color: res ? QUALITY_COLOR[res.quality] : '#3a2708' }}>
                       {w.name}
                     </span>
                     {w.lyric && (
                       <span className="text-[9px] leading-tight mt-1 px-1 text-center truncate max-w-full"
-                        style={{ color: isActive ? 'var(--color-ink)' : 'var(--color-ink-faint)' }}>
+                        style={{ color: res ? 'var(--color-ink-faint)' : 'rgba(58,39,8,0.75)' }}>
                         {w.lyric}
                       </span>
                     )}
