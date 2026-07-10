@@ -16,6 +16,11 @@ import {
   matchChordConfigured,
 } from '../lib/micDetect';
 import { playProgression, stopAudio } from '../lib/audio';
+import { composeSong } from '../lib/melodyCompose';
+import { getActiveStyle, loadStyle, saveStyle, learnStyle,
+         SCALE_FLAVORS, CHORD_COLORS, GENRES } from '../lib/styleProfile';
+import { saveCustomSong } from '../lib/customSongs';
+import { useAuth } from '../App';
 import PracticeGame from './PracticeGame';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
@@ -553,13 +558,16 @@ function SavedSequences({ sequences, onLoad, onDelete }) {
 // which debounces the queue so vibrato / attack transients don't spam it.
 const STABLE_FRAMES = 3;
 
-function PitchTracker({ cfg }) {
+function PitchTracker({ cfg, style, loggedIn, onComposed }) {
   const [active, setActive]       = useState(false);
   const [permDenied, setPermDenied] = useState(false);
   const [volume, setVolume]       = useState(0);
   const [live, setLive]           = useState(null);   // { name, octave, hz, cents, midi }
   const [queue, setQueue]         = useState([]);      // [{ id, name, octave, midi, hz }]
   const [copied, setCopied]       = useState(false);
+  const [composed, setComposed]   = useState(null);    // { song } after Compose
+  const [composing, setComposing] = useState(false);
+  const [songTitle, setSongTitle] = useState('My melody');
 
   const mic       = useMic();
   const rafRef    = useRef(null);
@@ -623,11 +631,26 @@ function PitchTracker({ cfg }) {
 
   useEffect(() => () => stop(), [stop]);
 
-  const clearQueue = () => { setQueue([]); lastMidiRef.current = null; };
+  const clearQueue = () => { setQueue([]); lastMidiRef.current = null; setComposed(null); };
   const seqText = queue.map(n => `${n.name}${n.octave}`).join(' ');
   const copySeq = async () => {
     if (!seqText) return;
     try { await navigator.clipboard.writeText(seqText); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {}
+  };
+
+  // Compose a song from the captured melody using the active style, then save it.
+  const compose = async () => {
+    if (!queue.length || composing) return;
+    setComposing(true);
+    try {
+      const noteNames = queue.map(n => n.name); // pitch classes in play order
+      const song = composeSong(noteNames, style, { title: songTitle.trim() || 'My melody' });
+      await saveCustomSong(song, loggedIn);
+      setComposed({ song });
+      onComposed?.(song);
+    } finally {
+      setComposing(false);
+    }
   };
 
   // Cents meter geometry: -50..+50 cents mapped to 0..100% around center.
@@ -740,14 +763,141 @@ function PitchTracker({ cfg }) {
               </div>
             )}
           </div>
+
+          {/* Compose a song from the captured melody, in the user's style. */}
+          {queue.length > 0 && (
+            <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-800)', border: '1px solid var(--color-surface-700)' }}>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <input value={songTitle} onChange={e => setSongTitle(e.target.value)}
+                  placeholder="Song title"
+                  className="flex-1 min-w-[120px] px-3 py-2 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }} />
+                <button onClick={compose} disabled={composing}
+                  className="px-4 py-2 rounded-lg text-xs font-bold"
+                  style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)', opacity: composing ? 0.6 : 1 }}>
+                  {composing ? 'Composing…' : '🎼 Compose song from melody'}
+                </button>
+              </div>
+              {composed && (
+                <div className="rounded-lg p-3 mt-1" style={{ background: 'var(--color-surface-900)', border: '1px solid rgba(74,222,128,0.25)' }}>
+                  <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-success)' }}>
+                    ✓ Saved “{composed.song.title}” — {composed.song.key}{composed.song.scaleType === 'minor' ? 'm' : ''} · {composed.song.bpm} bpm
+                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                    <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>Chords:</span>
+                    {composed.song.lyricLines.map((ln, i) => ln.chordNames[0] && (
+                      <ChordTip key={i} name={ln.chordNames[0]}>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg"
+                          style={{ background: 'var(--color-surface-800)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-700)' }}>
+                          {ln.chordNames[0]}
+                        </span>
+                      </ChordTip>
+                    ))}
+                  </div>
+                  {composed.song.tabBlocks?.[0] && (
+                    <p className="text-xs mt-1.5" style={{ color: 'var(--color-ink-ghost)' }}>
+                      + {composed.song.tabBlocks[0].events.length}-note solo. Find it in <strong style={{ color: 'var(--color-brand)' }}>Progressions</strong> and Play-Along.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {!active && (
         <p className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>
           Tracks a single note in real time (YIN pitch detection) and builds a sequence
-          of the notes you play. Tune detection sensitivity in the <strong style={{ color: 'var(--color-brand)' }}>Tune</strong> tab.
+          of the notes you play, then composes chords + a solo in your style. Tune
+          detection sensitivity in the <strong style={{ color: 'var(--color-brand)' }}>Tune</strong> tab.
         </p>
+      )}
+    </div>
+  );
+}
+
+// ── StylePanel ────────────────────────────────────────────────────────────────
+// "My style" settings — auto-learns a starting profile from the user's saved
+// songs, then lets them override genre / scale flavor / chord color / tempo.
+// The composer (composeSong) reads getActiveStyle(), which folds these over the
+// learned profile.
+function StylePanel({ style, setStyle }) {
+  const [open, setOpen] = useState(false);
+  const learned = useMemo(() => learnStyle(), []);
+
+  const set = (key) => (val) => {
+    const next = { ...style, [key]: val };
+    setStyle(next);
+    saveStyle(next);
+  };
+
+  const Pill = ({ active, onClick, children }) => (
+    <button onClick={onClick}
+      className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+      style={active
+        ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
+        : { background: 'var(--color-surface-850)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>🎨 My style</span>
+        <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>
+          {style.scaleFlavor === 'auto' ? (learned.minorLeaning ? 'minor' : 'major') : style.scaleFlavor}
+          {style.chordColor !== 'clean' ? ` · ${style.chordColor}` : ''}
+          {style.tempo ? ` · ${style.tempo} bpm` : ''}
+        </span>
+        <span className="ml-auto text-xs" style={{ color: 'var(--color-ink-ghost)' }}>{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="space-y-3 mt-3">
+          {learned.songCount > 0 && (
+            <p className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>
+              Learned from your {learned.songCount} saved song{learned.songCount !== 1 ? 's' : ''}:
+              {learned.topKey ? ` favors ${learned.topKey};` : ''}
+              {learned.likesSevenths ? ' uses 7th chords;' : ''}
+              {learned.avgBpm ? ` ~${learned.avgBpm} bpm.` : ''}
+            </p>
+          )}
+
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: 'var(--color-ink-faint)' }}>Genre</p>
+            <div className="flex flex-wrap gap-1.5">
+              {GENRES.map(g => <Pill key={g} active={style.genre === g} onClick={() => set('genre')(g)}>{g}</Pill>)}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: 'var(--color-ink-faint)' }}>Scale flavor</p>
+            <div className="flex flex-wrap gap-1.5">
+              {SCALE_FLAVORS.map(f => <Pill key={f} active={style.scaleFlavor === f} onClick={() => set('scaleFlavor')(f)}>{f}</Pill>)}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: 'var(--color-ink-faint)' }}>Chord color</p>
+            <div className="flex flex-wrap gap-1.5">
+              {CHORD_COLORS.map(c => <Pill key={c} active={style.chordColor === c} onClick={() => set('chordColor')(c)}>{c}</Pill>)}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>Tempo</p>
+              <span className="text-xs font-bold tabular-nums" style={{ color: 'var(--color-brand)' }}>
+                {style.tempo ? `${style.tempo} bpm` : 'auto'}
+              </span>
+            </div>
+            <input type="range" min={0} max={200} step={5} value={style.tempo}
+              onChange={e => set('tempo')(Number(e.target.value))} className="w-full" />
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-surface-550)' }}>0 = auto (learned average)</p>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -763,6 +913,11 @@ function RecorderMode({ cfg }) {
   const [saveName, setSaveName]   = useState('');
   const [showSave, setShowSave]   = useState(false);
   const [permDenied, setPermDenied] = useState(false);
+  const [manualStyle, setManualStyle] = useState(loadStyle); // raw settings shown in the panel
+  const loggedIn                  = !!useAuth();
+  // The composer uses the resolved style (manual folded over the learned
+  // profile). Recompute whenever the manual settings change.
+  const activeStyle = useMemo(() => getActiveStyle(), [manualStyle]);
 
   const mic         = useMic();
   const rafRef      = useRef(null);
@@ -900,8 +1055,11 @@ function RecorderMode({ cfg }) {
 
   return (
     <div className="space-y-4">
-      {/* Real-time single-note pitch tracker + note-sequence queue */}
-      <PitchTracker cfg={cfg} />
+      {/* "My style" settings that shape the composer */}
+      <StylePanel style={manualStyle} setStyle={setManualStyle} />
+
+      {/* Real-time single-note pitch tracker + note-sequence queue + composer */}
+      <PitchTracker cfg={cfg} style={activeStyle} loggedIn={loggedIn} />
 
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
