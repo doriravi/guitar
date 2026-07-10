@@ -229,7 +229,16 @@ export default function SongImporter() {
                 just-imported song for review/tweaks on demand. Always shown,
                 enabled once a song has been imported. */}
             <button
-              onClick={() => lastImported && handleEdit(lastImported)}
+              onClick={() => {
+                if (!lastImported) return;
+                // Open the freshest saved copy (by id, else title) so the editor
+                // always gets the up-to-date song, not a stale in-memory snapshot.
+                const fresh = loadCustomSongs().find(
+                  s => s.id === lastImported.id ||
+                    (s.title || '').trim().toLowerCase() === (lastImported.title || '').trim().toLowerCase(),
+                ) || lastImported;
+                handleEdit(fresh);
+              }}
               disabled={!lastImported || fetching || tryingAnother}
               title={lastImported ? `Edit “${lastImported.title}”` : 'Import a song first to edit it'}
               className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
