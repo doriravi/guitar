@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { parseChordSheet, keyLabel } from '../lib/chordSheetParser';
-import { loadCustomSongs, addCustomSong, updateCustomSong, deleteCustomSong, songToText, saveCustomSong } from '../lib/customSongs';
+import { loadCustomSongs, addCustomSong, updateCustomSong, deleteCustomSong, removeCustomSong, songToText, saveCustomSong } from '../lib/customSongs';
 import { chordSheet as chordSheetApi } from '../lib/api';
 import { ALL_BUILTIN_SONGS } from '../lib/songs';
 import { getDiatonicChords } from '../lib/scales';
 import SongEditor from './SongEditor';
 import ChordTip from './ChordTip';
 import SoloTabView from './SoloTabView';
-import { useHandProfile } from '../App';
+import { useHandProfile, useAuth } from '../App';
 
 // Import a song BY NAME: the generate-music-data pipeline fetches the real
 // chord sheet through the backend (/api/chordsheet), parses it into the app's
@@ -37,6 +37,7 @@ export default function SongImporter() {
   const [lastImported, setLastImported] = useState(null); // saved song from the last import (for the Edit button)
   const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
   const editorProfile = useHandProfile();
+  const loggedIn = !!useAuth();   // drives DB-backed save/delete vs. localStorage-only
 
   useEffect(() => { setSaved(loadCustomSongs()); }, []);
 
@@ -51,7 +52,7 @@ export default function SongImporter() {
     const withMeta = { ...song, custom: true, sourceUrl: res.url };
     // Saves locally right away; also pushes to the DB when logged in (a
     // logged-out save simply syncs on the next login).
-    const list = await saveCustomSong(withMeta, true);
+    const list = await saveCustomSong(withMeta, loggedIn);
     setSaved(list);
     const savedSong = list.find(s =>
       (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
@@ -162,9 +163,16 @@ export default function SongImporter() {
     setParsed(null); setText(''); setWarnings([]); setEditingId(null);
   };
 
-  const handleDelete = (id) => {
-    setSaved(deleteCustomSong(id));
+  const handleDelete = async (id) => {
+    // removeCustomSong deletes from the DB too (when logged in), so a deleted
+    // song doesn't reappear on the next login sync. Update the list optimistically
+    // then reconcile with the awaited result.
+    setSaved(loadCustomSongs().filter(s => s.id !== id));
     if (editingId === id) cancelEdit();
+    // If the just-imported song is the one being deleted, disable the Edit button.
+    setLastImported(prev => (prev && prev.id === id ? null : prev));
+    const remaining = await removeCustomSong(id, loggedIn);
+    setSaved(remaining);
   };
 
   const editField = (k, v) => setParsed(p => ({ ...p, [k]: v }));
