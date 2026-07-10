@@ -34,7 +34,8 @@ export default function SongImporter() {
   const [version, setVersion] = useState(0);        // 0-based index into ranked sheets
   const [moreVersions, setMoreVersions] = useState(false);
   const [tryingAnother, setTryingAnother] = useState(false);
-  const [lastImported, setLastImported] = useState(null); // saved song from the last import (for the Edit button)
+  const [lastImported, setLastImported] = useState(null); // the parsed song from the last import (displayed; saved on demand)
+  const [songSaved, setSongSaved] = useState(false);      // has lastImported been persisted yet?
   const [originText, setOriginText] = useState('');       // the raw fetched sheet, for the "Show origin" compare
   const [showOrigin, setShowOrigin] = useState(false);    // toggle the raw-sheet panel
   const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
@@ -46,21 +47,16 @@ export default function SongImporter() {
   // Import by name — the whole generate-music-data pipeline in one click:
   // fetch the REAL sheet (actual chords + full lyrics) → parse → save as an
   // imported song. The saved song then behaves exactly like a pasted one.
-  // Core import: fetch the `skip`-th ranked sheet for a title/artist, parse and
-  // save it. Shared by the initial Import and the "Try another version" button.
+  // Core import: fetch the `skip`-th ranked sheet for a title/artist and parse
+  // it. It DOES NOT save — the parsed song is just displayed; saving is an
+  // explicit click. Shared by the initial Import and "Try another version".
   const importByName = async (title, artist, skip) => {
     const res = await chordSheetApi.fetch(artist, title, skip); // { url, text, version, matchCount }
     const { song } = parseChordSheet(res.text);
     const withMeta = { ...song, custom: true, sourceUrl: res.url };
-    // Saves locally right away; also pushes to the DB when logged in (a
-    // logged-out save simply syncs on the next login).
-    const list = await saveCustomSong(withMeta, loggedIn);
-    setSaved(list);
-    const savedSong = list.find(s =>
-      (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
-    // Keep the saved song around so the "Edit" button can open it on demand —
-    // but do NOT auto-open the review panel; the import just saves.
-    setLastImported(savedSong);
+    // Show the parsed song without persisting it (unsaved until "Save song").
+    setLastImported(withMeta);
+    setSongSaved(false);
     // Keep the raw fetched sheet so "Show origin" can compare it to what we parsed.
     setOriginText(res.text || '');
     setShowOrigin(false);
@@ -78,7 +74,7 @@ export default function SongImporter() {
     setFetching(true); setFetchErr(''); setSavedMsg('');
     try {
       const { song } = await importByName(title, artistQuery.trim(), 0);
-      setSavedMsg(`Imported “${song.title}” — saved to your songs. Use Edit to tweak it, or Try another version if the chords look wrong.`);
+      setSavedMsg(`Found “${song.title}”. Review it below, then click Save song to keep it — or Try another version if the chords look wrong.`);
       setNameQuery(''); setArtistQuery('');
     } catch (e) {
       setFetchErr(e?.status === 404
@@ -89,6 +85,20 @@ export default function SongImporter() {
     }
   };
 
+  // Persist the currently-displayed imported song (localStorage + DB when logged
+  // in). This is the ONLY place a name-imported song gets written.
+  const handleSaveImported = async () => {
+    if (!lastImported || songSaved) return;
+    const list = await saveCustomSong(lastImported, loggedIn);
+    setSaved(list);
+    // Adopt the persisted copy (it now has an id/serverId) so Edit/Delete target it.
+    const savedSong = list.find(s =>
+      (s.title || '').trim().toLowerCase() === (lastImported.title || '').trim().toLowerCase()) || lastImported;
+    setLastImported(savedSong);
+    setSongSaved(true);
+    setSavedMsg(`Saved “${savedSong.title}” to your songs.`);
+  };
+
   // Re-import the SAME song at the next ranked sheet — for when the first
   // version's chords/lyrics were wrong. Advances `version`; stops (and says so)
   // once there are no more versions.
@@ -97,7 +107,7 @@ export default function SongImporter() {
     setTryingAnother(true); setFetchErr(''); setSavedMsg('');
     try {
       const { song, ver, matchCount } = await importByName(lastQuery.title, lastQuery.artist, version + 1);
-      setSavedMsg(`Loaded another version of “${song.title}” (version ${ver + 1} of ${matchCount}) — saved to your songs.`);
+      setSavedMsg(`Loaded another version of “${song.title}” (version ${ver + 1} of ${matchCount}). Review it, then Save song to keep it.`);
     } catch (e) {
       if (e?.status === 404) {
         setMoreVersions(false);
@@ -190,7 +200,17 @@ export default function SongImporter() {
         <SongEditor
           song={editorSong}
           profile={editorProfile}
-          onClose={() => { setEditorSong(null); setSaved(loadCustomSongs()); }}
+          onClose={() => {
+            setEditorSong(null);
+            const list = loadCustomSongs();
+            setSaved(list);
+            // If the editor persisted this song, reflect that in the Save button.
+            if (lastImported && list.some(s =>
+              s.id === lastImported.id ||
+              (s.title || '').trim().toLowerCase() === (lastImported.title || '').trim().toLowerCase())) {
+              setSongSaved(true);
+            }
+          }}
         />
       )}
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--color-ink)' }}>
@@ -303,8 +323,22 @@ export default function SongImporter() {
                 style={{ color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}>
                 Edit
               </button>
+              {/* Save song — nothing is written until this is clicked. Flips to a
+                  "Saved ✓" confirmation once persisted. */}
+              <button onClick={handleSaveImported} disabled={songSaved}
+                className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:opacity-50"
+                style={songSaved
+                  ? { color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.4)' }
+                  : { background: 'var(--color-success)', color: 'var(--color-surface-base)' }}>
+                {songSaved ? 'Saved ✓' : 'Save song'}
+              </button>
             </div>
           </div>
+          {!songSaved && (
+            <div className="mb-3 text-[11px]" style={{ color: 'var(--color-warning)' }}>
+              Not saved yet — click <span className="font-semibold">Save song</span> to keep it, or Try another version to compare.
+            </div>
+          )}
 
           {/* Origin panel: the raw sheet as fetched, side by side with a link to
               the published source, for comparing against the parsed result above. */}
