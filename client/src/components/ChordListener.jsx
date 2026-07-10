@@ -4,6 +4,7 @@ import { calcDifficulty } from '../lib/fretboard';
 import {
   evaluateStrings,
   hzToNote,
+  detectPitchYIN,
   STRING_LABELS,
 } from '../lib/pitchDetect';
 import {
@@ -541,6 +542,217 @@ function SavedSequences({ sequences, onLoad, onDelete }) {
   );
 }
 
+// ── PitchTracker ──────────────────────────────────────────────────────────────
+// Real-time single-note (monophonic) pitch tracker — the browser-native
+// equivalent of a pyaudio + librosa.yin loop. Runs the YIN algorithm on the
+// mic's time-domain buffer, maps f0 → closest note / MIDI / octave and the
+// tuning deviation in cents, and captures a live queue of the notes played
+// (e.g. E3 · G3 · A3) so a sequence can be copied/reused elsewhere.
+
+// A note is "stable" once the same note class is seen on N consecutive frames,
+// which debounces the queue so vibrato / attack transients don't spam it.
+const STABLE_FRAMES = 3;
+
+function PitchTracker({ cfg }) {
+  const [active, setActive]       = useState(false);
+  const [permDenied, setPermDenied] = useState(false);
+  const [volume, setVolume]       = useState(0);
+  const [live, setLive]           = useState(null);   // { name, octave, hz, cents, midi }
+  const [queue, setQueue]         = useState([]);      // [{ id, name, octave, midi, hz }]
+  const [copied, setCopied]       = useState(false);
+
+  const mic       = useMic();
+  const rafRef    = useRef(null);
+  const cfgRef    = useRef(cfg);
+  cfgRef.current  = cfg;
+  // Debounce state for the queue (kept in refs so the RAF loop stays stable).
+  const candRef   = useRef({ midi: null, count: 0 }); // note being confirmed
+  const lastMidiRef = useRef(null);                   // last note pushed to queue
+  const nextIdRef = useRef(1);
+
+  const stop = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    mic.current.close();
+    setActive(false); setVolume(0); setLive(null);
+  }, [mic]);
+
+  const start = useCallback(async () => {
+    setPermDenied(false);
+    try {
+      // Open raw (no AEC/NS/AGC) — those DSP stages hurt sustained-pitch tracking.
+      await mic.current.open(cfgRef.current.smoothing, { raw: true });
+      setActive(true);
+      candRef.current = { midi: null, count: 0 };
+      lastMidiRef.current = null;
+      const loop = () => {
+        rafRef.current = requestAnimationFrame(loop);
+        const rms = mic.current.getRMS();
+        setVolume(Math.min(1, rms * 8));
+        // Noise gate: below the silence RMS we treat it as silence (script parity).
+        if (rms < cfgRef.current.silenceRms) {
+          setLive(null);
+          candRef.current = { midi: null, count: 0 };
+          return;
+        }
+        const td = mic.current.getTimeData();
+        const sr = mic.current.sampleRate;
+        if (!td || !sr) return;
+        const hz = detectPitchYIN(td, sr);
+        if (!hz) { setLive(null); return; }
+        const note = hzToNote(hz);
+        if (!note) return;
+        setLive(note);
+
+        // Queue debounce: confirm a note after STABLE_FRAMES identical frames,
+        // then push it once (until a different note is confirmed).
+        const cand = candRef.current;
+        if (cand.midi === note.midi) cand.count++;
+        else { cand.midi = note.midi; cand.count = 1; }
+        if (cand.count === STABLE_FRAMES && note.midi !== lastMidiRef.current) {
+          lastMidiRef.current = note.midi;
+          setQueue(prev => [...prev, {
+            id: nextIdRef.current++, name: note.name, octave: note.octave, midi: note.midi, hz: note.hz,
+          }]);
+        }
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    } catch (e) {
+      if (e.name === 'NotAllowedError') setPermDenied(true);
+    }
+  }, [mic]);
+
+  useEffect(() => () => stop(), [stop]);
+
+  const clearQueue = () => { setQueue([]); lastMidiRef.current = null; };
+  const seqText = queue.map(n => `${n.name}${n.octave}`).join(' ');
+  const copySeq = async () => {
+    if (!seqText) return;
+    try { await navigator.clipboard.writeText(seqText); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {}
+  };
+
+  // Cents meter geometry: -50..+50 cents mapped to 0..100% around center.
+  const centsPct = live ? Math.max(0, Math.min(100, 50 + live.cents)) : 50;
+  const inTune   = live && Math.abs(live.cents) <= 5;
+
+  return (
+    <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>
+          🎯 Pitch tracker
+        </p>
+        {!active ? (
+          <button onClick={start}
+            className="ml-auto flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold"
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+            🎙️ Start
+          </button>
+        ) : (
+          <button onClick={stop}
+            className="ml-auto flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold"
+            style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <span className="animate-pulse">●</span> Stop
+          </button>
+        )}
+      </div>
+
+      {permDenied && <p className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>Microphone access denied.</p>}
+
+      {active && (
+        <div className="space-y-3">
+          <VolumeBar level={volume} />
+
+          {/* Live note readout: note + octave, Hz, cents (script's output format). */}
+          <div className="rounded-xl px-4 py-4 flex items-center gap-4"
+            style={{ background: 'var(--color-surface-900)',
+              border: `1.5px solid ${live ? (inTune ? 'rgba(74,222,128,0.35)' : 'var(--color-surface-700)') : 'var(--color-surface-700)'}`,
+              transition: 'border-color 0.2s' }}>
+            {live ? (
+              <>
+                <div className="text-center shrink-0" style={{ minWidth: 72 }}>
+                  <div className="text-4xl font-black leading-none" style={{ color: inTune ? 'var(--color-success)' : 'var(--color-ink)' }}>
+                    {live.name}<span className="text-lg align-top" style={{ color: 'var(--color-ink-ghost)' }}>{live.octave}</span>
+                  </div>
+                  <div className="text-xs mt-1 tabular-nums" style={{ color: 'var(--color-ink-ghost)' }}>{live.hz.toFixed(1)} Hz</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  {/* Cents deviation meter */}
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>♭</span>
+                    <span className="text-xs font-bold tabular-nums"
+                      style={{ color: inTune ? 'var(--color-success)' : Math.abs(live.cents) > 25 ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                      {live.cents > 0 ? `+${live.cents}` : live.cents} ¢
+                    </span>
+                    <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>♯</span>
+                  </div>
+                  <div className="relative h-2 rounded-full" style={{ background: 'var(--color-surface-700)' }}>
+                    {/* center line */}
+                    <div className="absolute top-0 bottom-0" style={{ left: '50%', width: 1, background: 'var(--color-surface-550)' }} />
+                    {/* deviation marker */}
+                    <div className="absolute top-1/2 rounded-full"
+                      style={{ left: `${centsPct}%`, width: 10, height: 10, transform: 'translate(-50%,-50%)',
+                        background: inTune ? 'var(--color-success)' : 'var(--color-brand)',
+                        boxShadow: inTune ? '0 0 8px rgba(74,222,128,0.6)' : 'none', transition: 'left 0.08s linear' }} />
+                  </div>
+                  <p className="text-xs mt-1.5" style={{ color: 'var(--color-ink-ghost)' }}>MIDI {live.midi}</p>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-2 py-2" style={{ color: 'var(--color-ink-ghost)' }}>
+                <span className="text-2xl">🎸</span>
+                <span className="text-sm">{volume < 0.05 ? 'Silence… play or sing a note.' : 'Listening…'}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Note queue (the captured sequence array). */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>
+                Note queue{queue.length > 0 ? ` (${queue.length})` : ''}
+              </p>
+              {queue.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <button onClick={copySeq}
+                    className="text-xs px-2 py-1 rounded-lg"
+                    style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.2)' }}>
+                    {copied ? '✓ Copied' : 'Copy'}
+                  </button>
+                  <button onClick={clearQueue}
+                    className="text-xs px-2 py-1 rounded-lg"
+                    style={{ color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-700)' }}>
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+            {queue.length === 0 ? (
+              <p className="text-xs italic" style={{ color: 'var(--color-surface-550)' }}>
+                Detected notes are captured here in order, e.g. E3 · G3 · A3.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {queue.map(n => (
+                  <span key={n.id} className="text-xs font-bold px-2 py-1 rounded-lg tabular-nums"
+                    style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-700)' }}>
+                    {n.name}{n.octave}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!active && (
+        <p className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>
+          Tracks a single note in real time (YIN pitch detection) and builds a sequence
+          of the notes you play. Tune detection sensitivity in the <strong style={{ color: 'var(--color-brand)' }}>Tune</strong> tab.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RecorderMode({ cfg }) {
   const [phase, setPhase]         = useState('idle');
   const [entries, setEntries]     = useState([]);
@@ -688,6 +900,9 @@ function RecorderMode({ cfg }) {
 
   return (
     <div className="space-y-4">
+      {/* Real-time single-note pitch tracker + note-sequence queue */}
+      <PitchTracker cfg={cfg} />
+
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           {phase === 'idle' && (

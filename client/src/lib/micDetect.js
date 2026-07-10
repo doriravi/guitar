@@ -114,6 +114,15 @@ export function useMic() {
       analyserRef.current.getFloatFrequencyData(freqDataRef.current);
       return freqDataRef.current;
     },
+    // Raw time-domain samples — what the YIN pitch detector needs (the browser
+    // equivalent of librosa reading a PCM buffer). Reuses the shared buffer.
+    getTimeData() {
+      const td = timeDataRef.current;
+      if (!td || !analyserRef.current) return null;
+      analyserRef.current.getFloatTimeDomainData(td);
+      return td;
+    },
+    get sampleRate() { return audioCtxRef.current ? audioCtxRef.current.sampleRate : 0; },
     updateSmoothing(v) {
       if (analyserRef.current) analyserRef.current.smoothingTimeConstant = v;
     },
