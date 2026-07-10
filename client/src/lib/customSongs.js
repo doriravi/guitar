@@ -159,9 +159,53 @@ export async function syncSongsOnLogin() {
 export function songToText(song) {
   const head = `${song.title} Chords by ${song.artist}\nKey: ${song.key}${song.scaleType === 'minor' ? 'm' : ''}` +
     `${song.capo ? `\nCapo: ${song.capo}` : ''}${song.bpm ? `\n${song.bpm} bpm` : ''}\n\n`;
-  const body = (song.lyricLines || []).map(ln => {
+  // Group any solo tab blocks by the lyric line they follow, so we can splice
+  // each one back into the text at the same spot it was parsed from — a save →
+  // edit-as-text → re-parse round-trip then preserves the solo.
+  const blocksAfter = new Map();
+  for (const b of (song.tabBlocks || [])) {
+    const k = b.afterLine ?? 0;
+    if (!blocksAfter.has(k)) blocksAfter.set(k, []);
+    blocksAfter.get(k).push(b);
+  }
+  const emitBlocks = (lineIdx) =>
+    (blocksAfter.get(lineIdx) || []).map(b => '\n' + tabBlockToAscii(b.events) + '\n').join('');
+
+  const lines = song.lyricLines || [];
+  let body = emitBlocks(0); // blocks before the first lyric line
+  lines.forEach((ln, i) => {
     const chord = (ln.chordNames || []).join('  ');
-    return (chord ? chord + '\n' : '') + (ln.text || '');
-  }).join('\n');
-  return head + body;
+    body += (chord ? chord + '\n' : '') + (ln.text || '') + '\n';
+    body += emitBlocks(i + 1);
+  });
+  return head + body.replace(/\n+$/, '');
+}
+
+// Render a solo block's {string,fret,col} events back to a 6-line ASCII tab
+// staff (low E on the bottom, high e on top), so songToText can round-trip it.
+function tabBlockToAscii(events) {
+  const LABELS = ['e', 'B', 'G', 'D', 'A', 'E']; // top→bottom (string 5→0)
+  if (!events.length) return '';
+  const cols = [...new Set(events.map(e => e.col))].sort((a, b) => a - b);
+  // Each column is padded to its widest fret so all six rows stay aligned even
+  // with two-digit frets. grid[r][ci] holds the fret string (or null).
+  const grid = LABELS.map(() => cols.map(() => null));
+  const colWidth = cols.map(() => 1);
+  const colIndex = new Map(cols.map((c, i) => [c, i]));
+  for (const e of events) {
+    const r = 5 - e.string;                 // string 5 (high e) → row 0
+    const ci = colIndex.get(e.col);
+    if (r < 0 || r > 5 || ci == null) continue;
+    const s = String(e.fret);
+    grid[r][ci] = s;
+    colWidth[ci] = Math.max(colWidth[ci], s.length);
+  }
+  return grid
+    .map((row, r) => {
+      const body = row
+        .map((cell, ci) => (cell == null ? '-'.repeat(colWidth[ci]) : cell.padStart(colWidth[ci], '-')))
+        .join('-');
+      return `${LABELS[r]}|-${body}-|`;
+    })
+    .join('\n');
 }

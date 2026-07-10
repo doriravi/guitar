@@ -54,14 +54,63 @@ export function lyricFragments(text, count, positions) {
   return frags;
 }
 
+// Turn a solo tab block's {string,fret,col} events into a run of solo cells —
+// one per column (a column may hold a few simultaneously-picked notes, e.g. a
+// double-stop). Each cell mirrors the chord-cell shape enough that every
+// consumer (game timeline, song view) can walk chord and solo cells uniformly.
+//   { kind:'solo', notes:[{string,fret}], tab, chordName:'♪', voicings:[…], … }
+function soloCells(block) {
+  const byCol = new Map();
+  for (const e of block.events || []) {
+    if (e.string < 0 || e.string > 5 || e.fret < 0) continue;
+    if (!byCol.has(e.col)) byCol.set(e.col, []);
+    byCol.get(e.col).push({ string: e.string, fret: e.fret });
+  }
+  const cols = [...byCol.keys()].sort((a, b) => a - b);
+  return cols.map(c => {
+    const notes = byCol.get(c);
+    // Build a 6-char EADGBe tab so the existing diagram/audio helpers work.
+    const byString = {};
+    for (const n of notes) byString[n.string] = n.fret;
+    let tab = '';
+    for (let s = 0; s < 6; s++) {
+      const f = byString[s];
+      tab += f == null ? 'x' : (f > 9 ? String.fromCharCode(97 + f - 10) : String(f));
+    }
+    const label = notes.length === 1 ? '♪' : '♪♪';
+    return {
+      kind: 'solo',
+      chordName: label,
+      voicings: [{ name: label, tab, notes: notes.filter(n => n.fret > 0), score: 1 }],
+      notes,
+      tab,
+      degree: null, roman: null, lyric: '',
+    };
+  });
+}
+
 // Build the flat per-cell chord timeline for a song (one entry per chord beat-
 // cell, NOT deduplicated). Mirrors ProgressionExplorer's chord resolution so
-// every consumer sees the same chords the song shows.
+// every consumer sees the same chords the song shows. Chord cells carry
+// kind:'chord'; solo tab blocks are spliced in as kind:'solo' note-cells.
 export function resolveChordCells(song) {
+  // Group solo blocks by the lyric line they follow (afterLine), so we can
+  // splice each solo into the flat cell stream at the right point.
+  const soloAfter = new Map();
+  for (const b of (song.tabBlocks || [])) {
+    const k = b.afterLine ?? 0;
+    if (!soloAfter.has(k)) soloAfter.set(k, []);
+    soloAfter.get(k).push(b);
+  }
+  const spliceSolos = (seq, lineIdx) => {
+    for (const b of (soloAfter.get(lineIdx) || [])) seq.push(...soloCells(b));
+  };
+
   // Custom (saved) song: source of truth is its lyricLines, in order.
   if (song.lyricLines && song.lyricLines.length) {
     const seq = [];
-    for (const ln of song.lyricLines) {
+    spliceSolos(seq, 0); // solo blocks before the first lyric line
+    song.lyricLines.forEach((ln, li) => {
       const names = ln.chordNames || [];
       // Split the line's lyric across its chords so each chord cell carries the
       // words sung under it (for the Play-Along synced-lyrics display). Prefer
@@ -70,9 +119,18 @@ export function resolveChordCells(song) {
       const frags = lyricFragments(ln.text || '', names.length, ln.chordPositions);
       names.forEach((name, k) => {
         const voicings = lookupVoicings(name).slice().sort((a, b) => a.score - b.score);
-        seq.push({ chordName: name, voicings, degree: null, roman: null, lyric: frags[k] || '' });
+        seq.push({ kind: 'chord', chordName: name, voicings, degree: null, roman: null, lyric: frags[k] || '' });
       });
-    }
+      spliceSolos(seq, li + 1);
+    });
+    if (seq.length) return seq;
+  }
+
+  // Degree-based (built-in) songs may still carry solo blocks — emit them alone
+  // if there are no chords to interleave with.
+  if ((!song.degrees || !song.degrees.length) && (song.tabBlocks || []).length) {
+    const seq = [];
+    for (const b of song.tabBlocks) seq.push(...soloCells(b));
     if (seq.length) return seq;
   }
 
@@ -108,7 +166,7 @@ export function resolveChordCells(song) {
     const chordName = finalNames[i];
     const voicings = lookupVoicings(chordName).slice().sort((a, b) => a.score - b.score);
     const dia = diatonic[d];
-    return { chordName, voicings, degree: d, roman: dia?.roman ?? null };
+    return { kind: 'chord', chordName, voicings, degree: d, roman: dia?.roman ?? null };
   };
   if (song.lineChords && song.lineChords.length) {
     return song.lineChords

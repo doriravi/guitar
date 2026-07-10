@@ -6,6 +6,7 @@ import { ALL_BUILTIN_SONGS } from '../lib/songs';
 import { getDiatonicChords } from '../lib/scales';
 import SongEditor from './SongEditor';
 import ChordTip from './ChordTip';
+import SoloTabView from './SoloTabView';
 import { useHandProfile } from '../App';
 
 // Import a song BY NAME: the generate-music-data pipeline fetches the real
@@ -283,6 +284,10 @@ export default function SongImporter() {
                 ))
               : <span className="italic" style={{ color: 'var(--color-ink-ghost)' }}>No lyric lines parsed.</span>}
           </div>
+
+          {/* Any solo/riff tab passages we pulled out of the sheet — confirm they
+              were captured; they'll play & be scored in Play-Along. */}
+          <SoloTabView song={parsed} bpm={parsed.bpm} profile={editorProfile} />
 
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={cancelEdit}

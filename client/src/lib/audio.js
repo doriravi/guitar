@@ -282,6 +282,41 @@ export function playEvents(events, onDone) {
   return lead + endRel;
 }
 
+/**
+ * Sound a song's solo/riff notes UNDER an already-started Play-Along run, so the
+ * lead line plays through the speakers on the beat while chord windows are still
+ * mic-scored. Mirrors playBacking's contract: schedule-only (never clears the
+ * shared timeout list), routes through ctx._out so stopAudio() silences it.
+ *
+ * @param {Array<{string:number, fret:number, atSec:number, durSec?:number}>} notes
+ *        `atSec` is seconds from NOW (this module's clock) until the note sounds.
+ */
+export function playSoloGuitar(notes) {
+  if (!notes || !notes.length) return;
+  const ctx = getCtx();
+  const base = ctx.currentTime;
+  const list = notes
+    .filter(n => n && n.string >= 0 && n.string <= 5 && n.fret >= 0)
+    .sort((a, b) => a.atSec - b.atSec);
+
+  let idx = 0;
+  const pump = () => {
+    const horizon = ctx.currentTime + SCHED_WINDOW;
+    while (idx < list.length) {
+      const n = list[idx];
+      const t = base + n.atSec;
+      if (t > horizon) break;
+      if (t >= ctx.currentTime - 0.01) {
+        const decay = Math.min(1.6, Math.max(0.3, n.durSec || 0.6));
+        pluck(ctx, fretHz(n.string, n.fret), t, decay);
+      }
+      idx++;
+    }
+    if (idx < list.length) _timeouts.push(setTimeout(pump, SCHED_TICK_MS));
+  };
+  pump();
+}
+
 // ─── Backing band (drums / bass) ─────────────────────────────────────────────
 // Synthesized accompaniment scheduled ALONGSIDE an already-started guitar
 // playback (playProgression / playEvents). Everything routes through ctx._out,

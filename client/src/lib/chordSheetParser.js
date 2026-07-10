@@ -17,6 +17,8 @@
 // Everything here is pure string/music-theory work — no copyrighted data is
 // fetched; we only structure exactly what the user pasted.
 
+import { extractTabBlocks } from './tabBlockParser';
+
 const NOTE_TO_PC = {
   C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
   'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
@@ -146,10 +148,26 @@ export function parseChordSheet(text) {
     }
   }
 
+  // ── Solo/riff tab staves: pull ASCII tab blocks out of the sheet first, so
+  // their dashed rows never get mistaken for lyrics. Each block records the raw
+  // line it began at, so we can interleave it into the lyric flow in order. ──
+  const { blocks: tabStaves, tabLineSet } = extractTabBlocks(rawLines);
+
   // ── Body: pair chord lines with the lyric line beneath them ──
   const lyricLines = [];
   const allChords = [];
+  // Solo blocks positioned by how many lyricLines precede them, so the timeline
+  // can splice each solo in at the right spot: { afterLine, events }.
+  const tabBlocks = [];
+  let nextStaff = 0;
   for (let i = 0; i < rawLines.length; i++) {
+    // A tab staff starts here → record it in document order, then skip its rows.
+    while (nextStaff < tabStaves.length && tabStaves[nextStaff].atLine === i) {
+      tabBlocks.push({ afterLine: lyricLines.length, events: tabStaves[nextStaff].events });
+      nextStaff++;
+    }
+    if (tabLineSet.has(i)) continue;                 // a row inside a tab staff
+
     const line = rawLines[i];
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -209,11 +227,17 @@ export function parseChordSheet(text) {
   }
   if (!degrees.length) warnings.push('No chords fit the chosen key — the key may be wrong.');
 
+  const soloNoteCount = tabBlocks.reduce((n, b) => n + b.events.length, 0);
+  if (soloNoteCount) {
+    warnings.push(`Found ${tabBlocks.length} tab ${tabBlocks.length === 1 ? 'passage' : 'passages'} (${soloNoteCount} notes) — the solo will play and be scored in Play-Along.`);
+  }
+
   const song = {
     title: title || 'Untitled', artist: artist || 'Unknown',
     key, scaleType, capo, bpm,
     degrees, chords,
     lyricLines,
+    ...(tabBlocks.length ? { tabBlocks } : {}),
     custom: true,
   };
   return { song, warnings };

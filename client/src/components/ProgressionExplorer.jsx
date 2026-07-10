@@ -20,6 +20,7 @@ import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
+import SoloTabView from './SoloTabView';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit } from '../App';
 
@@ -188,10 +189,11 @@ function SongPlayer({ sequence, bpm, onActive }) {
 
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
-function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progChordsWithVoicings }) {
+function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings }) {
   // Imported songs carry their own pasted lyrics+chords → render those directly,
   // no fetch. Otherwise fetch the real lyrics from a public lyrics database.
   const isCustom = Array.isArray(customLyricLines) && customLyricLines.length > 0;
+  const soloProfile = useHandProfile();
   const [status, setStatus] = useState(isCustom ? 'done' : 'loading');
   const [lyrics, setLyrics]  = useState('');
   const [tooltip, setTooltip] = useState(null);
@@ -407,6 +409,11 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, progC
       })}
       </div>
       )}
+
+      {/* Solo / riff tab passages parsed out of the imported sheet — shown with
+          hover shapes and their own Play button. */}
+      <SoloTabView song={{ tabBlocks }} bpm={bpm} profile={soloProfile} />
+
       {tooltip && (
         <div
           className="fixed z-50 rounded-xl p-3 pointer-events-none"
@@ -787,7 +794,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           )}
         </div>
       )}
-      {lyricsOpen && <LyricsSection title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} progChordsWithVoicings={songChordsWithVoicings} />}
+      {lyricsOpen && <LyricsSection title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} />}
     </div>
   );
 }

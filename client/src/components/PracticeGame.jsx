@@ -22,7 +22,7 @@ import {
   songKeyOf, saveSession, sessionsForSong, bestForSong, ghostForSong,
 } from '../lib/practiceGame';
 import { useMic, detectPeaksConfigured } from '../lib/micDetect';
-import { playTicks, playBacking, playMetronome, stopAudio, unlockAudio } from '../lib/audio';
+import { playTicks, playBacking, playMetronome, playSoloGuitar, stopAudio, unlockAudio } from '../lib/audio';
 import { loadCustomSongs } from '../lib/customSongs';
 import { loadCatalogSongs } from '../lib/catalogSongs';
 import { loadComposerSongs, composerSongToLyricSong } from '../lib/composerLibrary';
@@ -40,6 +40,29 @@ import Lazy3D from './Lazy3D';
 // Static-literal dynamic import so Rollup splits Neck3D (and all of three) into
 // the shared three-vendor chunk; only fetched when the 3D neck is actually shown.
 const loadNeck3D = () => import('./Neck3D');
+
+// Timeline windows now vary in length (a chord = 4 beats, a solo note = 1), so
+// the count-in bar, metronome and lane must read each window's own `beats`.
+const totalBeatsOf = (windows) => windows.reduce((n, w) => n + (w.beats || 4), 0);
+// Backing-band chord list from windows: solo windows carry no chord (name ''),
+// so bass/drums keep their grid without playing a phantom chord under the solo.
+const backingChords = (windows) =>
+  windows.map(w => ({ name: w.kind === 'solo' ? '' : w.name, beats: w.beats || 4 }));
+
+// Schedule the run's solo notes to sound on the beat. The audio engine's clock
+// is separate from the mic's, so we schedule relative to NOW: window `w` starts
+// at (t0Ref - micNow) + w.startSec from now. `fromIdx` skips already-played
+// windows on resume.
+function collectSoloNotes(tl, t0MinusMicNow, fromIdx = 0) {
+  const notes = [];
+  for (let i = fromIdx; i < tl.windows.length; i++) {
+    const w = tl.windows[i];
+    if (w.kind !== 'solo' || !w.notes?.length) continue;
+    const atSec = t0MinusMicNow + w.startSec;
+    for (const n of w.notes) notes.push({ string: n.string, fret: n.fret, atSec, durSec: w.durSec });
+  }
+  return notes;
+}
 
 const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
 const NOW_X = 110;               // px position of the now-line inside the lane
@@ -309,6 +332,13 @@ export default function PracticeGame({ cfg }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mic]);
 
+  // Sound the solo notes for this run through the audio engine. Called AFTER
+  // t0Ref is set, so it can convert the mic-clock start into an audio-clock delay.
+  const scheduleSolos = (tl, micNow, fromIdx = 0) => {
+    const notes = collectSoloNotes(tl, t0Ref.current - micNow, fromIdx);
+    if (notes.length) playSoloGuitar(notes);
+  };
+
   // ── Start / pause / resume / finish ──
   const start = async (item) => {
     setPermDenied(false);
@@ -343,8 +373,7 @@ export default function PracticeGame({ cfg }) {
     const micNow = mic.current.audioCtx.currentTime;
     if (drumsOn) {
       playBacking(
-        [{ name: '', beats: tl.meta.countInBeats },
-         ...tl.windows.map(w => ({ name: w.name, beats: tl.meta.beatsPerChord }))],
+        [{ name: '', beats: tl.meta.countInBeats }, ...backingChords(tl.windows)],
         tl.meta.bpm, { drums: true, bass: false },
       );
       t0Ref.current = micNow + 0.15 + tl.meta.countInSec;   // audio.js scheduling lead
@@ -352,9 +381,12 @@ export default function PracticeGame({ cfg }) {
       const lead = playTicks(tl.meta.countInBeats, tl.meta.spb);
       t0Ref.current = micNow + lead;
     }
+    // Sound the solo/riff notes on the beat so the lead line plays along too.
+    // audio.js clock ≠ mic clock, so schedule relative to NOW: the first playable
+    // window starts at (t0 - micNow) from now, plus each window's own offset.
+    scheduleSolos(tl, micNow);
     if (metronomeOn) {
-      const totalBeats = tl.windows.length * tl.meta.beatsPerChord;
-      metroStopRef.current = playMetronome(totalBeats, tl.meta.spb, {
+      metroStopRef.current = playMetronome(totalBeatsOf(tl.windows), tl.meta.spb, {
         startInSec: t0Ref.current - mic.current.audioCtx.currentTime,
       });
     }
@@ -388,8 +420,7 @@ export default function PracticeGame({ cfg }) {
     const countSec = 4 * tl.meta.spb;
     if (drumsOn) {
       playBacking(
-        [{ name: '', beats: 4 },
-         ...tl.windows.slice(i).map(w => ({ name: w.name, beats: tl.meta.beatsPerChord }))],
+        [{ name: '', beats: 4 }, ...backingChords(tl.windows.slice(i))],
         tl.meta.bpm, { drums: true, bass: false },
       );
       t0Ref.current = micNow + 0.15 + countSec - tl.windows[i].startSec;
@@ -397,8 +428,9 @@ export default function PracticeGame({ cfg }) {
       const lead = playTicks(4, tl.meta.spb);
       t0Ref.current = micNow + lead - tl.windows[i].startSec;
     }
+    scheduleSolos(tl, micNow, i);
     if (metronomeOn) {
-      const remainingBeats = (tl.windows.length - i) * tl.meta.beatsPerChord;
+      const remainingBeats = totalBeatsOf(tl.windows.slice(i));
       metroStopRef.current = playMetronome(remainingBeats, tl.meta.spb, {
         startInSec: t0Ref.current + tl.windows[i].startSec - mic.current.audioCtx.currentTime,
       });
@@ -418,7 +450,7 @@ export default function PracticeGame({ cfg }) {
     const tl = timelineRef.current;
     const songSec = mic.current.audioCtx.currentTime - t0Ref.current;
     const nextBeat = Math.max(0, Math.ceil(songSec / tl.meta.spb + 0.02));
-    const totalBeats = tl.windows.length * tl.meta.beatsPerChord;
+    const totalBeats = totalBeatsOf(tl.windows);
     if (nextBeat >= totalBeats) return;
     metroStopRef.current = playMetronome(totalBeats - nextBeat, tl.meta.spb, {
       startInSec: t0Ref.current + nextBeat * tl.meta.spb - mic.current.audioCtx.currentTime,
@@ -827,28 +859,43 @@ export default function PracticeGame({ cfg }) {
               {tl.windows.map((w, i) => {
                 const res = game.results[i];
                 const isActive = i === activeIdx && phase === 'playing';
+                const isSolo = w.kind === 'solo';
+                // Beat-based geometry: solo notes are narrow (1 beat), chords a
+                // full bar (4 beats). Position by the window's own start beat.
+                const leftPx = (w.startSec / tl.meta.spb) * PX_PER_BEAT;
+                const widthPx = (w.beats || 4) * PX_PER_BEAT - (isSolo ? 4 : 8);
+                // Solo notes get a distinct cyan "lead" look so they read apart
+                // from the gold chord blocks.
+                const soloBg = isActive
+                  ? 'radial-gradient(120% 120% at 35% 25%, #d6f4ff 0%, #6fd3f0 40%, #2aa8d4 80%)'
+                  : 'radial-gradient(120% 120% at 35% 25%, rgba(147,220,242,0.9) 0%, rgba(56,189,248,0.8) 60%, rgba(14,120,170,0.75) 100%)';
+                const chordBg = isActive
+                  ? 'radial-gradient(120% 120% at 35% 25%, #fff3cf 0%, #f0cf7a 32%, #d4a63c 70%, #a97d24 100%)'
+                  : 'radial-gradient(120% 120% at 35% 25%, rgba(240,207,122,0.85) 0%, rgba(212,166,60,0.8) 60%, rgba(169,125,36,0.75) 100%)';
                 return (
                   <div key={i} className="absolute rounded-lg flex flex-col items-center justify-center"
+                    title={isSolo && w.notes?.length ? w.notes.map(n => `${['E','A','D','G','B','e'][n.string]}${n.fret}`).join(' ') : undefined}
                     style={{
-                      left: i * 4 * PX_PER_BEAT, width: 4 * PX_PER_BEAT - 8, top: 10, bottom: 10,
-                      // Un-judged cells read as glossy gold markers riding the neck;
+                      left: leftPx, width: widthPx, top: isSolo ? 24 : 10, bottom: isSolo ? 24 : 10,
+                      // Un-judged cells read as glossy markers riding the neck;
                       // once judged they take their result color as a flat tint.
                       background: res
                         ? 'var(--color-surface-800)'
-                        : isActive
-                          ? 'radial-gradient(120% 120% at 35% 25%, #fff3cf 0%, #f0cf7a 32%, #d4a63c 70%, #a97d24 100%)'
-                          : 'radial-gradient(120% 120% at 35% 25%, rgba(240,207,122,0.85) 0%, rgba(212,166,60,0.8) 60%, rgba(169,125,36,0.75) 100%)',
-                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? '#fff3cf' : 'rgba(122,90,20,0.9)'}`,
+                        : isSolo ? soloBg : chordBg,
+                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? (isSolo ? '#d6f4ff' : '#fff3cf') : isSolo ? 'rgba(14,120,170,0.9)' : 'rgba(122,90,20,0.9)'}`,
                       boxShadow: res ? 'none' : isActive
-                        ? '0 0 16px var(--brand-glow), inset 0 1px 2px rgba(255,255,255,0.5)'
+                        ? `0 0 16px ${isSolo ? 'rgba(56,189,248,0.5)' : 'var(--brand-glow)'}, inset 0 1px 2px rgba(255,255,255,0.5)`
                         : '0 2px 8px rgba(0,0,0,0.35), inset 0 1px 2px rgba(255,255,255,0.35)',
                       opacity: res ? (res.quality === 'miss' || res.quality === 'silent' ? 0.4 : 0.75) : 1,
                       animation: res
                         ? (res.quality === 'miss' ? 'pgShake 0.3s' : res.quality === 'perfect' || res.quality === 'good' ? 'pgPop 0.24s' : 'none')
                         : 'none',
                     }}>
-                    <span className="text-base font-black leading-none" style={{ color: res ? QUALITY_COLOR[res.quality] : '#3a2708' }}>
-                      {w.name}
+                    <span className={isSolo ? 'text-xs font-black leading-none' : 'text-base font-black leading-none'}
+                      style={{ color: res ? QUALITY_COLOR[res.quality] : isSolo ? '#062b3a' : '#3a2708' }}>
+                      {isSolo && w.notes?.length
+                        ? w.notes.map(n => n.fret).join('/')
+                        : w.name}
                     </span>
                     {w.lyric && (
                       <span className="text-[9px] leading-tight mt-1 px-1 text-center truncate max-w-full"

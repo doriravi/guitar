@@ -114,18 +114,38 @@ export function buildPlayTimeline(song, { speed = 1, profile = null, limitToReac
   const spb = 60 / bpm;
   const countInBeats = bpm > 120 ? 8 : 4;
 
+  // Chord cells occupy a full bar (4 beats); solo notes are quicker — each solo
+  // cell gets SOLO_BEATS. Walk the cells accumulating a running beat position so
+  // chords and solos share one continuous timeline.
+  let beat = 0;
   const windows = cells.map((cell, i) => {
+    const isSolo = cell.kind === 'solo';
+    const beats = isSolo ? SOLO_BEATS : BEATS_PER_CHORD;
+    const startSec = beat * spb;
+    beat += beats;
+    if (isSolo) {
+      const v = cell.voicings?.[0] || null;
+      return {
+        index: i, kind: 'solo',
+        name: cell.chordName,           // '♪' / '♪♪'
+        tab: cell.tab || v?.tab || '',
+        notes: cell.notes || v?.notes || [],
+        lyric: '',
+        pcs: notePCs(cell.notes || []),
+        beats,
+        startSec, endSec: beat * spb, durSec: beats * spb,
+      };
+    }
     const v = easiestVoicing(cell.chordName, { profile, limitToReach }) || cell.voicings?.[0] || null;
     return {
-      index: i,
+      index: i, kind: 'chord',
       name: cell.chordName,
       tab: v?.tab || '',
       notes: v?.notes || [],
       lyric: cell.lyric || '',
       pcs: classifyChordPCs(cell.chordName),
-      startSec: i * BEATS_PER_CHORD * spb,
-      endSec: (i + 1) * BEATS_PER_CHORD * spb,
-      durSec: BEATS_PER_CHORD * spb,
+      beats,
+      startSec, endSec: beat * spb, durSec: beats * spb,
     };
   });
 
@@ -136,9 +156,24 @@ export function buildPlayTimeline(song, { speed = 1, profile = null, limitToReac
       beatsPerChord: BEATS_PER_CHORD,
       countInBeats,
       countInSec: countInBeats * spb,
-      totalSec: windows.length * BEATS_PER_CHORD * spb,
+      totalSec: beat * spb,
     },
   };
+}
+
+// How many beats a single solo note/double-stop occupies in the timeline.
+const SOLO_BEATS = 1;
+
+// Open-string MIDI, standard tuning — for turning solo {string,fret} notes into
+// the pitch-class sets the window scorer expects. A single-note window's
+// "required" pc IS the note; there's nothing to tolerate.
+function notePCs(notes) {
+  const expected = new Set();
+  for (const n of (notes || [])) {
+    if (n.string < 0 || n.string > 5) continue;
+    expected.add((OPEN_MIDI[n.string] + n.fret) % 12);
+  }
+  return { expected, required: [...expected], tolerated: new Set(), rootPc: [...expected][0] ?? null };
 }
 
 // ── Per-window scorer ─────────────────────────────────────────────────────────
