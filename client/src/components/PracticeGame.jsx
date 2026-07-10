@@ -77,6 +77,12 @@ function soloNoteLabel(notes) {
 }
 
 const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
+const LANE_H = 96;               // lane height in px
+// Y-center of each string row inside the lane (index 0 = low E at top … 5 = high
+// e at bottom). Solo-note dots sit on these; the lane's string gradient is drawn
+// to match. 6 rows evenly inset so a 20px dot never clips the top/bottom edge.
+const LANE_STRING_Y = [12, 26, 40, 54, 69, 84];
+const STRING_ABBR = ['E', 'A', 'D', 'G', 'B', 'e'];
 const NOW_X = 110;               // px position of the now-line inside the lane
 const SNAP_LAG = 0.10;           // s — analyser latency compensation
 const FFT_MS = 100;              // detection cadence (≈ one full 4096-FFT frame)
@@ -841,12 +847,16 @@ export default function PracticeGame({ cfg }) {
               horizontal steel strings, and metallic fret wires. Purely visual;
               the conveyor mechanics below are unchanged. */}
           <div className="relative rounded-xl overflow-hidden" style={{
-            height: 96,
+            height: LANE_H,
             border: '1px solid var(--color-surface-700)',
             backgroundColor: '#2a1a10',
             backgroundImage: [
-              // 6 steel strings, thicker toward the bass (top)
-              'repeating-linear-gradient(0deg, transparent 0 13px, rgba(216,212,204,0.55) 13px 14.4px, transparent 14.4px 16px)',
+              // 6 steel strings, drawn exactly on LANE_STRING_Y so solo-note dots
+              // land on them; thicker toward the bass (top string, index 0).
+              ...LANE_STRING_Y.map((y, s) => {
+                const half = (2.2 - s * 0.22) / 2; // bass strings a touch thicker
+                return `linear-gradient(0deg, transparent ${y - half}px, rgba(216,212,204,0.6) ${y - half}px, rgba(216,212,204,0.6) ${y + half}px, transparent ${y + half}px)`;
+              }),
               // fret wires every ~one bar, with a bright top edge (metallic)
               `repeating-linear-gradient(90deg, transparent 0 ${4 * PX_PER_BEAT - 1.5}px, rgba(255,255,255,0.28) ${4 * PX_PER_BEAT - 1.5}px ${4 * PX_PER_BEAT - 1}px, rgba(150,152,158,0.9) ${4 * PX_PER_BEAT - 1}px ${4 * PX_PER_BEAT + 1}px, transparent ${4 * PX_PER_BEAT + 1}px ${4 * PX_PER_BEAT}px)`,
               // wood grain / depth shading
@@ -876,38 +886,63 @@ export default function PracticeGame({ cfg }) {
                 // full bar (4 beats). Position by the window's own start beat.
                 const leftPx = (w.startSec / tl.meta.spb) * PX_PER_BEAT;
                 const widthPx = (w.beats || 4) * PX_PER_BEAT - (isSolo ? 4 : 8);
-                // Solo notes get a distinct cyan "lead" look so they read apart
-                // from the gold chord blocks.
-                const soloBg = isActive
-                  ? 'radial-gradient(120% 120% at 35% 25%, #d6f4ff 0%, #6fd3f0 40%, #2aa8d4 80%)'
-                  : 'radial-gradient(120% 120% at 35% 25%, rgba(147,220,242,0.9) 0%, rgba(56,189,248,0.8) 60%, rgba(14,120,170,0.75) 100%)';
+
+                // ── Solo note: draw it as a DOT on its actual string row, so the
+                // lead line reads like real tab on the neck (not a text blob). ──
+                if (isSolo) {
+                  const judged = !!res;
+                  const dotColor = judged ? QUALITY_COLOR[res.quality]
+                    : isActive ? '#eafaff' : '#7fd8f5';
+                  return (
+                    <div key={i} className="absolute" style={{ left: leftPx, width: widthPx, top: 0, bottom: 0 }}
+                      title={w.notes?.length ? w.notes.map(n => `${STRING_ABBR[n.string]}${n.fret}`).join(' ') : undefined}>
+                      {(w.notes || []).map((n, k) => (
+                        <div key={k} className="absolute flex items-center justify-center rounded-full"
+                          style={{
+                            // Center of the note's string row (see LANE_STRING_Y).
+                            top: LANE_STRING_Y[n.string] - 10, left: '50%',
+                            width: 20, height: 20, transform: 'translateX(-50%)',
+                            background: judged ? 'var(--color-surface-800)'
+                              : `radial-gradient(circle at 35% 28%, #eafaff 0%, ${isActive ? '#5ecbee' : '#38bdf8'} 55%, #0e78aa 100%)`,
+                            border: `2px solid ${dotColor}`,
+                            boxShadow: judged ? 'none'
+                              : isActive ? '0 0 12px rgba(56,189,248,0.9), inset 0 1px 1px rgba(255,255,255,0.7)'
+                              : '0 1px 4px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.5)',
+                            opacity: judged ? (res.quality === 'miss' || res.quality === 'silent' ? 0.35 : 0.7) : 1,
+                            animation: res
+                              ? (res.quality === 'miss' ? 'pgShake 0.3s' : res.quality === 'perfect' || res.quality === 'good' ? 'pgPop 0.24s' : 'none')
+                              : 'none',
+                          }}>
+                          <span className="text-[11px] font-black leading-none"
+                            style={{ color: judged ? QUALITY_COLOR[res.quality] : '#04263a' }}>{n.fret}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
                 const chordBg = isActive
                   ? 'radial-gradient(120% 120% at 35% 25%, #fff3cf 0%, #f0cf7a 32%, #d4a63c 70%, #a97d24 100%)'
                   : 'radial-gradient(120% 120% at 35% 25%, rgba(240,207,122,0.85) 0%, rgba(212,166,60,0.8) 60%, rgba(169,125,36,0.75) 100%)';
                 return (
                   <div key={i} className="absolute rounded-lg flex flex-col items-center justify-center"
-                    title={isSolo && w.notes?.length ? w.notes.map(n => `${['E','A','D','G','B','e'][n.string]}${n.fret}`).join(' ') : undefined}
                     style={{
-                      left: leftPx, width: widthPx, top: isSolo ? 24 : 10, bottom: isSolo ? 24 : 10,
+                      left: leftPx, width: widthPx, top: 10, bottom: 10,
                       // Un-judged cells read as glossy markers riding the neck;
                       // once judged they take their result color as a flat tint.
-                      background: res
-                        ? 'var(--color-surface-800)'
-                        : isSolo ? soloBg : chordBg,
-                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? (isSolo ? '#d6f4ff' : '#fff3cf') : isSolo ? 'rgba(14,120,170,0.9)' : 'rgba(122,90,20,0.9)'}`,
+                      background: res ? 'var(--color-surface-800)' : chordBg,
+                      border: `1.5px solid ${res ? QUALITY_COLOR[res.quality] : isActive ? '#fff3cf' : 'rgba(122,90,20,0.9)'}`,
                       boxShadow: res ? 'none' : isActive
-                        ? `0 0 16px ${isSolo ? 'rgba(56,189,248,0.5)' : 'var(--brand-glow)'}, inset 0 1px 2px rgba(255,255,255,0.5)`
+                        ? '0 0 16px var(--brand-glow), inset 0 1px 2px rgba(255,255,255,0.5)'
                         : '0 2px 8px rgba(0,0,0,0.35), inset 0 1px 2px rgba(255,255,255,0.35)',
                       opacity: res ? (res.quality === 'miss' || res.quality === 'silent' ? 0.4 : 0.75) : 1,
                       animation: res
                         ? (res.quality === 'miss' ? 'pgShake 0.3s' : res.quality === 'perfect' || res.quality === 'good' ? 'pgPop 0.24s' : 'none')
                         : 'none',
                     }}>
-                    <span className={isSolo ? 'text-xs font-black leading-none' : 'text-base font-black leading-none'}
-                      style={{ color: res ? QUALITY_COLOR[res.quality] : isSolo ? '#062b3a' : '#3a2708' }}>
-                      {isSolo && w.notes?.length
-                        ? w.notes.map(n => n.fret).join('/')
-                        : w.name}
+                    <span className="text-base font-black leading-none"
+                      style={{ color: res ? QUALITY_COLOR[res.quality] : '#3a2708' }}>
+                      {w.name}
                     </span>
                     {w.lyric && (
                       <span className="text-[9px] leading-tight mt-1 px-1 text-center truncate max-w-full"
