@@ -243,8 +243,11 @@ export const catalog = {
 // { url, text } — text already carries the "TITLE Chords by ARTIST" / Key /
 // Capo header lines that parseChordSheet understands.
 export const chordSheet = {
-  fetch: (artist, title) =>
-    apiFetch(`/api/chordsheet?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`),
+  // `skip` asks for the Nth-ranked sheet instead of the top hit — powers the
+  // "Try another version" button when the first sheet is wrong. Response adds
+  // { version, matchCount } so the UI knows if more versions remain.
+  fetch: (artist, title, skip = 0) =>
+    apiFetch(`/api/chordsheet?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&skip=${skip}`),
 };
 
 // ── Lyrics ───────────────────────────────────────────────────────────────────

@@ -63,7 +63,8 @@ public class ChordSheetController {
 
     @GetMapping
     public ResponseEntity<?> fetch(@RequestParam String title,
-                                   @RequestParam(required = false, defaultValue = "") String artist) {
+                                   @RequestParam(required = false, defaultValue = "") String artist,
+                                   @RequestParam(required = false, defaultValue = "0") int skip) {
         try {
             // 1) Search for the song. The endpoint answers JSONP: ({...}) — unwrap.
             String query = URLEncoder.encode((title + " " + artist).trim(), StandardCharsets.UTF_8);
@@ -73,16 +74,26 @@ public class ChordSheetController {
             if (raw.startsWith("(") && raw.endsWith(")")) raw = raw.substring(1, raw.length() - 1);
 
             // Docs: m=title, a=artist, d=artist slug, u=song slug, t="2"=chord sheet.
+            // `skip` lets the client ask for the 2nd, 3rd… ranked sheet ("try another
+            // version") instead of always the top hit. matchCount is how many sheets
+            // exist total, so the client can grey out the button at the last one.
             JsonNode docs = mapper.readTree(raw).at("/response/docs");
             JsonNode hit = null;
+            int matchCount = 0;
+            int skipRemaining = Math.max(0, skip);
             for (JsonNode d : docs) {
                 boolean isSheet = d.path("t").asText("2").equals("2");
                 if (isSheet && !d.path("d").asText("").isBlank() && !d.path("u").asText("").isBlank()) {
-                    hit = d;
-                    break; // results come ranked by relevance — take the top sheet
+                    matchCount++;
+                    if (hit == null) {
+                        if (skipRemaining > 0) { skipRemaining--; continue; }
+                        hit = d; // first sheet AT OR AFTER the requested skip offset
+                    }
                 }
             }
             if (hit == null) {
+                // Ran past the last result: report NOT_FOUND so the client can stop
+                // advancing (and, for skip>0, keep the version it already had).
                 return ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("error", "No chord sheet found for this song"));
             }
@@ -111,7 +122,13 @@ public class ChordSheetController {
             if (capo > 0) text.append("Capo: ").append(capo).append('\n');
             text.append('\n').append(sheet).append('\n');
 
-            return ResponseEntity.ok(Map.of("url", pageUrl, "text", text.toString()));
+            // `version`/`matchCount` let the UI show "version 2 of 5" and disable
+            // "try another version" when it's already showing the last one.
+            return ResponseEntity.ok(Map.of(
+                    "url", pageUrl,
+                    "text", text.toString(),
+                    "version", Math.min(skip, matchCount - 1),
+                    "matchCount", matchCount));
 
         } catch (ResourceAccessException e) {
             return upstreamDown();

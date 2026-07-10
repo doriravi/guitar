@@ -28,6 +28,12 @@ export default function SongImporter() {
   const [artistQuery, setArtistQuery] = useState(''); // import-by-name: optional artist
   const [fetching, setFetching] = useState(false);
   const [fetchErr, setFetchErr] = useState('');
+  // "Try another version" state: the query we last imported + which ranked sheet
+  // we're on, so the button can re-fetch the next version of the SAME song.
+  const [lastQuery, setLastQuery] = useState(null); // { title, artist } | null
+  const [version, setVersion] = useState(0);        // 0-based index into ranked sheets
+  const [moreVersions, setMoreVersions] = useState(false);
+  const [tryingAnother, setTryingAnother] = useState(false);
   const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
   const editorProfile = useHandProfile();
 
@@ -36,25 +42,37 @@ export default function SongImporter() {
   // Import by name — the whole generate-music-data pipeline in one click:
   // fetch the REAL sheet (actual chords + full lyrics) → parse → save as an
   // imported song. The saved song then behaves exactly like a pasted one.
+  // Core import: fetch the `skip`-th ranked sheet for a title/artist, parse and
+  // save it. Shared by the initial Import and the "Try another version" button.
+  const importByName = async (title, artist, skip) => {
+    const res = await chordSheetApi.fetch(artist, title, skip); // { url, text, version, matchCount }
+    const { song, warnings: warns } = parseChordSheet(res.text);
+    const withMeta = { ...song, custom: true, sourceUrl: res.url };
+    // Saves locally right away; also pushes to the DB when logged in (a
+    // logged-out save simply syncs on the next login).
+    const list = await saveCustomSong(withMeta, true);
+    setSaved(list);
+    const savedSong = list.find(s =>
+      (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
+    // Drop it into the review editor so it can be tweaked immediately.
+    setEditingId(savedSong.id || null);
+    setParsed(savedSong);
+    setText(songToText(savedSong));
+    setWarnings(warns);
+    // Remember the query + version so "Try another version" can advance.
+    setLastQuery({ title, artist });
+    const ver = res.version ?? skip;
+    setVersion(ver);
+    setMoreVersions((res.matchCount ?? 1) > ver + 1);
+    return { song, ver, matchCount: res.matchCount ?? 1 };
+  };
+
   const handleImportByName = async () => {
     const title = nameQuery.trim();
     if (!title || fetching) return;
     setFetching(true); setFetchErr(''); setSavedMsg('');
     try {
-      const res = await chordSheetApi.fetch(artistQuery.trim(), title); // { url, text }
-      const { song, warnings: warns } = parseChordSheet(res.text);
-      const withMeta = { ...song, custom: true, sourceUrl: res.url };
-      // Saves locally right away; also pushes to the DB when logged in (a
-      // logged-out save simply syncs on the next login).
-      const list = await saveCustomSong(withMeta, true);
-      setSaved(list);
-      const savedSong = list.find(s =>
-        (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
-      // Drop it into the review editor so it can be tweaked immediately.
-      setEditingId(savedSong.id || null);
-      setParsed(savedSong);
-      setText(songToText(savedSong));
-      setWarnings(warns);
+      const { song } = await importByName(title, artistQuery.trim(), 0);
       setSavedMsg(`Imported “${song.title}” — saved to your songs. Review below and Update if you tweak anything.`);
       setNameQuery(''); setArtistQuery('');
     } catch (e) {
@@ -63,6 +81,27 @@ export default function SongImporter() {
         : 'The chord-sheet service is unavailable right now — is the backend running?');
     } finally {
       setFetching(false);
+    }
+  };
+
+  // Re-import the SAME song at the next ranked sheet — for when the first
+  // version's chords/lyrics were wrong. Advances `version`; stops (and says so)
+  // once there are no more versions.
+  const handleTryAnother = async () => {
+    if (!lastQuery || tryingAnother) return;
+    setTryingAnother(true); setFetchErr(''); setSavedMsg('');
+    try {
+      const { song, ver, matchCount } = await importByName(lastQuery.title, lastQuery.artist, version + 1);
+      setSavedMsg(`Loaded another version of “${song.title}” (version ${ver + 1} of ${matchCount}). Review below.`);
+    } catch (e) {
+      if (e?.status === 404) {
+        setMoreVersions(false);
+        setFetchErr('That was the last version available for this song.');
+      } else {
+        setFetchErr('The chord-sheet service is unavailable right now — is the backend running?');
+      }
+    } finally {
+      setTryingAnother(false);
     }
   };
 
@@ -173,12 +212,25 @@ export default function SongImporter() {
             />
             <button
               onClick={handleImportByName}
-              disabled={!nameQuery.trim() || fetching}
+              disabled={!nameQuery.trim() || fetching || tryingAnother}
               className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
               style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
             >
               {fetching ? 'Fetching…' : 'Import'}
             </button>
+            {/* Try another version — appears after an import; re-fetches the next
+                ranked chord sheet for the same song when the first was wrong. */}
+            {lastQuery && (
+              <button
+                onClick={handleTryAnother}
+                disabled={tryingAnother || fetching || !moreVersions}
+                title={moreVersions ? 'Load a different chord sheet for the same song' : 'No more versions available'}
+                className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
+                style={{ background: 'transparent', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}
+              >
+                {tryingAnother ? 'Finding…' : '↻ Try another version'}
+              </button>
+            )}
           </div>
           {fetchErr && (
             <div className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{fetchErr}</div>
