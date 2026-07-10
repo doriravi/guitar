@@ -218,19 +218,20 @@ export default function SongImporter() {
             >
               {fetching ? 'Fetching…' : 'Import'}
             </button>
-            {/* Try another version — appears after an import; re-fetches the next
-                ranked chord sheet for the same song when the first was wrong. */}
-            {lastQuery && (
-              <button
-                onClick={handleTryAnother}
-                disabled={tryingAnother || fetching || !moreVersions}
-                title={moreVersions ? 'Load a different chord sheet for the same song' : 'No more versions available'}
-                className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
-                style={{ background: 'transparent', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}
-              >
-                {tryingAnother ? 'Finding…' : '↻ Try another version'}
-              </button>
-            )}
+            {/* Try another version — always shown next to Import so it's
+                discoverable, but only active once a song has been imported (it
+                re-fetches the next ranked sheet for that same song). */}
+            <button
+              onClick={handleTryAnother}
+              disabled={!lastQuery || tryingAnother || fetching || !moreVersions}
+              title={!lastQuery
+                ? 'Import a song first, then use this to load a different chord sheet if the first one was wrong'
+                : moreVersions ? 'Load a different chord sheet for the same song' : 'No more versions available'}
+              className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
+              style={{ background: 'transparent', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}
+            >
+              {tryingAnother ? 'Finding…' : '↻ Try another version'}
+            </button>
           </div>
           {fetchErr && (
             <div className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{fetchErr}</div>
