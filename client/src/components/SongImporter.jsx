@@ -35,6 +35,8 @@ export default function SongImporter() {
   const [moreVersions, setMoreVersions] = useState(false);
   const [tryingAnother, setTryingAnother] = useState(false);
   const [lastImported, setLastImported] = useState(null); // saved song from the last import (for the Edit button)
+  const [originText, setOriginText] = useState('');       // the raw fetched sheet, for the "Show origin" compare
+  const [showOrigin, setShowOrigin] = useState(false);    // toggle the raw-sheet panel
   const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
   const editorProfile = useHandProfile();
   const loggedIn = !!useAuth();   // drives DB-backed save/delete vs. localStorage-only
@@ -59,6 +61,9 @@ export default function SongImporter() {
     // Keep the saved song around so the "Edit" button can open it on demand —
     // but do NOT auto-open the review panel; the import just saves.
     setLastImported(savedSong);
+    // Keep the raw fetched sheet so "Show origin" can compare it to what we parsed.
+    setOriginText(res.text || '');
+    setShowOrigin(false);
     // Remember the query + version so "Try another version" can advance.
     setLastQuery({ title, artist });
     const ver = res.version ?? skip;
@@ -283,12 +288,44 @@ export default function SongImporter() {
                 <span className="ml-2">{keyLabel(lastImported)}{lastImported.capo ? ` · capo ${lastImported.capo}` : ''}{lastImported.bpm ? ` · ${lastImported.bpm} BPM` : ''}</span>
               </div>
             </div>
-            <button onClick={() => handleEdit(loadCustomSongs().find(s => s.id === lastImported.id) || lastImported)}
-              className="text-xs px-3 py-1.5 rounded-lg shrink-0 font-semibold"
-              style={{ color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}>
-              Edit
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Show origin — reveal the raw fetched sheet + a link to the source
+                  page, so the parsed result can be compared against the original. */}
+              {(originText || lastImported.sourceUrl) && (
+                <button onClick={() => setShowOrigin(v => !v)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                  style={{ color: 'var(--color-info)', border: '1px solid rgba(56,189,248,0.4)' }}>
+                  {showOrigin ? 'Hide origin' : 'Show origin'}
+                </button>
+              )}
+              <button onClick={() => handleEdit(loadCustomSongs().find(s => s.id === lastImported.id) || lastImported)}
+                className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                style={{ color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}>
+                Edit
+              </button>
+            </div>
           </div>
+
+          {/* Origin panel: the raw sheet as fetched, side by side with a link to
+              the published source, for comparing against the parsed result above. */}
+          {showOrigin && (
+            <div className="mb-3 rounded-lg p-3" style={{ background: 'var(--color-surface-base)', border: '1px solid rgba(56,189,248,0.25)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-info)' }}>
+                  Original sheet (as fetched)
+                </span>
+                {lastImported.sourceUrl && (
+                  <a href={lastImported.sourceUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-[11px] underline" style={{ color: 'var(--color-info)' }}>
+                    Open source page ↗
+                  </a>
+                )}
+              </div>
+              {originText
+                ? <pre className="font-mono text-[11px] whitespace-pre-wrap max-h-72 overflow-y-auto" style={{ color: 'var(--color-ink-subtle)' }}>{originText}</pre>
+                : <span className="text-[11px] italic" style={{ color: 'var(--color-ink-ghost)' }}>Raw sheet not available for this import — open the source page to compare.</span>}
+            </div>
+          )}
 
           {/* chord chips with hover shapes */}
           {lastImported.chords?.length > 0 && (
