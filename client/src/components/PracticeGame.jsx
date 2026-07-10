@@ -64,6 +64,18 @@ function collectSoloNotes(tl, t0MinusMicNow, fromIdx = 0) {
   return notes;
 }
 
+// Musical note name for a solo cell's notes, shown under its fretboard dot
+// (e.g. a single D3 → "D", a double-stop → "D+F#"). Standard-tuning open MIDI.
+const OPEN_MIDI_PG = [40, 45, 50, 55, 59, 64];
+const PC_NAMES_PG = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function soloNoteLabel(notes) {
+  if (!notes?.length) return '♪';
+  return notes
+    .filter(n => n.string >= 0 && n.string <= 5)
+    .map(n => PC_NAMES_PG[(OPEN_MIDI_PG[n.string] + n.fret) % 12])
+    .join('+') || '♪';
+}
+
 const PX_PER_BEAT = 36;          // lane geometry: one bar cell = 4 × 36 = 144 px
 const NOW_X = 110;               // px position of the now-line inside the lane
 const SNAP_LAG = 0.10;           // s — analyser latency compensation
@@ -972,29 +984,42 @@ export default function PracticeGame({ cfg }) {
 
           {/* current + next shapes */}
           <div className="flex items-start gap-4 rounded-xl px-4 py-3" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
-            {tl.windows[activeIdx] && (
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-brand)' }}>Now</span>
-                {view3D ? (
-                  <div style={{ width: 160, height: 140 }}>
-                    <Lazy3D
-                      load={loadNeck3D}
-                      componentProps={{ notes: tl.windows[activeIdx].notes }}
-                      fallback={<FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />}
-                    />
-                    <p className="text-center text-xs font-semibold -mt-1" style={{ color: 'var(--color-ink)' }}>{tl.windows[activeIdx].name}</p>
-                  </div>
-                ) : (
-                  <FretboardDiagram chord={{ name: tl.windows[activeIdx].name, tab: tl.windows[activeIdx].tab, notes: tl.windows[activeIdx].notes }} showFingers />
-                )}
-              </div>
-            )}
-            {tl.windows[activeIdx + 1] && (
-              <div className="flex flex-col items-center opacity-60">
-                <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-ink-ghost)' }}>Next</span>
-                <FretboardDiagram chord={{ name: tl.windows[activeIdx + 1].name, tab: tl.windows[activeIdx + 1].tab, notes: tl.windows[activeIdx + 1].notes }} />
-              </div>
-            )}
+            {tl.windows[activeIdx] && (() => {
+              const w = tl.windows[activeIdx];
+              const solo = w.kind === 'solo';
+              // For a solo, label it "Solo" and show the note name(s) instead of a
+              // chord name; the FretboardDiagram already draws each note as a dot.
+              const label = solo ? 'Solo' : 'Now';
+              const caption = solo ? soloNoteLabel(w.notes) : w.name;
+              return (
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] uppercase tracking-widest font-semibold mb-1"
+                    style={{ color: solo ? 'var(--color-info)' : 'var(--color-brand)' }}>{label}</span>
+                  {view3D ? (
+                    <div style={{ width: 160, height: 140 }}>
+                      <Lazy3D
+                        load={loadNeck3D}
+                        componentProps={{ notes: w.notes }}
+                        fallback={<FretboardDiagram chord={{ name: caption, tab: w.tab, notes: w.notes }} showFingers={!solo} />}
+                      />
+                      <p className="text-center text-xs font-semibold -mt-1" style={{ color: solo ? 'var(--color-info)' : 'var(--color-ink)' }}>{caption}</p>
+                    </div>
+                  ) : (
+                    <FretboardDiagram chord={{ name: caption, tab: w.tab, notes: w.notes }} showFingers={!solo} />
+                  )}
+                </div>
+              );
+            })()}
+            {tl.windows[activeIdx + 1] && (() => {
+              const w = tl.windows[activeIdx + 1];
+              const solo = w.kind === 'solo';
+              return (
+                <div className="flex flex-col items-center opacity-60">
+                  <span className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--color-ink-ghost)' }}>{solo ? 'Solo' : 'Next'}</span>
+                  <FretboardDiagram chord={{ name: solo ? soloNoteLabel(w.notes) : w.name, tab: w.tab, notes: w.notes }} />
+                </div>
+              );
+            })()}
             <div className="flex-1 text-xs self-center" style={{ color: 'var(--color-ink-faint)' }}>
               {activeIdx < tl.windows.length
                 ? <>Chord {Math.min(activeIdx + 1, tl.windows.length)} of {tl.windows.length}</>
