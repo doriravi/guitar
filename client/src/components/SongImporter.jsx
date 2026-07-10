@@ -270,6 +270,60 @@ export default function SongImporter() {
         </div>
       )}
 
+      {/* ── Imported song, displayed read-only ── The import just saves and
+          SHOWS the song here; editing is opt-in via the Edit button above or
+          the one below. */}
+      {!editingId && lastImported && (
+        <div className="mb-5 rounded-xl p-4" style={{ background: 'var(--color-surface-850)', border: '1px solid var(--color-surface-700)' }}>
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <div className="text-base font-bold truncate" style={{ color: 'var(--color-ink)' }}>{lastImported.title}</div>
+              <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                {lastImported.artist}
+                <span className="ml-2">{keyLabel(lastImported)}{lastImported.capo ? ` · capo ${lastImported.capo}` : ''}{lastImported.bpm ? ` · ${lastImported.bpm} BPM` : ''}</span>
+              </div>
+            </div>
+            <button onClick={() => handleEdit(loadCustomSongs().find(s => s.id === lastImported.id) || lastImported)}
+              className="text-xs px-3 py-1.5 rounded-lg shrink-0 font-semibold"
+              style={{ color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}>
+              Edit
+            </button>
+          </div>
+
+          {/* chord chips with hover shapes */}
+          {lastImported.chords?.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {lastImported.chords.map((c, i) => (
+                <ChordTip key={i} name={c}>
+                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-750)', color: 'var(--color-brand)' }}>{c}</span>
+                </ChordTip>
+              ))}
+            </div>
+          )}
+
+          {/* chord-over-lyric display (read-only) */}
+          {lastImported.lyricLines?.length > 0 && (
+            <div className="rounded-lg p-3 font-mono text-xs max-h-72 overflow-y-auto" style={{ background: 'var(--color-surface-base)', border: '1px solid var(--color-surface-700)' }}>
+              {lastImported.lyricLines.map((ln, i) => (
+                <div key={i} className="mb-1">
+                  {ln.chordNames?.length > 0 && (
+                    <div className="font-bold" style={{ color: 'var(--color-accent)' }}>
+                      {ln.chordNames.map((n, k) => (
+                        <ChordTip key={k} name={n}><span className="mr-2">{n}</span></ChordTip>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ color: 'var(--color-ink-subtle)' }}>{ln.text || ' '}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* any solo/riff tab passages, with their own Play buttons */}
+          <SoloTabView song={lastImported} bpm={lastImported.bpm} profile={editorProfile} />
+        </div>
+      )}
+
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
