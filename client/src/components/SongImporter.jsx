@@ -75,7 +75,8 @@ export default function SongImporter() {
     try {
       const { song } = await importByName(title, artistQuery.trim(), 0);
       setSavedMsg(`Found “${song.title}”. Review it below, then click Save song to keep it — or Try another version if the chords look wrong.`);
-      setNameQuery(''); setArtistQuery('');
+      // Keep the name/artist in the fields so it's clear what was imported and a
+      // re-import/tweak is easy — don't clear them.
     } catch (e) {
       setFetchErr(e?.status === 404
         ? 'No chord sheet found for that name — check the spelling, or add the artist.'
