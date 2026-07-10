@@ -1180,6 +1180,7 @@ function beatToStaffNotes(frets, key, capo = 0) {
 
 function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
   const key = keyByName(musicKey);
+  const scrollRef = useRef(null);
 
   // Staff geometry. One space = STEP px between adjacent diatonic positions is
   // half a line gap, so a full line-to-line gap is 2*STEP.
@@ -1214,6 +1215,20 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
 
   const width = NOTES_X0 + Math.max(beats.length, 1) * COL_W + 12;
 
+  // Keep the active beat visible in long songs: scroll it toward the middle of
+  // the (horizontally overflowing) sheet whenever the active beat changes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || activeIdx == null || activeIdx < 0) return;
+    const cx = NOTES_X0 + activeIdx * COL_W + COL_W / 2;
+    const target = cx - el.clientWidth / 2;
+    const max = el.scrollWidth - el.clientWidth;
+    const next = Math.max(0, Math.min(target, max));
+    if (Math.abs(next - el.scrollLeft) > 1) {
+      el.scrollTo({ left: next, behavior: 'smooth' });
+    }
+  }, [activeIdx, NOTES_X0, COL_W]);
+
   // Ledger lines needed for a note far above/below the staff.
   const ledgersFor = (dia) => {
     const lines = [];
@@ -1226,7 +1241,7 @@ function NotationSheet({ beats, activeIdx, musicKey, capo = 0, tr }) {
   };
 
   return (
-    <div className="rounded-xl mb-3 overflow-x-auto"
+    <div ref={scrollRef} className="rounded-xl mb-3 overflow-x-auto"
       style={{
         // Aged yellow manuscript paper: warm base + soft edge vignette + faint
         // mottling so it reads as real parchment rather than a flat swatch.
@@ -1909,6 +1924,7 @@ function MusicEditorMode({ diffMax, tr }) {
   const [capo, setCapo] = useState(0); // capo fret (0 = none); raises pitch, eases reach
   const capoRef = useRef(capo);
   capoRef.current = capo;
+  const trackRef = useRef(null); // beat-track scroll container (auto-follows active beat)
   const nextId = useRef(1);
   const playTimer = useRef(null);
   const bpmRef = useRef(bpm);
@@ -2109,6 +2125,21 @@ function MusicEditorMode({ diffMax, tr }) {
 
   const sheetActiveIdx = isPlaying && playIdx !== null ? playIdx : editIdx;
 
+  // Keep the active beat card in view in long songs: scroll the beat track so
+  // the active card is centered whenever the active beat changes.
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || sheetActiveIdx == null || sheetActiveIdx < 0) return;
+    const card = el.children[sheetActiveIdx];
+    if (!card) return;
+    const target = card.offsetLeft - (el.clientWidth - card.offsetWidth) / 2;
+    const max = el.scrollWidth - el.clientWidth;
+    const next = Math.max(0, Math.min(target, max));
+    if (Math.abs(next - el.scrollLeft) > 1) {
+      el.scrollTo({ left: next, behavior: 'smooth' });
+    }
+  }, [sheetActiveIdx]);
+
   return (
     <div>
       {/* Floating, draggable particle field that LISTENS to the music the editor
@@ -2204,7 +2235,7 @@ function MusicEditorMode({ diffMax, tr }) {
       </div>
 
       {/* Beat track */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+      <div ref={trackRef} className="flex gap-2 overflow-x-auto pb-2 mb-3">
         {beats.map((beat, i) => (
           <BeatCard
             key={beat.id}
