@@ -46,6 +46,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/version").permitAll()
+                        // Live "jam" WebSocket handshake — the room relay does its
+                        // own room-code gating; no JWT needed to join a jam.
+                        .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/analyze-hand", "/api/analyze-hand/claude").permitAll()
                         .requestMatchers("/api/tab/**").permitAll()
                         .requestMatchers("/api/explain").permitAll()

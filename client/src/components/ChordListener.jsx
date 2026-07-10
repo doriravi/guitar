@@ -20,6 +20,7 @@ import { composeSong } from '../lib/melodyCompose';
 import { getActiveStyle, loadStyle, saveStyle, learnStyle,
          SCALE_FLAVORS, CHORD_COLORS, GENRES } from '../lib/styleProfile';
 import { saveCustomSong } from '../lib/customSongs';
+import { createJam, makeRoomCode } from '../lib/jamSession';
 import { useAuth } from '../App';
 import PracticeGame from './PracticeGame';
 import FretboardDiagram from './FretboardDiagram';
@@ -903,6 +904,147 @@ function StylePanel({ style, setStyle }) {
   );
 }
 
+// ── JamPanel ──────────────────────────────────────────────────────────────────
+// Live multi-device shared songwriting. Create or join a room by code; every
+// phone in the room shares the song — when one composes/edits and taps
+// "Share to room", the others receive it. A copyable join link + native Share
+// make it easy to pull in another phone. Exposes the jam via `jamRef` so the
+// composer can broadcast a freshly composed song.
+function JamPanel({ jamRef, latestSong }) {
+  const [status, setStatus]   = useState('idle');   // idle|connecting|connected|disconnected|error
+  const [room, setRoom]       = useState('');
+  const [peers, setPeers]     = useState(1);
+  const [joinCode, setJoinCode] = useState('');
+  const [incoming, setIncoming] = useState(null);   // last song received from a peer
+  const [copied, setCopied]   = useState(false);
+
+  const jam = useRef(null);
+  if (!jam.current) {
+    jam.current = createJam({
+      onStatus: setStatus,
+      onPresence: setPeers,
+      onSong: (song) => setIncoming(song),
+    });
+    if (jamRef) jamRef.current = jam.current;
+  }
+  // Auto-join a room if the page was opened from a shared ?jam=CODE link.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const code = new URLSearchParams(window.location.search).get('jam');
+    if (code) { const joined = jam.current.join(code); setRoom(joined); }
+    return () => jam.current?.leave();
+  }, []);
+
+  const create = () => { const code = makeRoomCode(); setRoom(code); jam.current.join(code); };
+  const join = () => {
+    const code = joinCode.trim().toUpperCase();
+    if (code.length < 3) return;
+    setRoom(code); jam.current.join(code);
+  };
+  const leave = () => { jam.current.leave(); setRoom(''); setPeers(1); setIncoming(null); };
+
+  const joinUrl = room && typeof window !== 'undefined'
+    ? `${window.location.origin}${window.location.pathname}?jam=${room}`
+    : '';
+  const shareLink = async () => {
+    if (!joinUrl) return;
+    if (navigator.share) { try { await navigator.share({ title: 'Join my jam', text: `Room ${room}`, url: joinUrl }); return; } catch {} }
+    try { await navigator.clipboard.writeText(joinUrl); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {}
+  };
+
+  const shareSong = () => {
+    if (latestSong) jam.current.sendSong(latestSong);
+  };
+
+  const statusColor = status === 'connected' ? 'var(--color-success)'
+    : status === 'connecting' ? 'var(--color-brand)'
+    : status === 'error' ? 'var(--color-danger)' : 'var(--color-ink-ghost)';
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>📱 Jam — write together</span>
+        {room && (
+          <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: statusColor }}>
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: statusColor }} />
+            {status}{status === 'connected' ? ` · ${peers} device${peers !== 1 ? 's' : ''}` : ''}
+          </span>
+        )}
+      </div>
+
+      {!room ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={create}
+            className="px-4 py-2 rounded-lg text-xs font-bold"
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+            + Create room
+          </button>
+          <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>or</span>
+          <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && join()}
+            placeholder="CODE" maxLength={6}
+            className="w-24 px-3 py-2 rounded-lg text-xs font-mono tracking-widest text-center outline-none"
+            style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }} />
+          <button onClick={join}
+            className="px-3 py-2 rounded-lg text-xs font-semibold"
+            style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+            Join
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>Room</span>
+            <span className="text-lg font-black font-mono tracking-widest" style={{ color: 'var(--color-brand)' }}>{room}</span>
+            <button onClick={shareLink}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.2)' }}>
+              {copied ? '✓ Link copied' : '🔗 Share link'}
+            </button>
+            <button onClick={leave}
+              className="px-3 py-1.5 rounded-lg text-xs"
+              style={{ color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-700)' }}>
+              Leave
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={shareSong} disabled={!latestSong || status !== 'connected'}
+              className="px-3 py-2 rounded-lg text-xs font-bold"
+              style={{ background: 'var(--color-success)', color: 'var(--color-surface-base)', opacity: (!latestSong || status !== 'connected') ? 0.5 : 1 }}>
+              📤 Share song to room
+            </button>
+            {!latestSong && <span className="text-xs" style={{ color: 'var(--color-surface-550)' }}>Compose a song first, then share it.</span>}
+          </div>
+
+          {incoming && (
+            <div className="rounded-lg p-2.5" style={{ background: 'var(--color-surface-900)', border: '1px solid rgba(74,222,128,0.25)' }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-success)' }}>
+                ↓ Received “{incoming.title}” from a bandmate
+              </p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(incoming.lyricLines || []).map((ln, i) => ln.chordNames?.[0] && (
+                  <ChordTip key={i} name={ln.chordNames[0]}>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg"
+                      style={{ background: 'var(--color-surface-800)', color: 'var(--color-brand)', border: '1px solid var(--color-surface-700)' }}>
+                      {ln.chordNames[0]}
+                    </span>
+                  </ChordTip>
+                ))}
+              </div>
+              <button onClick={async () => { await saveCustomSong({ ...incoming, custom: true }, false); setIncoming(i => ({ ...i, _saved: true })); }}
+                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.2)' }}>
+                {incoming._saved ? '✓ Saved to my songs' : '💾 Save to my songs'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecorderMode({ cfg }) {
   const [phase, setPhase]         = useState('idle');
   const [entries, setEntries]     = useState([]);
@@ -914,7 +1056,9 @@ function RecorderMode({ cfg }) {
   const [showSave, setShowSave]   = useState(false);
   const [permDenied, setPermDenied] = useState(false);
   const [manualStyle, setManualStyle] = useState(loadStyle); // raw settings shown in the panel
+  const [latestSong, setLatestSong] = useState(null);        // last composed song (to share to jam)
   const loggedIn                  = !!useAuth();
+  const jamRef                    = useRef(null);
   // The composer uses the resolved style (manual folded over the learned
   // profile). Recompute whenever the manual settings change.
   const activeStyle = useMemo(() => getActiveStyle(), [manualStyle]);
@@ -1058,8 +1202,11 @@ function RecorderMode({ cfg }) {
       {/* "My style" settings that shape the composer */}
       <StylePanel style={manualStyle} setStyle={setManualStyle} />
 
+      {/* Live multi-device shared songwriting */}
+      <JamPanel jamRef={jamRef} latestSong={latestSong} />
+
       {/* Real-time single-note pitch tracker + note-sequence queue + composer */}
-      <PitchTracker cfg={cfg} style={activeStyle} loggedIn={loggedIn} />
+      <PitchTracker cfg={cfg} style={activeStyle} loggedIn={loggedIn} onComposed={setLatestSong} />
 
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3 flex-wrap">

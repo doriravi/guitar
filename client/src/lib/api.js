@@ -11,7 +11,7 @@ const _isLocalDev =
   /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) &&
   window.location.port === '5173';
 
-const API_BASE = _envUrl && _envUrl !== 'same-origin'
+export const API_BASE = _envUrl && _envUrl !== 'same-origin'
   ? _envUrl
   : _isLocalDev
     ? 'http://localhost:8080'
