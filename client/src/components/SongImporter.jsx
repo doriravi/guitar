@@ -34,6 +34,7 @@ export default function SongImporter() {
   const [version, setVersion] = useState(0);        // 0-based index into ranked sheets
   const [moreVersions, setMoreVersions] = useState(false);
   const [tryingAnother, setTryingAnother] = useState(false);
+  const [lastImported, setLastImported] = useState(null); // saved song from the last import (for the Edit button)
   const [editorSong, setEditorSong] = useState(null); // song open in the full Song Editor
   const editorProfile = useHandProfile();
 
@@ -46,7 +47,7 @@ export default function SongImporter() {
   // save it. Shared by the initial Import and the "Try another version" button.
   const importByName = async (title, artist, skip) => {
     const res = await chordSheetApi.fetch(artist, title, skip); // { url, text, version, matchCount }
-    const { song, warnings: warns } = parseChordSheet(res.text);
+    const { song } = parseChordSheet(res.text);
     const withMeta = { ...song, custom: true, sourceUrl: res.url };
     // Saves locally right away; also pushes to the DB when logged in (a
     // logged-out save simply syncs on the next login).
@@ -54,11 +55,9 @@ export default function SongImporter() {
     setSaved(list);
     const savedSong = list.find(s =>
       (s.title || '').trim().toLowerCase() === (withMeta.title || '').trim().toLowerCase()) || withMeta;
-    // Drop it into the review editor so it can be tweaked immediately.
-    setEditingId(savedSong.id || null);
-    setParsed(savedSong);
-    setText(songToText(savedSong));
-    setWarnings(warns);
+    // Keep the saved song around so the "Edit" button can open it on demand —
+    // but do NOT auto-open the review panel; the import just saves.
+    setLastImported(savedSong);
     // Remember the query + version so "Try another version" can advance.
     setLastQuery({ title, artist });
     const ver = res.version ?? skip;
@@ -73,7 +72,7 @@ export default function SongImporter() {
     setFetching(true); setFetchErr(''); setSavedMsg('');
     try {
       const { song } = await importByName(title, artistQuery.trim(), 0);
-      setSavedMsg(`Imported “${song.title}” — saved to your songs. Review below and Update if you tweak anything.`);
+      setSavedMsg(`Imported “${song.title}” — saved to your songs. Use Edit to tweak it, or Try another version if the chords look wrong.`);
       setNameQuery(''); setArtistQuery('');
     } catch (e) {
       setFetchErr(e?.status === 404
@@ -92,7 +91,7 @@ export default function SongImporter() {
     setTryingAnother(true); setFetchErr(''); setSavedMsg('');
     try {
       const { song, ver, matchCount } = await importByName(lastQuery.title, lastQuery.artist, version + 1);
-      setSavedMsg(`Loaded another version of “${song.title}” (version ${ver + 1} of ${matchCount}). Review below.`);
+      setSavedMsg(`Loaded another version of “${song.title}” (version ${ver + 1} of ${matchCount}) — saved to your songs.`);
     } catch (e) {
       if (e?.status === 404) {
         setMoreVersions(false);
@@ -217,6 +216,18 @@ export default function SongImporter() {
               style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}
             >
               {fetching ? 'Fetching…' : 'Import'}
+            </button>
+            {/* Edit — importing no longer auto-opens the editor; this opens the
+                just-imported song for review/tweaks on demand. Always shown,
+                enabled once a song has been imported. */}
+            <button
+              onClick={() => lastImported && handleEdit(lastImported)}
+              disabled={!lastImported || fetching || tryingAnother}
+              title={lastImported ? `Edit “${lastImported.title}”` : 'Import a song first to edit it'}
+              className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 shrink-0"
+              style={{ background: 'transparent', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }}
+            >
+              Edit
             </button>
             {/* Try another version — always shown next to Import so it's
                 discoverable, but only active once a song has been imported (it
