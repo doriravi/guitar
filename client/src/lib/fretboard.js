@@ -182,20 +182,67 @@ export function optimalFingering(notes) {
 }
 
 /**
- * Score the difficulty of CHANGING from one chord shape to another (1-10).
+ * How much of the fretting hand has to REORGANIZE to get from shape A to shape B,
+ * as a 0..1 fraction (0 = nothing moves, 1 = full rebuild). Built from the
+ * reach-cost primitives the rest of the engine uses:
  *
- * Switching chords smoothly is the #1 struggle for most players, and it depends
- * on physical movement, not just how hard each shape is to hold. We model:
+ *   - Anchor share: fretted notes held on the identical string+fret in both
+ *     shapes don't move. The more of the (larger) shape is anchored, the less
+ *     reorganizes. A shared barre fret anchors every barred note.
+ *   - Neck shift: how far the index-finger anchor (lowest fret) slides, relative
+ *     to a ~5-fret "big move", added on top.
+ *   - Into-a-barre floor: forming a barre recommits the whole hand — a near-full
+ *     reorganization regardless of how many notes happen to line up. Waived when
+ *     BOTH shapes barre the same fret (the index never lifts — a real anchor).
  *
- *   - Hand-shift: how far the fretting hand slides along the neck, measured in mm
- *     between the two shapes' lowest fretted fret (the index-finger anchor).
- *   - Finger travel: average mm each fretted note moves to its nearest position
- *     in the other shape (captures reshaping the hand, not just sliding it).
- *   - Common-tone bonus: notes held on the exact same string+fret act as anchors
- *     and make the change easier, so each one reduces the score.
+ * Both inputs are already fretted-only note arrays. Returns 0..1.
+ */
+function reorganizationFraction(a, b) {
+  const keyOf = n => `${n.string}:${n.fret}`;
+  const setB = new Set(b.map(keyOf));
+  const anchored = a.filter(n => setB.has(keyOf(n))).length;
+  const anchorShare = anchored / Math.max(a.length, b.length);      // 0..1 held still
+
+  const anchorA = Math.min(...a.map(n => n.fret));
+  const anchorB = Math.min(...b.map(n => n.fret));
+  const shiftFrac = Math.min(1, fretDistanceMm(anchorA, anchorB) / 160); // ~5 frets ≈ 1
+
+  let reorg = Math.min(1, (1 - anchorShare) * 0.85 + shiftFrac * 0.4);
+
+  const fa = optimalFingering(a);
+  const fb = optimalFingering(b);
+  const sameBarre = fa?.barreFret != null && fa.barreFret === fb?.barreFret;
+  const intoBarre = !sameBarre && (fa?.barreFret != null || fb?.barreFret != null);
+  if (intoBarre) reorg = Math.max(reorg, 0.9);
+
+  return reorg;
+}
+
+/**
+ * Score the difficulty of CHANGING from one chord shape to another (1-10), for
+ * the population-average hand. (scoreTransition adds hand-profile personalization
+ * on top of this.)
+ *
+ * Switching chords smoothly is the #1 struggle for most players. For a real
+ * fretting hand the cost is dominated by the harder GRIP you have to form,
+ * modulated by how much the hand physically reorganizes to get there:
+ *
+ *   - Grip cost: how hard the harder of the two shapes is to hold (calcDifficulty).
+ *     Switching into an F barre is hard mostly because the barre is hard, even
+ *     when the hand barely slides.
+ *   - Reorganization: total finger travel, neck reposition, and common-tone /
+ *     shared-barre anchors, folded into a 0..1 share of a full rebuild
+ *     (reorganizationFraction). It SCALES the grip cost rather than competing
+ *     with it: a self-transition (nothing moves) collapses toward trivial; a
+ *     full reshuffle pays the grip in full.
+ *
+ * This deliberately does NOT use average nearest-note travel as the backbone —
+ * that mis-rates common open changes (it inflates G→C on phantom travel between
+ * mismatched string layouts) and lets the anchor discount floor genuinely hard
+ * barre changes (C→F barre) to trivial. Grip-anchoring fixes both.
  *
  * Open-string and muted notes carry no fretting-hand cost. Two chords that are
- * identical, or differ only by open strings, score 1 (trivial).
+ * identical, or differ only by open strings, score ~1 (trivial).
  *
  * @param {Array<{string:number, fret:number}>} notesA - first chord's fretted notes
  * @param {Array<{string:number, fret:number}>} notesB - second chord's fretted notes
@@ -208,52 +255,88 @@ export function transitionDifficulty(notesA, notesB) {
   // No fretting on one side (e.g. all-open chord) → just place/lift the hand.
   if (a.length === 0 || b.length === 0) return 1;
 
-  // Hand-shift: distance the index-finger anchor (lowest fret) slides, in mm.
-  const anchorA = Math.min(...a.map(n => n.fret));
-  const anchorB = Math.min(...b.map(n => n.fret));
-  const shiftMm = fretDistanceMm(anchorA, anchorB);
+  // Backbone: how hard the harder of the two grips is to form.
+  const grip = Math.max(calcDifficulty(a), calcDifficulty(b));
 
-  // Finger travel: for each note in A, the physical distance to its nearest
-  // note in B (and vice versa), averaged. A note that stays put costs ~0.
-  // String distance is weighted lightly: the fretting hand spans all strings at
-  // a given position, so moving a finger to a different string is far cheaper
-  // than sliding it up/down the neck. Fret movement dominates the cost.
-  const STRING_WEIGHT = 0.35;
-  const travel = (from, to) => {
-    let sum = 0;
-    for (const n of from) {
-      let best = Infinity;
-      for (const m of to) {
-        const fr = fretDistanceMm(n.fret, m.fret);
-        const sr = Math.abs(n.string - m.string) * STRING_SPACING_MM * STRING_WEIGHT;
-        best = Math.min(best, Math.sqrt(fr ** 2 + sr ** 2));
-      }
-      sum += best;
-    }
-    return sum / from.length;
-  };
-  const avgTravelMm = (travel(a, b) + travel(b, a)) / 2;
+  // Reorganization drives how much of that grip cost you actually pay.
+  const reorg = reorganizationFraction(a, b);
+  const movementMult = 0.15 + 1.05 * reorg;                        // 0.15 .. 1.20
 
-  // Common-tone anchors: notes on the identical string+fret in both shapes.
-  const keyOf = n => `${n.string}:${n.fret}`;
-  const setB = new Set(b.map(keyOf));
-  const commonTones = a.filter(n => setB.has(keyOf(n))).length;
+  const score = grip * movementMult;
+  return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
+}
 
-  // Combine: shift and reshaping both drive difficulty; anchors relieve it.
-  // ~50mm of combined movement ≈ a hard change before the anchor discount.
-  const movementMm = shiftMm * 0.6 + avgTravelMm;
-  let score = 1 + (movementMm / 50) * 9;
-  score -= commonTones * 1.2;
+// Population-average hand spans (cm), the reference used to personalize a
+// transition. Mirrors handProfile.DEFAULT_PROFILE — duplicated here (as a small
+// literal) so fretboard.js stays free of a handProfile import and the two
+// modules don't form an import cycle. Keep in sync if the defaults change.
+const DEFAULT_HAND = { thumbToIndex: 7.5, indexToMiddle: 4.5, middleToRing: 3.5, ringToLittle: 5.5 };
 
-  // Fingering-aware bonus: if both shapes barre the same fret, the index finger
-  // never lifts — a physical anchor that eases the change. Only the non-barre
-  // fingers reshape, so we discount but keep a floor: two different barre
-  // chords are still a real move, not trivial.
-  const fa = optimalFingering(a);
-  const fb = optimalFingering(b);
-  if (fa?.barreFret != null && fa.barreFret === fb?.barreFret) {
-    score = Math.max(2.5, score - 1);
+// Pull the fretted notes out of whatever the caller passed for a chord: a raw
+// notes array [{string,fret}], or a voicing object { notes: [...] }. Returns []
+// for null/empty/open-only inputs. (Name-string → voicing resolution lives in
+// the UI layer, which owns the chord catalog; the physics core stays pure.)
+function chordNotes(chord) {
+  if (!chord) return [];
+  const notes = Array.isArray(chord) ? chord : Array.isArray(chord.notes) ? chord.notes : [];
+  return notes.filter(n => n && n.fret > 0);
+}
+
+/**
+ * How much the DESTINATION shape over-taxes this hand, as a factor ≥ 1.
+ *
+ * Reuses fingerGapUsage (the same per-finger reach-cost model that powers the
+ * hand-profile bars): each adjacent finger-pair's required span in cm, divided
+ * by the user's actual span for that pair. The single worst-stretched pair
+ * drives the factor — a chord is as hard to grab as its tightest joint. An
+ * average hand on an average shape lands ~1.0 (no penalty); a small hand
+ * reaching a wide shape lands >1. The effect is damped (^0.5) so small hands
+ * play harder, but not linearly — they adapt with technique, matching how
+ * handProfile.personalDifficulty treats static shapes.
+ */
+function handStrainFactor(notes, profile) {
+  const usage = fingerGapUsage(notes);          // fractions of the REFERENCE max per pair
+  if (!usage) return 1;
+  const p = { ...DEFAULT_HAND, ...(profile || {}) };
+  let worst = 0;
+  for (const key of Object.keys(GAP_REF_MAX)) {
+    const requiredCm = usage[key] * GAP_REF_MAX[key];   // undo the ref-max normalization
+    const userCm = p[key];
+    if (requiredCm <= 0 || userCm <= 0) continue;
+    worst = Math.max(worst, requiredCm / userCm);       // 1.0 = right at this hand's limit
   }
+  if (worst <= 0) return 1;
+  return Math.max(1, Math.pow(worst, 0.5));
+}
+
+/**
+ * Personalized chord-CHANGE difficulty (1-10) for a specific hand.
+ *
+ * `scoreTransition(chordA, chordB, handProfile)` is the hand-aware entry point
+ * for "how hard is it to switch between these two chords?". It is the
+ * population-average change cost — transitionDifficulty(), which already models
+ * the harder grip you form and how much the hand reorganizes — scaled by how far
+ * that shape over-taxes THIS hand (handStrainFactor, built on fingerGapUsage). A
+ * small hand pays more; an average hand sees the base cost unchanged.
+ *
+ * chordA / chordB may each be a notes array [{string,fret}] or a voicing object
+ * { notes }. handProfile is optional (defaults to the average hand). Returns
+ * 1-10, one decimal — the same scale as every other difficulty in the app.
+ */
+export function scoreTransition(chordA, chordB, handProfile) {
+  const a = chordNotes(chordA);
+  const b = chordNotes(chordB);
+
+  // Population-average change cost (grip backbone + reorganization).
+  const base = transitionDifficulty(a, b);
+
+  // A change with no fretting on one side (all-open chord) is trivial no matter
+  // the hand — placing/lifting, no stretch or grip to personalize.
+  if (a.length === 0 || b.length === 0) return base;
+
+  // Personalize by the shape that over-taxes THIS hand the most.
+  const strain = Math.max(handStrainFactor(a, handProfile), handStrainFactor(b, handProfile));
+  const score = base * strain;
 
   return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
 }

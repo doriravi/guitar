@@ -20,6 +20,7 @@ import {
   buildPlayTimeline, windowScorer, applyWindowResult, initialGameState,
   accuracyPct, speedAdjAccuracy, gradeFor, multiplierFor, worstChords,
   songKeyOf, saveSession, sessionsForSong, bestForSong, ghostForSong,
+  reachedLevelForSong,
 } from '../lib/practiceGame';
 import { useMic, detectPeaksConfigured } from '../lib/micDetect';
 import { playTicks, playBacking, playMetronome, playSoloGuitar, stopAudio, unlockAudio } from '../lib/audio';
@@ -29,8 +30,14 @@ import { loadComposerSongs, composerSongToLyricSong } from '../lib/composerLibra
 import { filterSongsByReach, chordWithinReach, songAllChordNames } from '../lib/songReach';
 import { buildSessionReport } from '../lib/practiceReport';
 import { personalDifficulty } from '../lib/handProfile';
+import { calcDifficulty } from '../lib/fretboard';
 import { easiestVoicing } from '../lib/voicingLookup';
 import { songBpm } from '../lib/songs';
+import {
+  BUILTIN_LADDERS, ladderPairs, drillToItem,
+  loadDrillSets, saveDrillSet, deleteDrillSet, hydrateDrillSet,
+  SPEED_STEPS, buildDrillLevel, nextDrillLevel,
+} from '../lib/transitionDrills';
 import { useHandProfile, useReachLimit } from '../App';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
@@ -92,7 +99,12 @@ const SILENCE_PAUSE_MS = 8000;   // sustained silence → auto-pause
 // in +10% steps (level N = N×10% speed). The difficulty pill picks the
 // STARTING level; the game then climbs one level per RAMP_EVERY_SEC of actual
 // playing until level MAX_LEVEL (double tempo).
-const RAMP_EVERY_SEC = 120;
+const RAMP_EVERY_SEC = 10;
+// Human phrase for the ramp interval, single-sourced from RAMP_EVERY_SEC so all
+// copy stays correct if it changes (e.g. "every 10 seconds", "every minute").
+const RAMP_LABEL = RAMP_EVERY_SEC % 60 === 0
+  ? `every ${RAMP_EVERY_SEC / 60} minute${RAMP_EVERY_SEC === 60 ? '' : 's'}`
+  : `every ${RAMP_EVERY_SEC} seconds`;
 const MAX_LEVEL = 20;
 const speedForLevel = (level) => level / 10;
 const levelForSpeed = (speed) => Math.min(MAX_LEVEL, Math.max(1, Math.round(speed * 10)));
@@ -102,6 +114,69 @@ const DIFFICULTIES = [
   { id: 'hard',     label: '🏃 Hard',     speed: 0.8 },
   { id: 'original', label: '🎸 Original', speed: 1   },
 ];
+
+// Build the rich level-up popup payload: what the level the player is entering
+// actually contains — its speed/tempo, the score bonus that speed earns, and the
+// chords coming up in the rest of the run (flagging any not yet seen this run).
+// `windows` is the rebuilt timeline's windows; `fromIdx` is the first unscored
+// window (where play resumes).
+function buildLevelUpMsg(level, speed, tl, fromIdx) {
+  const windows = tl?.windows || [];
+  const chordName = w => (w && w.kind !== 'solo' ? w.name : null);
+
+  // Unique chords already played this run (before the resume point).
+  const seen = new Set();
+  for (let i = 0; i < fromIdx && i < windows.length; i++) {
+    const n = chordName(windows[i]);
+    if (n) seen.add(n);
+  }
+  // Unique chords coming up, in first-appearance order; mark the ones new this run.
+  const upcoming = [];
+  const added = new Set();
+  for (let i = fromIdx; i < windows.length; i++) {
+    const n = chordName(windows[i]);
+    if (!n || added.has(n)) continue;
+    added.add(n);
+    upcoming.push({ name: n, isNew: !seen.has(n) });
+  }
+
+  return {
+    level,
+    pct: Math.round(speed * 100),
+    bpm: Math.round(tl?.meta?.bpm ?? 0),
+    // Speed score bonus mirrors applyWindowResult's speedMult (0.6 + 0.4·speed).
+    speedBonusPct: Math.round((0.6 + 0.4 * speed) * 100),
+    upcoming: upcoming.slice(0, 8),
+    remaining: windows.length - fromIdx,
+  };
+}
+
+// Level-up popup payload for a DRILL: a level is a chord TIER × speed STEP.
+// `built` is the buildDrillLevel result. When a new tier just unlocked (speed
+// reset to step 0), we flag the harder pairs it added as NEW.
+function buildDrillLevelUpMsg(level, built) {
+  const tierAdvanced = built.step === 0 && built.tier > 0;   // just moved to harder chords
+  const chords = new Set();
+  for (const p of built.pairs) { chords.add(p.from); chords.add(p.to); }
+  return {
+    level,
+    isDrill: true,
+    tier: built.tier + 1,
+    tiers: built.tiers,
+    step: built.step + 1,
+    steps: SPEED_STEPS.length,
+    pct: Math.round(built.speed * 100),
+    bpm: Math.round(built.timeline?.meta?.bpm ?? 0),
+    speedBonusPct: Math.round((0.6 + 0.4 * built.speed) * 100),
+    tierAdvanced,
+    // The pairs now in play, hardest last; mark all as "new" when the tier just
+    // grew (the top pairs are freshly unlocked).
+    pairs: built.pairs.map((p, i) => ({
+      from: p.from, to: p.to, score: p.score,
+      isNew: tierAdvanced && i >= built.pairs.length - Math.max(1, Math.ceil(built.pairs.length / (built.tier + 1))),
+    })),
+  };
+}
 
 const QUALITY_COLOR = {
   perfect: 'var(--color-success)',
@@ -116,6 +191,112 @@ const GRADE_COLOR = {
   C: 'var(--color-warning)', D: 'var(--color-danger)',
 };
 
+// Color for a 1–10 transition score (matches the Progressions "changes" strip).
+function transitionColor(score) {
+  if (score <= 3) return 'var(--color-success)';
+  if (score <= 6) return '#eab308';
+  if (score <= 8) return 'var(--color-warning)';
+  return 'var(--color-danger)';
+}
+
+// ── Drill picker (chord-change practice, no song) ──────────────────────────────
+// Lists built-in easy→hard ladders and the player's saved weak-transition sets.
+// Each drill previews its ranked pairs as chord · score · chord, with the chord
+// SHAPE on hover (ChordTip, per the CLAUDE.md hover rule), and a Play button that
+// launches it through the same mic game the songs use.
+
+function DrillRow({ item, onPlay, onDelete }) {
+  const pairs = item.drill?.pairs || [];
+  const best = bestForSong(item.key);
+  const attempts = sessionsForSong(item.key).length;
+  const hardest = pairs.length ? pairs[pairs.length - 1] : null;
+
+  return (
+    <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-ink)' }}>{item.song.title}</span>
+            <span className="text-[11px]" style={{ color: 'var(--color-ink-ghost)' }}>{item.pairCount} change{item.pairCount === 1 ? '' : 's'}</span>
+            {hardest && (
+              <span className="text-[11px]" style={{ color: 'var(--color-ink-ghost)' }}>
+                hardest <span className="font-semibold" style={{ color: transitionColor(hardest.score) }}>{hardest.from}→{hardest.to} {hardest.score.toFixed(1)}</span>
+              </span>
+            )}
+          </div>
+          {item.blurb && <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-ink-faint)' }}>{item.blurb}</div>}
+          <div className="flex items-center gap-1 mt-1 flex-wrap text-[11px]" style={{ color: 'var(--color-ink-ghost)' }}>
+            {best
+              ? <span style={{ color: 'var(--color-success)' }}>Best {best.grade} {Math.round(best.accuracy)}%</span>
+              : attempts ? <span>Practiced {attempts}×</span> : <span style={{ color: 'var(--color-surface-550)' }}>Never practiced</span>}
+          </div>
+        </div>
+        <button onClick={() => onPlay(item)}
+          className="text-xs font-bold px-4 py-2 rounded-lg shrink-0"
+          style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+          ▶ Practice
+        </button>
+        {onDelete && (
+          <button onClick={onDelete} title="Delete this saved set"
+            className="text-xs px-2 py-2 rounded-lg shrink-0"
+            style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink-ghost)', border: '1px solid var(--color-surface-550)' }}>
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Ranked pairs preview: chord · score · chord, easy→hard, shape on hover. */}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 mt-2 font-mono">
+        {pairs.map((p, i) => (
+          <span key={i} className="flex items-center px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--color-surface-800)' }}
+            title={`${p.from} → ${p.to}: ${p.score.toFixed(1)}/10`}>
+            <ChordTip name={p.from}><span className="text-xs font-semibold cursor-default" style={{ color: 'var(--color-ink-subtle)' }}>{p.from}</span></ChordTip>
+            <span className="text-[10px] px-1 font-bold tabular-nums" style={{ color: transitionColor(p.score) }}>→{p.score.toFixed(1)}→</span>
+            <ChordTip name={p.to}><span className="text-xs font-semibold cursor-default" style={{ color: 'var(--color-ink-subtle)' }}>{p.to}</span></ChordTip>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DrillPicker({ drillItems, savedMsg, onPlay, onDeleteSet, histTick }) {
+  const { built, saved } = drillItems;
+  return (
+    <div className="space-y-3">
+      <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+        Practice switching between chord pairs — ranked <strong>easy→hard for your hand</strong>. Each change loops
+        A→B→A→B so it grooves in; the mic scores every switch. You start slow on the easiest changes; {RAMP_LABEL} the
+        <strong> speed steps up</strong>, and after 3 steps the <strong>harder changes unlock</strong> and the speed
+        resets. Save the changes you struggle with to build your own practice set.
+      </p>
+
+      {savedMsg && (
+        <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.25)' }}>
+          {savedMsg}
+        </div>
+      )}
+
+      {saved.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>My saved changes</p>
+          {saved.map(item => (
+            <DrillRow key={`${item.key}|${histTick}`} item={item} onPlay={onPlay} onDelete={() => onDeleteSet(item.setId)} />
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <p className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Built-in ladders</p>
+        {built.map(item => (
+          <DrillRow key={`${item.key}|${histTick}`} item={item} onPlay={onPlay} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PracticeGame({ cfg }) {
   const profile = useHandProfile();
   const limitToReach = useReachLimit();
@@ -126,6 +307,9 @@ export default function PracticeGame({ cfg }) {
   const [permDenied, setPermDenied] = useState(false);
 
   // ── Song select state ──
+  const [source, setSource] = useState('songs');  // 'songs' | 'drills' — what to practice
+  const [drillSets, setDrillSets] = useState([]);  // user-saved weak-transition sets
+  const [savedMsg, setSavedMsg] = useState(null);  // transient "saved to practice" toast
   const [customSongs, setCustomSongs] = useState([]);
   const [composerSongs, setComposerSongs] = useState([]);
   const [catalogSongs, setCatalogSongs] = useState([]);
@@ -141,6 +325,7 @@ export default function PracticeGame({ cfg }) {
 
   // ── Game state (one React update per resolved window) ──
   const [game, setGame] = useState(initialGameState);
+  const [activePos, setActivePos] = useState(0);   // playhead position within the CURRENT sequence
   const [summary, setSummary] = useState(null);   // { record, worst, prevBest, history }
   const [song, setSong] = useState(null);
 
@@ -158,13 +343,18 @@ export default function PracticeGame({ cfg }) {
   const nextToScoreRef = useRef(0);
   const silenceSinceRef = useRef(null);
   const metroStopRef = useRef(null);              // stop handle for the in-play metronome
-  const playedSecRef = useRef(0);                 // actual playing time toward the next level
-  const lastTsRef = useRef(null);                 // previous rAF timestamp for playedSec accumulation
+  const levelClockStartRef = useRef(null);        // audioCtx time this level started (real-elapsed ramp)
+  const pauseStartRef = useRef(null);             // audioCtx time an explicit/silence pause began
+  const drillTierRef = useRef(0);                 // current chord tier (drills): harder pairs each tier
+  const drillStepRef = useRef(0);                 // current speed step within the tier (drills)
+  const activePosRef = useRef(0);                 // last playhead index pushed to activePos state
+  const lastTsRef = useRef(null);                 // previous rAF timestamp (kept for compatibility)
   const levelUpTimerRef = useRef(null);           // 5s "Good luck!" interlude timer
   const levelRef = useRef(1);                     // current level, mirrored for the rAF loop
   const levelClockRef = useRef(null);             // stopwatch <span> — written per frame, no re-render
   const startSpeedRef = useRef(1);                // the difficulty's tempo at run start (before ramping)
   const phaseRef = useRef(phase); phaseRef.current = phase;
+  const lastItemRef = useRef(null);               // the launched item (song OR drill) — for Play-again / ramp
 
   const laneTrackRef = useRef(null);
   const volRef = useRef(null);
@@ -178,6 +368,7 @@ export default function PracticeGame({ cfg }) {
   const finishRef = useRef(null);
   const resumeRef = useRef(null);
   const speedUpRef = useRef(null);
+  const loopDrillRef = useRef(null);
   const speedRef = useRef(speed); speedRef.current = speed;
 
   // ── Load song sources ──
@@ -190,9 +381,44 @@ export default function PracticeGame({ cfg }) {
     if (phase === 'select') {
       setCustomSongs(loadCustomSongs());
       setComposerSongs(loadComposerSongs().map(composerSongToLyricSong).filter(Boolean));
+      // Clean up any saved set that exactly duplicates a built-in ladder name
+      // (older "save these changes" of a built-in) so it doesn't linger.
+      let sets = loadDrillSets();
+      const builtInNames = new Set(BUILTIN_LADDERS.map(l => l.name.trim().toLowerCase()));
+      const dupes = sets.filter(s => builtInNames.has((s.name || '').trim().toLowerCase()));
+      if (dupes.length) {
+        for (const d of dupes) deleteDrillSet(d.id);
+        sets = loadDrillSets();
+      }
+      setDrillSets(sets);
       setHistTick(t => t + 1);
     }
   }, [phase]);
+
+  // ── Transition-drill items (built-in ladders + saved weak-spot sets) ──
+  // Each ladder's pairs are ranked easy→hard by scoreTransition, personalized to
+  // the active hand. drillToItem wraps a drill in the same {song,key,timeline}
+  // shape start() consumes for songs, so the whole game loop runs unchanged.
+  const drillItems = useMemo(() => {
+    const opts = { profile, limitToReach };
+    const built = BUILTIN_LADDERS.map(l => {
+      const pairs = ladderPairs(l, opts);
+      return { ...drillToItem({ id: l.id, name: l.name, pairs }, { ...opts, bpm: 70, reps: 4 }),
+               blurb: l.blurb, builtIn: true, pairCount: pairs.length };
+    }).filter(d => d.pairCount > 0);
+    // A saved set that shares a built-in ladder's name is a duplicate (e.g. a
+    // "save these changes" of a built-in) — don't list it twice; the built-in
+    // wins. Match case-insensitively on the display name.
+    const builtInNames = new Set(BUILTIN_LADDERS.map(l => l.name.trim().toLowerCase()));
+    const saved = drillSets
+      .filter(set => !builtInNames.has((set.name || '').trim().toLowerCase()))
+      .map(set => {
+        const h = hydrateDrillSet(set, opts);
+        return { ...drillToItem({ id: set.id, name: set.name, pairs: h.pairs }, { ...opts, bpm: 70, reps: 4 }),
+                 builtIn: false, setId: set.id, pairCount: h.pairs.length };
+      }).filter(d => d.pairCount > 0);
+    return { built, saved };
+  }, [profile, limitToReach, drillSets, histTick]);
 
   // ── Song list (custom + composer + catalog, dedup, ≥4 chord hits, reach-aware) ──
   const songItems = useMemo(() => {
@@ -229,6 +455,7 @@ export default function PracticeGame({ cfg }) {
         song: s, key, occ, uniq, hardest, beyond,
         bpm: Math.min(220, Math.max(40, s.bpm ?? songBpm(s.title) ?? 100)),
         best, last: sessions[0] || null,
+        reached: reachedLevelForSong(key),
         spark: sessions.slice(0, 5).reverse().map(x => x.accuracy),
       };
     }).sort((a, b) => (a.song.title || '').localeCompare(b.song.title || ''));
@@ -284,20 +511,27 @@ export default function PracticeGame({ cfg }) {
       countWrapRef.current.style.display = 'none';
     }
 
-    // Level clock: accumulate actual playing time (count-in and pauses excluded);
-    // every RAMP_EVERY_SEC climb one level, up to MAX_LEVEL (= double tempo).
-    if (lastTsRef.current != null) playedSecRef.current += Math.min(0.1, (ts - lastTsRef.current) / 1000);
-    lastTsRef.current = ts;
+    // Level clock: real elapsed time since this level started, so it climbs on a
+    // wall-clock minute regardless of whether you're strumming (only explicit
+    // pauses are excluded — see pause/resume). Anchored to the audio clock the
+    // first frame after the count-in ends.
+    if (levelClockStartRef.current == null) levelClockStartRef.current = api.audioCtx.currentTime;
+    const elapsed = api.audioCtx.currentTime - levelClockStartRef.current;
+    // At the top of the ladder there's nothing left to ramp to: a song at
+    // MAX_LEVEL, or a drill at its hardest tier's top speed step.
+    const item = lastItemRef.current;
+    const atMax = item?.isDrill
+      ? (drillTierRef.current >= item.tiers - 1 && drillStepRef.current >= SPEED_STEPS.length - 1)
+      : levelRef.current >= MAX_LEVEL;
     if (levelClockRef.current) {
-      if (levelRef.current >= MAX_LEVEL) {
+      if (atMax) {
         levelClockRef.current.textContent = 'MAX';
       } else {
-        const rem = Math.max(0, RAMP_EVERY_SEC - playedSecRef.current);
+        const rem = Math.max(0, RAMP_EVERY_SEC - elapsed);
         levelClockRef.current.textContent = `${Math.floor(rem / 60)}:${String(Math.floor(rem % 60)).padStart(2, '0')}`;
       }
     }
-    if (playedSecRef.current >= RAMP_EVERY_SEC && levelRef.current < MAX_LEVEL) {
-      playedSecRef.current = 0;
+    if (elapsed >= RAMP_EVERY_SEC && !atMax) {
       speedUpRef.current?.();
       return;   // speedUp rebuilds the timeline and restarts this loop
     }
@@ -316,8 +550,18 @@ export default function PracticeGame({ cfg }) {
         silenceSinceRef.current = null;
       }
 
+      // DISPLAY index: the window physically under the now-line, computed from
+      // raw songSec exactly like the lane conveyor positions its cells (no
+      // SNAP_LAG). This is what NOW/NEXT and the lane highlight must show, so the
+      // labels, diagrams and the lit cell always agree with what's at the line.
+      let disp = 0;
+      while (disp < windows.length - 1 && songSec >= windows[disp].endSec) disp++;
+      if (activePosRef.current !== disp) { activePosRef.current = disp; setActivePos(disp); }
+
       const t = songSec - SNAP_LAG;
       if (t >= 0 && t < meta.totalSec) {
+        // SCORING cursor: advanced with a small lead (SNAP_LAG) so the mic starts
+        // listening just before the beat. Kept separate from the display index.
         while (cursorRef.current < windows.length - 1 && t >= windows[cursorRef.current].endSec) {
           cursorRef.current++;
         }
@@ -346,7 +590,12 @@ export default function PracticeGame({ cfg }) {
       setGameBoth(applyWindowResult(gameRef.current, r, speedRef.current));
     }
 
-    if (songSec > meta.totalSec + 0.5) finishRef.current?.();
+    if (songSec > meta.totalSec + 0.5) {
+      // A drill loops the current tier until the level-clock advances it (or the
+      // player quits); a song ends when its chords run out.
+      if (lastItemRef.current?.isDrill) { loopDrillRef.current?.(); return; }
+      finishRef.current?.();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mic]);
 
@@ -366,22 +615,48 @@ export default function PracticeGame({ cfg }) {
       if (e.name === 'NotAllowedError') setPermDenied(true);
       return;
     }
-    const tl = buildPlayTimeline(item.song, { speed, profile, limitToReach });
+    lastItemRef.current = item;
+
+    // Songs: resume at the highest level previously reached, so progress carries
+    // over between sessions instead of restarting at the picked level.
+    // Drills: always begin at level 1 = easiest chord tier, slowest speed step
+    // (60%); the ramp then climbs speed and, every 3 steps, unlocks harder chords.
+    const pickedLevel = levelForSpeed(speed);
+    const reached = item.isDrill ? 0 : reachedLevelForSong(item.key);
+    const runLevel = item.isDrill ? 1 : Math.min(MAX_LEVEL, Math.max(pickedLevel, reached));
+    const runSpeed = item.isDrill ? SPEED_STEPS[0] : speedForLevel(runLevel);
+    const resumed = !item.isDrill && runLevel > pickedLevel;
+
+    // A drill carries a prebuilt timeline (ranked chord-pair changes); a song is
+    // built at the resume tempo here. Everything downstream reads only
+    // timelineRef.current.
+    const tl = item.timeline || buildPlayTimeline(item.song, { speed: runSpeed, profile, limitToReach });
     if (!tl.windows.length) { mic.current.close(); return; }
     timelineRef.current = tl;
     scorersRef.current = tl.windows.map((w, i) =>
       windowScorer(w, cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null));
-    ghostRef.current = ghostForSong(item.key, speed)?.scoreTimeline || null;
+    ghostRef.current = ghostForSong(item.key, runSpeed)?.scoreTimeline || null;
     cursorRef.current = 0;
     nextToScoreRef.current = 0;
+    activePosRef.current = 0; setActivePos(0);
     lastFFTRef.current = 0;
     silenceSinceRef.current = null;
-    playedSecRef.current = 0;
+    levelClockStartRef.current = null;   // re-anchored on the first frame after count-in
+    pauseStartRef.current = null;
     lastTsRef.current = null;
-    startSpeedRef.current = speed;
-    levelRef.current = levelForSpeed(speed);
-    setLevel(levelRef.current);
-    setRampMsg(null);
+    drillTierRef.current = 0;            // drills start at the easiest tier, slowest step
+    drillStepRef.current = 0;
+    setSpeed(runSpeed);
+    speedRef.current = runSpeed;
+    startSpeedRef.current = runSpeed;
+    levelRef.current = runLevel;
+    setLevel(runLevel);
+    if (resumed) {
+      setRampMsg({ resumed: true, level: runLevel, pct: Math.round(runSpeed * 100) });
+      setTimeout(() => setRampMsg(null), 4000);
+    } else {
+      setRampMsg(null);
+    }
     setGameBoth(initialGameState());
     setSummary(null);
     setSong(item.song);
@@ -417,7 +692,9 @@ export default function PracticeGame({ cfg }) {
     rafRef.current = null;
     stopAudio();
     metroStopRef.current = null;   // stopAudio silenced it; drop the stale handle
-    lastTsRef.current = null;      // paused time must not count toward the speed ramp
+    // Remember when the pause began so its duration can be excluded from the
+    // level clock on resume (paused time must not count toward the ramp).
+    if (mic.current?.audioCtx) pauseStartRef.current = mic.current.audioCtx.currentTime;
     if (levelUpTimerRef.current) { clearTimeout(levelUpTimerRef.current); levelUpTimerRef.current = null; }
     setLevelUp(null);
     setPauseReason(reason);
@@ -427,11 +704,18 @@ export default function PracticeGame({ cfg }) {
   const resume = () => {
     const tl = timelineRef.current;
     if (!tl) return;
+    // Exclude the paused span from the level clock: push its anchor forward by
+    // how long we were paused, so a pause doesn't advance the ramp.
+    if (levelClockStartRef.current != null && pauseStartRef.current != null && mic.current?.audioCtx) {
+      levelClockStartRef.current += mic.current.audioCtx.currentTime - pauseStartRef.current;
+    }
+    pauseStartRef.current = null;
     const i = Math.min(nextToScoreRef.current, tl.windows.length - 1);
     // Restart at the top of the first unscored window with a fresh count-in;
     // its partial evidence is discarded (completed windows keep their scores).
     scorersRef.current[i] = windowScorer(tl.windows[i], cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null);
     cursorRef.current = i;
+    activePosRef.current = i; setActivePos(i);
     silenceSinceRef.current = null;
     lastTsRef.current = null;
     const micNow = mic.current.audioCtx.currentTime;
@@ -525,12 +809,51 @@ export default function PracticeGame({ cfg }) {
     setPhase('done');
   };
 
-  // Level up: rebuild the timeline at the next level's tempo, keep all
-  // already-scored windows, hold the game behind a giant 5-second "Good luck!"
-  // interlude, then resume (with its own count-in) at the new tempo from the
-  // first unscored window.
+  // Level up: rebuild the timeline for the next level, hold the game behind a
+  // 5-second interlude popup, then resume with its own count-in. Songs climb the
+  // 20-step speed ladder; drills climb a tier×speed ladder (3 speed steps, then
+  // harder chords and speed resets — see nextDrillLevel/buildDrillLevel).
   const speedUp = () => {
     if (!timelineRef.current || phaseRef.current !== 'playing' || !song) return;
+    const item = lastItemRef.current;
+
+    if (item?.isDrill) {
+      // Drill ramp: advance tier/speed-step. Null → already at the hardest tier's
+      // top speed, so stay put (the run continues at max, then finishes).
+      const nx = nextDrillLevel(item, drillTierRef.current, drillStepRef.current);
+      if (!nx) return;
+      const built = buildDrillLevel(item, nx.tier, nx.step);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      stopAudio();
+      metroStopRef.current = null;
+      // A new tier is a fresh pair sequence — replace the timeline and scorers,
+      // and restart scoring from the top of the new set.
+      const tl = built.timeline;
+      timelineRef.current = tl;
+      scorersRef.current = tl.windows.map((w, i) =>
+        windowScorer(w, cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null));
+      cursorRef.current = 0;
+      nextToScoreRef.current = 0;
+      activePosRef.current = 0; setActivePos(0);
+      drillTierRef.current = nx.tier;
+      drillStepRef.current = nx.step;
+      levelRef.current += 1;
+      setLevel(levelRef.current);
+      setSpeed(built.speed);
+      speedRef.current = built.speed;
+      levelClockStartRef.current = null;
+      setLevelUp(buildDrillLevelUpMsg(levelRef.current, built));
+      levelUpTimerRef.current = setTimeout(() => {
+        levelUpTimerRef.current = null;
+        setLevelUp(null);
+        setRampMsg({ level: levelRef.current, pct: Math.round(built.speed * 100) });
+        setTimeout(() => setRampMsg(null), 4000);
+        resumeRef.current?.();
+      }, 5000);
+      return;
+    }
+
     if (levelRef.current >= MAX_LEVEL) return;
     const nextLevel = levelRef.current + 1;
     const next = speedForLevel(nextLevel);
@@ -547,21 +870,47 @@ export default function PracticeGame({ cfg }) {
     setLevel(nextLevel);
     setSpeed(next);
     speedRef.current = next;
-    const msg = { level: nextLevel, pct: Math.round(next * 100) };
-    setLevelUp(msg);
+    levelClockStartRef.current = null;   // next level's minute re-anchors after its count-in
+    setLevelUp(buildLevelUpMsg(nextLevel, next, tl, nextToScoreRef.current));
     levelUpTimerRef.current = setTimeout(() => {
       levelUpTimerRef.current = null;
       setLevelUp(null);
-      setRampMsg(msg);
+      setRampMsg({ level: nextLevel, pct: Math.round(next * 100) });
       setTimeout(() => setRampMsg(null), 4000);
       resumeRef.current?.();
     }, 5000);
+  };
+
+  // Loop the current drill tier: re-anchor the clock to the top of the sequence
+  // and rebuild the scorers, WITHOUT resetting the level clock — the ramp keeps
+  // counting toward the next level while the pairs repeat. No count-in (a
+  // continuous groove), so the loop is seamless.
+  const loopDrill = () => {
+    const tl = timelineRef.current;
+    if (!tl) return;
+    for (let i = 0; i < tl.windows.length; i++) {
+      scorersRef.current[i] = windowScorer(tl.windows[i], cfgRef.current, i > 0 ? tl.windows[i - 1].pcs : null);
+    }
+    cursorRef.current = 0;
+    nextToScoreRef.current = 0;
+    activePosRef.current = 0; setActivePos(0);
+    silenceSinceRef.current = null;
+    const micNow = mic.current.audioCtx.currentTime;
+    t0Ref.current = micNow;   // songSec restarts at 0 → sequence replays from the top
+    scheduleSolos(tl, micNow, 0);
+    if (metronomeOn) {
+      metroStopRef.current = playMetronome(totalBeatsOf(tl.windows), tl.meta.spb, {
+        startInSec: t0Ref.current - mic.current.audioCtx.currentTime,
+      });
+    }
+    // The rAF loop self-schedules at the top of each frame, so no reschedule here.
   };
 
   pauseRef.current = pause;
   finishRef.current = finish;
   resumeRef.current = resume;
   speedUpRef.current = speedUp;
+  loopDrillRef.current = loopDrill;
 
   const quitToSelect = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -573,6 +922,24 @@ export default function PracticeGame({ cfg }) {
     setPhase('select');
   };
 
+  // Save the drill just practiced (its ranked chord-change pairs) into the
+  // player's "My saved changes" set, so weak transitions can be re-drilled and
+  // tracked. Available on the results screen after a drill run.
+  const saveDrillToPractice = () => {
+    const drill = lastItemRef.current?.drill;
+    if (!drill?.pairs?.length) return;
+    const pairs = drill.pairs.map(p => ({ from: p.from, to: p.to }));
+    // A built-in ladder is always available in its own section; saving it under
+    // the same name would create a phantom duplicate (hidden by the name dedupe),
+    // so give a built-in save a distinct "(my copy)" name.
+    const isBuiltIn = BUILTIN_LADDERS.some(l => l.name.trim().toLowerCase() === (drill.name || '').trim().toLowerCase());
+    const name = isBuiltIn ? `${drill.name} (my copy)` : (drill.name || 'My weak changes');
+    saveDrillSet({ name, pairs, updatedAt: new Date().toISOString() });
+    setDrillSets(loadDrillSets());
+    setSavedMsg(`Saved “${name}” to My saved changes — practice it any time from the Chord changes tab.`);
+    setTimeout(() => setSavedMsg(null), 6000);
+  };
+
   // ── Derived HUD values ──
   const acc = accuracyPct(game);
   const ghostDelta = ghostRef.current && game.resolved > 0
@@ -580,8 +947,56 @@ export default function PracticeGame({ cfg }) {
     : null;
   const lastResult = game.results[game.results.length - 1] || null;
   const tl = timelineRef.current;
-  const activeIdx = game.resolved;
+  // Which window is playing NOW = the next one to be scored. game.resolved is a
+  // CUMULATIVE count (it keeps climbing across drill loops and level-up timeline
+  // rebuilds), so it can't index the current windows array. activePos mirrors
+  // nextToScoreRef — the true position within the *current* sequence — and is
+  // clamped to the array so the Now/Next preview and lane never point at a stale
+  // chord.
+  const activeIdx = Math.min(activePos, (tl?.windows.length || 1) - 1);
+  // Results accumulate across loops/tiers; to color the CURRENT loop's cells,
+  // index results by loopBase + windowIndex (loopBase = whole loops completed ×
+  // window count). Otherwise the lane shows stale results from a prior loop.
+  const winCount = tl?.windows.length || 0;
+  const loopBase = winCount ? game.resolved - (game.resolved % winCount) : 0;
+  const resultAt = (i) => game.results[loopBase + i] || null;
   const hasLyrics = !!tl?.windows.some(w => w.lyric);
+
+  // ── The two on-screen play indicators: SPEED and CHORD DIFFICULTY ──
+  // Speed: current tempo as a % (10–200% songs; 60–100% drills) and a 0..1 fill.
+  const speedPct = Math.round(speed * 100);
+  const speedFill = Math.min(1, speed / 2);   // 200% = full bar
+  const speedLabel = speedPct <= 50 ? 'Slow' : speedPct < 100 ? 'Steady' : speedPct <= 130 ? 'Fast' : 'Blazing';
+
+  // Chord difficulty: for a drill it's the current chord tier (1..tiers) and the
+  // hardest change score in that tier; for a song it's the hardest chord in the
+  // run (personalized). Both map to a 0..1 fill and a short label.
+  const isDrillRun = !!lastItemRef.current?.isDrill;
+  let diffFill, diffMain, diffSub, diffScore;
+  if (isDrillRun) {
+    const tiers = lastItemRef.current.tiers || 1;
+    const tierNo = drillTierRef.current + 1;
+    const activePairs = (lastItemRef.current.drill?.pairs || []).slice(); // ranked easy→hard
+    // Hardest change score reachable at this tier ≈ the tier's top pair score.
+    const perTier = lastItemRef.current.perTier || 1;
+    const ceilingIdx = Math.min(activePairs.length - 1, perTier * tierNo - 1);
+    diffScore = activePairs[ceilingIdx]?.score ?? null;
+    diffFill = tiers > 1 ? (tierNo - 1) / (tiers - 1) : 1;
+    diffMain = `Tier ${tierNo}/${tiers}`;
+    diffSub = diffScore != null ? `changes up to ${diffScore.toFixed(1)}/10` : 'chord changes';
+  } else {
+    let hardest = 0;
+    for (const w of (tl?.windows || [])) {
+      if (w.kind === 'solo') continue;
+      const v = w.notes?.length ? personalDifficulty(calcDifficulty(w.notes), profile) : 0;
+      if (v > hardest) hardest = v;
+    }
+    diffScore = hardest || null;
+    diffFill = Math.min(1, hardest / 10);
+    diffMain = hardest ? `${hardest.toFixed(1)}/10` : '—';
+    diffSub = 'hardest chord';
+  }
+  const diffColor = diffFill >= 0.8 ? 'var(--color-danger)' : diffFill >= 0.6 ? 'var(--color-warning)' : diffFill >= 0.4 ? '#eab308' : 'var(--color-success)';
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -597,20 +1012,98 @@ export default function PracticeGame({ cfg }) {
         @keyframes pgLuckFloat { 0%{transform:translateY(14px) scale(0.92); opacity:0} 12%{transform:translateY(0) scale(1); opacity:1} 100%{transform:translateY(-10px) scale(1.02); opacity:1} }
       `}</style>
 
-      {/* ══ LEVEL-UP INTERLUDE — giant 5s "Good luck!" while the game holds ══ */}
+      {/* ══ LEVEL-UP INTERLUDE — 5s "what's in this level" card while the game holds ══ */}
       {levelUp != null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(8,8,6,0.85)', backdropFilter: 'blur(5px)' }}>
-          <div className="text-center px-6" style={{ animation: 'pgLuckFloat 5s ease-out forwards' }}>
-            <p className="text-2xl sm:text-3xl font-bold mb-3" style={{ color: 'var(--color-success)' }}>
-              ⏫ Level {levelUp.level} — {levelUp.pct}% speed
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(8,8,6,0.88)', backdropFilter: 'blur(5px)' }}>
+          <div className="w-full max-w-md rounded-2xl p-6 text-center"
+            style={{ background: 'var(--color-surface-800)', border: '1px solid var(--color-surface-600)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)', animation: 'pgPop 0.4s ease' }}>
+            <p className="text-4xl sm:text-5xl font-black leading-tight mb-1"
+              style={{ color: 'var(--color-brand)', textShadow: '0 0 40px rgba(201,169,110,0.4)' }}>
+              ⏫ Level {levelUp.level}
             </p>
-            <p className="text-6xl sm:text-8xl font-black leading-tight"
-              style={{ color: 'var(--color-brand)', textShadow: '0 0 60px rgba(201,169,110,0.45)', animation: 'pgPulse 1.4s ease-in-out infinite' }}>
+            <p className="text-xs uppercase tracking-widest font-semibold mb-4" style={{ color: 'var(--color-success)' }}>
+              {levelUp.isDrill
+                ? (levelUp.tierAdvanced ? 'Harder chords unlocked!' : 'Level up — faster!')
+                : 'Level up! Here’s what changes'}
+            </p>
+
+            {/* What this level contains */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="rounded-xl py-2" style={{ background: 'var(--color-surface-750)' }}>
+                <div className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{levelUp.pct}%</div>
+                <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>speed</div>
+              </div>
+              {levelUp.isDrill ? (
+                <div className="rounded-xl py-2" style={{ background: 'var(--color-surface-750)' }}>
+                  <div className="text-lg font-black tabular-nums" style={{ color: levelUp.tierAdvanced ? 'var(--color-success)' : 'var(--color-ink)' }}>
+                    {levelUp.tier}<span className="text-xs opacity-70">/{levelUp.tiers}</span>
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>chord tier</div>
+                </div>
+              ) : (
+                <div className="rounded-xl py-2" style={{ background: 'var(--color-surface-750)' }}>
+                  <div className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{levelUp.bpm}</div>
+                  <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>bpm</div>
+                </div>
+              )}
+              <div className="rounded-xl py-2" style={{ background: 'var(--color-surface-750)' }}>
+                <div className="text-lg font-black tabular-nums" style={{ color: 'var(--color-brand)' }}>×{(levelUp.speedBonusPct / 100).toFixed(1)}</div>
+                <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>score bonus</div>
+              </div>
+            </div>
+
+            {/* DRILL: the chord changes now in play (hardest last, new ones flagged) */}
+            {levelUp.isDrill && levelUp.pairs?.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: 'var(--color-ink-ghost)' }}>
+                  Changes in play
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {levelUp.pairs.map((p, k) => (
+                    <span key={k} className="text-xs font-mono font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
+                      style={p.isNew
+                        ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
+                        : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
+                      <ChordTip name={p.from}><span className="cursor-default">{p.from}</span></ChordTip>
+                      <span style={{ opacity: 0.7 }}>→</span>
+                      <ChordTip name={p.to}><span className="cursor-default">{p.to}</span></ChordTip>
+                      {p.isNew && <span className="text-[9px]">NEW</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* SONG: chords coming up in the rest of this run — new ones highlighted */}
+            {!levelUp.isDrill && levelUp.upcoming?.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: 'var(--color-ink-ghost)' }}>
+                  Chords coming up
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {levelUp.upcoming.map((c, k) => (
+                    <ChordTip key={k} name={c.name}>
+                      <span className="text-sm font-mono font-bold px-2 py-1 rounded-lg cursor-default inline-flex items-center gap-1"
+                        style={c.isNew
+                          ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
+                          : { background: 'var(--color-surface-750)', color: 'var(--color-ink-subtle)' }}>
+                        {c.name}{c.isNew && <span className="text-[9px] font-semibold">NEW</span>}
+                      </span>
+                    </ChordTip>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p className="text-6xl font-black leading-tight mb-2"
+              style={{ color: 'var(--color-brand)', animation: 'pgPulse 1.4s ease-in-out infinite' }}>
               Good luck! 🍀
             </p>
-            <p className="text-sm mt-4" style={{ color: 'var(--color-ink-muted)' }}>
-              Take a breath — the count-in starts in a moment…
+            <p className="text-xs" style={{ color: 'var(--color-ink-muted)' }}>
+              {levelUp.isDrill && levelUp.tierAdvanced
+                ? 'Harder changes now — the count-in starts in a moment…'
+                : 'Faster now — the count-in starts in a moment…'}
             </p>
           </div>
         </div>
@@ -628,7 +1121,7 @@ export default function PracticeGame({ cfg }) {
                   {DIFFICULTIES.map(d => (
                     <button key={d.id} onClick={() => setSpeed(d.speed)}
                       className="text-xs px-2.5 py-1.5 rounded-lg font-semibold"
-                      title={`Starts at level ${levelForSpeed(d.speed)} of ${MAX_LEVEL} (${Math.round(d.speed * 100)}% tempo); +10% every 2 minutes, up to 200%`}
+                      title={`Starts at level ${levelForSpeed(d.speed)} of ${MAX_LEVEL} (${Math.round(d.speed * 100)}% tempo); +10% ${RAMP_LABEL}, up to 200%`}
                       style={speed === d.speed
                         ? { background: 'rgba(201,169,110,0.18)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.4)' }
                         : { background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
@@ -665,13 +1158,31 @@ export default function PracticeGame({ cfg }) {
             <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
               Chords scroll in time — play each one on your guitar and the mic scores how well you match.
               {' '}The ladder has <strong>{MAX_LEVEL} levels</strong> from 10% to 200% tempo (+10% each). You start at
-              {' '}<strong>level {levelForSpeed(speed)}</strong> ({Math.round(speed * 100)}%); every 2 minutes of playing climbs one level,
+              {' '}<strong>level {levelForSpeed(speed)}</strong> ({Math.round(speed * 100)}%); <strong>{RAMP_LABEL}</strong> of playing climbs one level,
               {' '}ending at <strong>level {MAX_LEVEL} — double tempo</strong>. Faster levels earn a bigger score multiplier.
+              {' '}Your <strong>highest level is saved</strong> per song — next time you pick up where you left off.
               {drumsOn && <span style={{ color: 'var(--color-warning)' }}> Headphones recommended with drums on.</span>}
             </p>
             {permDenied && <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>Microphone access denied — the game needs the mic to hear you play.</p>}
           </div>
 
+          {/* Source toggle: practice a whole SONG, or drill CHORD CHANGES */}
+          <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-800)' }}>
+            {[
+              { id: 'songs',  icon: '🎵', label: 'Songs' },
+              { id: 'drills', icon: '⇄',  label: 'Chord changes' },
+            ].map(s => (
+              <button key={s.id} onClick={() => setSource(s.id)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
+                style={source === s.id
+                  ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }
+                  : { color: 'var(--color-ink-faint)' }}>
+                <span>{s.icon}</span><span>{s.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {source === 'songs' && (<>
           <div className="flex items-center gap-2">
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search songs…"
               className="flex-1 text-sm rounded-lg px-3 py-2 outline-none"
@@ -702,6 +1213,13 @@ export default function PracticeGame({ cfg }) {
                     )}
                     {item.last && !item.best && <span>Last {Math.round(item.last.accuracy)}%</span>}
                     {!item.last && <span style={{ color: 'var(--color-surface-550)' }}>Never played</span>}
+                    {item.reached > levelForSpeed(speed) && (
+                      <span className="px-1.5 py-0.5 rounded font-semibold"
+                        style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--color-accent)' }}
+                        title={`You reached level ${item.reached} — this run resumes there`}>
+                        ↩ resumes L{item.reached}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {item.spark.length > 1 && (
@@ -729,6 +1247,17 @@ export default function PracticeGame({ cfg }) {
               </div>
             )}
           </div>
+          </>)}
+
+          {source === 'drills' && (
+            <DrillPicker
+              drillItems={drillItems}
+              savedMsg={savedMsg}
+              onPlay={start}
+              onDeleteSet={(id) => { setDrillSets(deleteDrillSet(id)); }}
+              histTick={histTick}
+            />
+          )}
         </>
       )}
 
@@ -757,7 +1286,7 @@ export default function PracticeGame({ cfg }) {
             {rampMsg && (
               <span className="text-xs px-2 py-1 rounded-lg font-bold"
                 style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--color-success)', animation: 'pgPop 0.5s ease' }}>
-                ⏫ Level {rampMsg.level} — {rampMsg.pct}%
+                {rampMsg.resumed ? '↩ Resumed at' : '⏫'} Level {rampMsg.level} — {rampMsg.pct}%
               </span>
             )}
             <button onClick={toggleMetronome}
@@ -793,12 +1322,35 @@ export default function PracticeGame({ cfg }) {
               <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Accuracy</span>
               <span className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>{game.resolved ? `${Math.round(acc)}%` : '—'}</span>
             </div>
+            {lastItemRef.current?.isDrill ? (
+              <div>
+                <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Chord tier</span>
+                <span className="text-lg font-black tabular-nums px-1.5 rounded"
+                  style={{ color: 'var(--color-surface-base)', background: 'var(--color-accent)' }}>
+                  {drillTierRef.current + 1}<span className="text-xs font-bold opacity-80">/{lastItemRef.current.tiers}</span>
+                </span>
+                <span className="text-[11px] ml-1.5 tabular-nums" style={{ color: 'var(--color-ink-faint)' }}>
+                  {Math.round(speed * 100)}% · step {drillStepRef.current + 1}/{SPEED_STEPS.length}
+                </span>
+              </div>
+            ) : (
+              <div>
+                <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>Level</span>
+                <span className="text-lg font-black tabular-nums px-1.5 rounded"
+                  style={{ color: 'var(--color-surface-base)', background: level >= MAX_LEVEL ? 'var(--color-brand)' : 'var(--color-accent)' }}>
+                  {level}<span className="text-xs font-bold opacity-80">/{MAX_LEVEL}</span>
+                </span>
+                <span className="text-[11px] ml-1.5 tabular-nums" style={{ color: 'var(--color-ink-faint)' }}>{Math.round(speed * 100)}%</span>
+              </div>
+            )}
             <div>
               <span className="text-[10px] uppercase tracking-widest font-semibold block" style={{ color: 'var(--color-ink-ghost)' }}>
-                Level {level}/{MAX_LEVEL} · {Math.round(speed * 100)}%
+                {(lastItemRef.current?.isDrill
+                  ? (drillTierRef.current >= lastItemRef.current.tiers - 1 && drillStepRef.current >= SPEED_STEPS.length - 1)
+                  : level >= MAX_LEVEL) ? 'Top level' : 'Next level in'}
               </span>
-              <span className="text-lg font-black tabular-nums" style={{ color: level >= MAX_LEVEL ? 'var(--color-brand)' : 'var(--color-ink)' }}>
-                ⏱ <span ref={levelClockRef}>2:00</span>
+              <span className="text-lg font-black tabular-nums" style={{ color: 'var(--color-ink)' }}>
+                ⏱ <span ref={levelClockRef}>{`${Math.floor(RAMP_EVERY_SEC / 60)}:${String(RAMP_EVERY_SEC % 60).padStart(2, '0')}`}</span>
               </span>
             </div>
             {ghostDelta != null && (
@@ -820,7 +1372,39 @@ export default function PracticeGame({ cfg }) {
             </div>
           </div>
 
-          {/* Level ladder — one cell per stage with its tempo percentage */}
+          {/* ── Two always-on play indicators: SPEED and CHORD DIFFICULTY ── */}
+          <div className="grid grid-cols-2 gap-2">
+            {/* Speed */}
+            <div className="rounded-xl px-3 py-2" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>⏩ Speed</span>
+                <span className="text-sm font-black tabular-nums" style={{ color: 'var(--color-brand)' }}>
+                  {speedPct}% <span className="text-[10px] font-semibold" style={{ color: 'var(--color-ink-faint)' }}>{speedLabel}</span>
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
+                <div className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${speedFill * 100}%`, background: 'var(--color-brand)' }} />
+              </div>
+            </div>
+            {/* Chord difficulty */}
+            <div className="rounded-xl px-3 py-2" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>✋ Chord difficulty</span>
+                <span className="text-sm font-black tabular-nums" style={{ color: diffColor }}>
+                  {diffMain} <span className="text-[10px] font-semibold" style={{ color: 'var(--color-ink-faint)' }}>{diffSub}</span>
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
+                <div className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${diffFill * 100}%`, background: diffColor }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Level ladder — one cell per stage with its tempo percentage (songs only;
+              drills show the tier×speed indicators above instead of a 20-step ladder) */}
+          {!isDrillRun && (
           <div className="flex gap-0.5">
             {Array.from({ length: MAX_LEVEL }, (_, i) => {
               const lv = i + 1;
@@ -842,6 +1426,7 @@ export default function PracticeGame({ cfg }) {
               );
             })}
           </div>
+          )}
 
           {/* Lane — styled as a realistic rosewood neck: warm wood gradient,
               horizontal steel strings, and metallic fret wires. Purely visual;
@@ -879,7 +1464,11 @@ export default function PracticeGame({ cfg }) {
             {/* conveyor track */}
             <div ref={laneTrackRef} className="absolute top-0 bottom-0 left-0" style={{ willChange: 'transform' }}>
               {tl.windows.map((w, i) => {
-                const res = game.results[i];
+                // Only PAST cells (behind the playhead this loop) show a scored
+                // result / dim. Upcoming cells always read as fresh, glossy
+                // markers — even if a stale result from a previous loop exists for
+                // that array index — so nothing ahead ever looks "disabled".
+                const res = i < activeIdx ? resultAt(i) : null;
                 const isActive = i === activeIdx && phase === 'playing';
                 const isSolo = w.kind === 'solo';
                 // Beat-based geometry: solo notes are narrow (1 beat), chords a
@@ -1273,18 +1862,35 @@ export default function PracticeGame({ cfg }) {
             </div>
           )}
 
-          <div className="flex gap-2">
-            <button onClick={() => { const item = songItems.find(x => x.key === songKeyOf(song || {})); if (item) start(item); }}
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => {
+              // Replay the exact item just played (works for drills, which aren't
+              // in songItems); fall back to re-finding the song by key.
+              const item = lastItemRef.current || songItems.find(x => x.key === songKeyOf(song || {}));
+              if (item) start(item);
+            }}
               className="text-sm font-bold px-5 py-2.5 rounded-xl"
               style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
               ▶ Play again
             </button>
+            {/* Drill run → let the player keep these changes to grind later.
+                (A saved set has setId; a built-in ladder doesn't — offer to save it.) */}
+            {lastItemRef.current?.isDrill && !lastItemRef.current?.setId && (
+              <button onClick={saveDrillToPractice}
+                className="text-sm font-semibold px-5 py-2.5 rounded-xl"
+                style={{ background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }}>
+                ⇄ Save these changes to practice
+              </button>
+            )}
             <button onClick={quitToSelect}
               className="text-sm font-semibold px-5 py-2.5 rounded-xl"
               style={{ background: 'var(--color-surface-750)', color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
-              Songs
+              {lastItemRef.current?.isDrill ? 'Back' : 'Songs'}
             </button>
           </div>
+          {savedMsg && (
+            <p className="text-xs mt-2" style={{ color: 'var(--color-success)' }}>{savedMsg}</p>
+          )}
         </>
       )}
     </div>

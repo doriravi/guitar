@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
-import { fingerGapUsage, GAP_REF_MAX, transitionDifficulty } from '../lib/fretboard';
+import { fingerGapUsage, GAP_REF_MAX, transitionDifficulty, scoreTransition } from '../lib/fretboard';
 import { DEFAULT_PROFILE } from '../lib/handProfile';
 import { suggestEasierProgression } from '../lib/substitutions';
 import { suggestUpperProgression } from '../lib/upperVoicings';
@@ -116,6 +116,86 @@ function TransitionBadge({ fromName, toName, score, tr }) {
         style={{ color: transitionColor(score) }}>
         {score.toFixed(1)}
       </span>
+    </div>
+  );
+}
+
+// ─── Transition strip (per-CHANGE difficulty across a whole progression) ───────
+//
+// Given a progression's chord names (e.g. G-C-D), score each ADJACENT change
+// with the hand-aware scoreTransition() and lay them out inline: chord · score ·
+// chord · score · … Every chord name shows its shape on hover (ChordTip), per
+// the CLAUDE.md hover-shape rule. Personalized to the active hand profile.
+
+function TransitionStrip({ chordNames, profile }) {
+  const items = useMemo(() => {
+    // Resolve each name to its easiest catalogued voicing; a name with no shape
+    // on file (returns []) can't be scored, so its adjacent changes are skipped.
+    const voicings = chordNames.map(name => ({
+      name,
+      voicing: lookupVoicings(name).slice().sort((a, b) => a.score - b.score)[0] || null,
+    }));
+    const transitions = [];
+    for (let i = 0; i < voicings.length - 1; i++) {
+      const from = voicings[i], to = voicings[i + 1];
+      const score = (from.voicing && to.voicing)
+        ? scoreTransition(from.voicing, to.voicing, profile)
+        : null;
+      transitions.push({ from, to, score });
+    }
+    return { voicings, transitions };
+  }, [chordNames, profile]);
+
+  if (items.voicings.length < 2) return null;
+
+  const hardest = items.transitions.reduce(
+    (m, t) => (t.score != null && t.score > (m?.score ?? -1) ? t : m), null);
+
+  return (
+    <div className="px-3 sm:px-4 py-3"
+      style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+      <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>
+        Chord-change difficulty
+      </div>
+
+      <div className="flex flex-wrap items-center gap-y-2 font-mono">
+        {items.voicings.map((c, i) => (
+          <span key={i} className="flex items-center">
+            <ChordTip name={c.name}>
+              <span className="text-sm font-semibold px-1 cursor-default"
+                style={{ color: c.voicing ? 'var(--color-ink)' : 'var(--color-danger)' }}>
+                {c.name}
+              </span>
+            </ChordTip>
+            {i < items.transitions.length && (() => {
+              const t = items.transitions[i];
+              if (t.score == null) {
+                return <span className="text-[10px] px-1.5" style={{ color: 'var(--color-ink-ghost)' }}>→</span>;
+              }
+              return (
+                <span className="flex flex-col items-center px-1.5 select-none"
+                  title={`Change ${t.from.name} → ${t.to.name}: ${t.score.toFixed(1)}/10`}>
+                  <span className="text-[10px] leading-none" style={{ color: 'var(--color-ink-ghost)' }}>→</span>
+                  <span className="text-[11px] font-bold tabular-nums leading-tight"
+                    style={{ color: transitionColor(t.score) }}>
+                    {t.score.toFixed(1)}
+                  </span>
+                </span>
+              );
+            })()}
+          </span>
+        ))}
+      </div>
+
+      {hardest?.score != null && (
+        <div className="text-[11px] mt-2" style={{ color: 'var(--color-ink-faint)' }}>
+          Hardest change:{' '}
+          <span className="font-semibold" style={{ color: transitionColor(hardest.score) }}>
+            {hardest.from.name} → {hardest.to.name} ({hardest.score.toFixed(1)}/10)
+          </span>
+          <span style={{ color: 'var(--color-ink-ghost)' }}> · personalized to your hand</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1417,6 +1497,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const [openEasier,  setOpenEasier]  = useState(new Set()); // Set of card keys
   const [openUpper,   setOpenUpper]   = useState(new Set()); // Set of card keys
   const [openTriad,   setOpenTriad]   = useState(new Set()); // Set of card keys
+  const [openChanges, setOpenChanges] = useState(new Set()); // Set of card keys
   // User-imported songs (localStorage) folded into the song matching, so a song
   // you import shows up under its progression + key like the built-ins.
   const [customSongs, setCustomSongs] = useState(loadCustomSongs);
@@ -1451,6 +1532,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
     setOpenEasier(new Set());
     setOpenUpper(new Set());
     setOpenTriad(new Set());
+    setOpenChanges(new Set());
     const roots  = allRoots   ? ROOT_NOTES         : [root];
     const scales = bothScales ? ['major', 'minor'] : [scaleType];
     const all = [];
@@ -1534,6 +1616,14 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
 
   const toggleTriad = useCallback((key) => {
     setOpenTriad(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleChanges = useCallback((key) => {
+    setOpenChanges(prev => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
@@ -1692,6 +1782,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           const easierOpen  = openEasier.has(key) || limitToReach;
           const upperOpen   = openUpper.has(key);
           const triadOpen   = openTriad.has(key);
+          const changesOpen = openChanges.has(key);
           const songCount   = songCounts.get(key) ?? 0;
 
           return (
@@ -1739,6 +1830,18 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                       : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
                   >
                     ▲ up the neck
+                  </button>
+
+                  <button
+                    onClick={() => toggleChanges(key)}
+                    title="Score how hard it is to SWITCH between each pair of chords, personalized to your hand"
+                    data-explain="The changes button scores how hard it is to switch between each pair of chords in the progression — the real difficulty of playing it, personalized to your hand."
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
+                    style={changesOpen
+                      ? { background: 'rgba(99,102,241,0.14)', color: 'var(--color-accent)' }
+                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
+                  >
+                    ⇄ changes
                   </button>
 
                   <button
@@ -1833,6 +1936,15 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   );
                 })}
               </div>
+
+              {/* Chord-change difficulty strip (collapsible) — per-transition
+                  scores across the whole progression, personalized to the hand. */}
+              {changesOpen && (
+                <TransitionStrip
+                  chordNames={prog.chords.map(c => c.chordName)}
+                  profile={activeProfile}
+                />
+              )}
 
               {/* Easier-alternatives panel (collapsible) */}
               {easierOpen && (

@@ -430,3 +430,13 @@ export function ghostForSong(songKey, speed) {
     s => s.completed && (s.startSpeed ?? s.speed) === speed && Array.isArray(s.scoreTimeline) && s.scoreTimeline.length,
   ) || null;
 }
+
+/** The highest level the player has ever reached on this song (0 if never
+ *  played). Derived from saved sessions — each records the `level` it ended on,
+ *  and saveSession only stores meaningful runs (≥3 resolved windows) — so the
+ *  next run can resume where they left off instead of restarting at level 1. */
+export function reachedLevelForSong(songKey) {
+  return sessionsForSong(songKey)
+    .filter(s => typeof s.level === 'number')
+    .reduce((max, s) => Math.max(max, s.level), 0);
+}
