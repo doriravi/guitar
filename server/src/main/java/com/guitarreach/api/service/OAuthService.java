@@ -3,11 +3,9 @@ package com.guitarreach.api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guitarreach.api.dto.response.AuthResponse;
-import com.guitarreach.api.entity.HandProfile;
 import com.guitarreach.api.entity.User;
 import com.guitarreach.api.exception.ProviderNotConfiguredException;
 import com.guitarreach.api.exception.UnauthorizedException;
-import com.guitarreach.api.repository.HandProfileRepository;
 import com.guitarreach.api.repository.UserRepository;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +36,6 @@ import java.util.Optional;
 public class OAuthService {
 
     private final UserRepository userRepository;
-    private final HandProfileRepository handProfileRepository;
     private final AuthService authService;
 
     @Value("${oauth.google.client-id:}")
@@ -204,9 +201,10 @@ public class OAuthService {
                 .build();
         user = userRepository.save(user);
 
-        // Default hand profile, matching local registration.
-        HandProfile profile = HandProfile.builder().user(user).build();
-        handProfileRepository.save(profile);
+        // Do NOT pre-create a hand profile (matching local registration). A
+        // first-time OAuth account must go through the mandatory hand-measurement
+        // onboarding, which the frontend gates on the absence of a saved profile.
+        // The row is created the first time the user saves a real measurement.
 
         return user;
     }

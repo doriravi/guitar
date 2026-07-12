@@ -117,7 +117,7 @@ function InstallMenuItem({ tr, onClose }) {
 
 function getTabs(tr) {
   return [
-    { id: 'start',        label: tr.tabStart || 'Start',  icon: '🚀' },
+    { id: 'start',        label: tr.tabStart || 'Start',  icon: '🚀', side: true },
     { id: 'hand',         label: tr.tabHand,         icon: '✋' },
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
     { id: 'play',         label: tr.tabPlay || 'Play',        icon: '🎸', side: true },
@@ -128,7 +128,7 @@ function getTabs(tr) {
     { id: 'micpractice',  label: tr.tabMicPractice || 'Practice',  icon: '🎸', side: true },
     { id: 'mictune',      label: tr.tabMicTune || 'Mic Tune',      icon: '⚙️', side: true },
     { id: 'listen',       label: tr.tabPlayAlong || 'Play-Along',  icon: '🎮' },
-    { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼' },
+    { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼', side: true },
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
     { id: 'import',       label: tr.tabImport || 'Import', icon: '📋' },
@@ -282,20 +282,27 @@ export default function App() {
       return false;
     }
     const remote = await handProfileApi.get().catch(() => null);
-    if (remote && !isDefaultProfile(remote)) {
-      // Server has a real profile — always use it as source of truth
+    // A profile counts as "really measured" ONLY if the server saved it — i.e.
+    // it carries an `updatedAt` stamp (set on save via @UpdateTimestamp). A
+    // brand-new account (incl. first Google/OAuth login) gets a fabricated
+    // default row back from the API with no `updatedAt`; its numbers differ from
+    // the frontend DEFAULT_PROFILE, so an `isDefaultProfile` check would wrongly
+    // treat it as real and skip onboarding. `updatedAt` is the reliable signal.
+    if (remote && remote.updatedAt) {
+      // Server has a real, saved profile — always use it as source of truth
       const merged = { ...DEFAULT_PROFILE, ...remote };
       setHandProfile(merged);
       try { localStorage.setItem('guitar_hand_profile', JSON.stringify(merged)); } catch {}
       return true;
     } else {
-      // Returning login with only defaults server-side — push a customised
-      // guest profile if one exists locally.
-      const local = loadLocalProfile();
-      if (!isDefaultProfile(local)) {
-        await handProfileApi.save(local).catch(() => {});
-        return true;
-      }
+      // No real profile on the server for this account. Do NOT trust a leftover
+      // local profile to skip onboarding — it may belong to a since-deleted
+      // account (a re-registered user with the same email, or a delete done
+      // outside this browser). The account itself has never measured a hand, so
+      // it must go through the mandatory measurement. Clear the stale local copy
+      // so the difficulty scores start from defaults during onboarding.
+      try { localStorage.removeItem('guitar_hand_profile'); } catch {}
+      setHandProfile(DEFAULT_PROFILE);
       return false;
     }
   }
@@ -330,11 +337,15 @@ export default function App() {
   }
 
   // Enter the app without an account. Everything stays in this tab's memory
-  // only — start from a clean default profile and persist nothing.
+  // only — start from a clean default profile and persist nothing. Guests still
+  // go through the mandatory hand-measurement onboarding first (same as a new
+  // account): the profile drives every difficulty score, so we must measure it
+  // before showing the app — the measurement just lives in memory for guests.
   function enterGuestMode() {
     setHandProfile(DEFAULT_PROFILE);
     setGuestMode(true);
     setShowSignIn(false);
+    setNeedsOnboarding(true);
   }
 
   // Leave guest mode to sign in / create an account (from the persistent notice).

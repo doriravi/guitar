@@ -3,10 +3,8 @@ package com.guitarreach.api.service;
 import com.guitarreach.api.dto.request.LoginRequest;
 import com.guitarreach.api.dto.request.RegisterRequest;
 import com.guitarreach.api.dto.response.AuthResponse;
-import com.guitarreach.api.entity.HandProfile;
 import com.guitarreach.api.entity.User;
 import com.guitarreach.api.exception.DuplicateEmailException;
-import com.guitarreach.api.repository.HandProfileRepository;
 import com.guitarreach.api.repository.UserRepository;
 import com.guitarreach.api.security.JwtTokenProvider;
 import jakarta.servlet.http.HttpServletResponse;
@@ -29,7 +27,6 @@ public class AuthService {
             java.util.Set.of("en", "es", "zh", "hi", "ar", "pt", "fr", "de", "ja", "ko");
 
     private final UserRepository userRepository;
-    private final HandProfileRepository handProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
     private final AuthenticationManager authManager;
@@ -57,9 +54,12 @@ public class AuthService {
         }
         User user = userRepository.save(builder.build());
 
-        // Create default hand profile so the frontend can immediately sync
-        HandProfile profile = HandProfile.builder().user(user).build();
-        handProfileRepository.save(profile);
+        // Do NOT pre-create a hand profile. A brand-new account has genuinely
+        // never measured a hand, and the frontend's mandatory onboarding gate
+        // keys off the ABSENCE of a saved profile (a profile with no updatedAt).
+        // Persisting a placeholder here would give the account a real, stamped
+        // profile and silently skip that measurement step. The row is created
+        // the first time the user saves a real measurement.
 
         // Send email verification (best-effort, don't fail registration if mail is down)
         try { userService.sendVerificationToken(user); } catch (Exception ignored) {}
