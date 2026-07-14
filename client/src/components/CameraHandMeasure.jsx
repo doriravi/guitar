@@ -204,6 +204,14 @@ function stdDev(values) {
 const STABILITY_WINDOW_MS = 500;
 const STABILITY_MAX_SIGMA_CM = 0.05;
 
+// Auto-measure: once the hand sits inside the target frame and stops moving,
+// hold it still for AUTO_HOLD_MS and the measurement fires on its own — no
+// button. AUTO_MOVE_EPS is the per-frame centroid drift (in normalized image
+// units) below which the hand counts as "not moving"; any larger jump resets
+// the hold timer.
+const AUTO_HOLD_MS = 3000;
+const AUTO_MOVE_EPS = 0.012;
+
 /**
  * Moving-window stability gate (upgrade 1.C): the 90th-percentile peak over
  * the *whole* recording buffer can be skewed if the user hesitates or drifts
@@ -545,6 +553,14 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const latestLm  = useRef(null);
   const latestWorld = useRef(null);          // metric world landmarks (meters)
 
+  // Auto-measure "hold still" detector: while the hand is in the target frame
+  // and not moving, we count up how long it's been steady. Once it holds still
+  // for AUTO_HOLD_MS the measurement fires by itself — no button press.
+  const prevCentroidRef = useRef(null);      // {x,y} of last frame's hand centroid (normalized)
+  const holdSinceRef    = useRef(null);       // performance.now() when the current still-hold began
+  const autoTriggeredRef = useRef(false);     // guards against firing twice per session
+  const autoMeasureRef  = useRef(null);       // holds the latest startRecording so onResults can fire it
+
   // Recording-window state (max-stretch over time)
   const recordingRef = useRef(false);        // true while buffering frames
   const buffersRef   = useRef({ thumbToIndex: [], indexToMiddle: [], middleToRing: [], ringToLittle: [] });
@@ -565,12 +581,12 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
   const [phase, setPhase]         = useState('idle');
   const [statusMsg, setStatus]    = useState('');
-  const [countdown, setCountdown] = useState(null);
   const [captured, setCaptured]   = useState(null);
   const [handVisible, setHandVisible] = useState(false);
   const [frameFit, setFrameFit] = useState({ ok: false, reason: 'nohand' }); // hand-in-frame gate
   const frameFitRef = useRef(false);                                          // latest ok, for handlers
   const [rulerActive, setRulerActive] = useState(false); // true when cm ruler is scaled & drawn
+  const [holdProgress, setHoldProgress] = useState(0);    // 0..1 how far through the hold-still auto-measure
   const [livePeaks, setLivePeaks] = useState(null); // { gapKey: cm } running p90 for live bars
   const pendingStreamRef = useRef(null); // stream waiting for video element to mount
 
@@ -627,6 +643,34 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           setFrameFit(fit);
           drawFrame(ctx, W, H, fit.ok);
 
+          // Auto-measure: if the hand is in position and holding still, count up
+          // the steady time; fire the measurement once it's held for AUTO_HOLD_MS.
+          // Only runs before any recording/measure has started this session.
+          if (!recordingRef.current && !autoTriggeredRef.current) {
+            const now = performance.now();
+            // Wrist-anchored centroid — cheap, stable proxy for "did the hand move".
+            const cx = (lm[0].x + lm[MCP.index].x + lm[MCP.pinky].x) / 3;
+            const cy = (lm[0].y + lm[MCP.index].y + lm[MCP.pinky].y) / 3;
+            const prev = prevCentroidRef.current;
+            const moved = prev ? Math.hypot(cx - prev.x, cy - prev.y) : Infinity;
+            prevCentroidRef.current = { x: cx, y: cy };
+
+            if (fit.ok && moved < AUTO_MOVE_EPS) {
+              if (holdSinceRef.current == null) holdSinceRef.current = now;
+              const held = now - holdSinceRef.current;
+              setHoldProgress(Math.min(1, held / AUTO_HOLD_MS));
+              if (held >= AUTO_HOLD_MS) {
+                autoTriggeredRef.current = true;
+                setHoldProgress(0);
+                autoMeasureRef.current?.();   // → startRecording (captures, then freezes)
+              }
+            } else {
+              // Moved, or drifted out of the frame — restart the hold.
+              holdSinceRef.current = null;
+              setHoldProgress(0);   // React bails out if already 0
+            }
+          }
+
           drawHand(ctx, lm, W, H);
 
           // Live cm ruler + average-hand reference, both scaled from the detected
@@ -670,6 +714,10 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           setRulerActive(false);
           frameFitRef.current = false;
           setFrameFit({ ok: false, reason: 'nohand' });
+          // Hand gone — cancel any in-progress auto-measure hold.
+          prevCentroidRef.current = null;
+          holdSinceRef.current = null;
+          setHoldProgress(0);
           // Still draw the empty target frame so the user knows where to aim.
           drawFrame(ctx, W, H, false);
         }
@@ -823,23 +871,10 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     }, 200);
   }, [finalize]);
 
-  const startCountdown = useCallback(() => {
-    // Require the hand to be inside the target frame before approving a measure.
-    if (!handVisible || !frameFitRef.current) return;
-    setPhase('measuring');
-    let n = 3;
-    setCountdown(n);
-    const id = setInterval(() => {
-      n--;
-      if (n <= 0) {
-        clearInterval(id);
-        setCountdown(null);
-        startRecording();
-      } else {
-        setCountdown(n);
-      }
-    }, 1000);
-  }, [handVisible, startRecording]);
+  // Keep the auto-measure trigger pointed at the current startRecording so the
+  // onResults closure (created once in startCamera) can fire the freshest one.
+  useEffect(() => { autoMeasureRef.current = startRecording; }, [startRecording]);
+
 
   // Attach stream to video element once it mounts after phase → 'ready'
   useEffect(() => {
@@ -875,6 +910,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     recordingRef.current = false;
     latestLm.current = null;
     latestWorld.current = null;
+    // Re-arm the hold-still auto-measure for the next attempt.
+    autoTriggeredRef.current = false;
+    prevCentroidRef.current = null;
+    holdSinceRef.current = null;
+    setHoldProgress(0);
   };
 
   const CARD_CORNER_LABELS = [
@@ -910,9 +950,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           <span className="text-base">📷</span>
           <span className="text-sm font-semibold" style={{ color: 'var(--color-ink)' }}>{tr.cameraMeasurement}</span>
         </div>
-        {(phase === 'ready' || phase === 'measuring' || phase === 'recording' || phase === 'card') && (
+        {(phase === 'ready' || phase === 'recording' || phase === 'card') && (
           <button
-            onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); }}
+            onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); autoTriggeredRef.current = false; holdSinceRef.current = null; prevCentroidRef.current = null; setHoldProgress(0); }}
             className="text-xs px-3 py-1 rounded-lg"
             style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
@@ -992,7 +1032,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         </div>
       )}
 
-      {(phase === 'ready' || phase === 'measuring' || phase === 'recording') && (
+      {(phase === 'ready' || phase === 'recording') && (
         <div>
           <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
             <video
@@ -1029,11 +1069,24 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                 {rulerActive ? (tr.rulerLive || 'cm ruler live') : (tr.rulerHint || 'Show your hand to scale the ruler')}
               </div>
             </div>
-            {countdown !== null && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-8xl font-black"
-                  style={{ color: 'var(--color-brand)', textShadow: '0 0 40px rgba(201,169,110,0.9)' }}>
-                  {countdown}
+            {/* Auto-measure "hold still" ring — fills as the hand stays steady. */}
+            {phase === 'ready' && holdProgress > 0 && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                <div className="relative w-28 h-28">
+                  <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                    <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(0,0,0,0.4)" strokeWidth="8" />
+                    <circle cx="50" cy="50" r="44" fill="none" stroke="var(--color-brand)" strokeWidth="8"
+                      strokeLinecap="round" strokeDasharray={2 * Math.PI * 44}
+                      strokeDashoffset={2 * Math.PI * 44 * (1 - holdProgress)} />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-4xl font-black"
+                    style={{ color: 'var(--color-brand)', textShadow: '0 0 20px rgba(201,169,110,0.9)' }}>
+                    {Math.max(1, Math.ceil((1 - holdProgress) * (AUTO_HOLD_MS / 1000)))}
+                  </span>
+                </div>
+                <span className="px-3 py-1.5 rounded-full text-xs font-bold"
+                  style={{ background: 'rgba(0,0,0,0.75)', color: 'var(--color-brand)' }}>
+                  {tr.holdStill || 'Hold still — measuring…'}
                 </span>
               </div>
             )}
@@ -1066,7 +1119,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
             </div>
           )}
 
-          <div className="p-4 flex items-center justify-between gap-4">
+          <div className="p-4">
             <p className="text-xs" style={{ color: (phase === 'ready' && handVisible && !frameFit.ok) ? 'var(--color-brand)' : 'var(--color-ink-faint)' }}>
               {phase === 'recording'
                 ? (tr.keepStretching || 'Keep stretching — capturing your max…')
@@ -1075,19 +1128,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                       ? (tr.frameTooFar || 'Move your hand closer — fill the frame.')
                       : (tr.frameOutside || 'Fit your whole hand inside the frame.'))
                   : cardMode
-                    ? (tr.cardHold || 'Hold a card flat against your hand, both in view, then tap Measure.')
-                    : (frameFit.ok ? (tr.frameGood || 'Perfect — hold still and tap Measure.') : tr.splayFingers)}
+                    ? (tr.cardHoldAuto || 'Hold a card flat against your hand, both in view, and keep still — it measures automatically.')
+                    : (frameFit.ok
+                        ? (tr.frameGoodAuto || 'Perfect — hold still and it measures automatically.')
+                        : tr.splayFingers)}
             </p>
-            <button
-              onClick={startCountdown}
-              disabled={!handVisible || !frameFit.ok || phase === 'measuring' || phase === 'recording'}
-              className="px-5 py-2 rounded-xl text-sm font-semibold shrink-0 transition-all"
-              style={handVisible && frameFit.ok && phase === 'ready'
-                ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
-                : { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)', cursor: 'not-allowed' }}
-            >
-              {phase === 'measuring' || phase === 'recording' ? tr.capturing : tr.measure}
-            </button>
           </div>
         </div>
       )}

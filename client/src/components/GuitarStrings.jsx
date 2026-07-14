@@ -30,6 +30,8 @@ export const OPEN_MIDI    = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 B3 E4
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
 export const NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const NOTE_FLAT    = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+// Interval-degree name by semitone distance from the root (for scale-position labels).
+const DEGREE_NAMES = ['R','b2','2','b3','3','4','b5','5','b6','6','b7','7'];
 export const STRING_COLORS= ['#a78bfa','#38bdf8','#34d399','#c9a96e','#fb923c','#f87171'];
 const STRING_THICK = [3.5, 3.0, 2.5, 2.0, 1.5, 1.0];
 const FRET_COUNT   = 12;
@@ -66,6 +68,144 @@ function noteDisplayName(semitone) {
 
 function semitoneAt(stringIdx, fret) {
   return (OPEN_MIDI[stringIdx] + fret) % 12;
+}
+
+// ── Scale-position generator ────────────────────────────────────────────────
+// Computes every playable position/shape of a scale across the neck, from the
+// interval set + tuning alone (no per-key hardcoded fret tables). A position is
+// { minFret, maxFret, notes:Set<"s:f">, rootFret } where rootFret is the anchor
+// root's fret on the low-E string. String 0 = low E … 5 = high e.
+const POS_KEY = (s, f) => `${s}:${f}`;
+
+// Lowest fret ≥ minFret on the low-E string whose pitch class is `pc`.
+function rootAnchorFret(pc, minFret = 0, maxFret = FRET_COUNT) {
+  for (let f = minFret; f <= maxFret; f++) {
+    if (semitoneAt(0, f) === pc) return f;
+  }
+  return null;
+}
+
+// CAGED "box" positions: slide a fixed-width window up the neck, anchored so each
+// box starts at a successive scale tone on the low-E string. `count` boxes,
+// `span` frets tall. Works for both pentatonic (5) and 7-note (5) scales.
+function boxPositions(scaleSet, rootPc, count, span) {
+  // Ordered scale tones (pitch classes) starting from the root.
+  const tones = [];
+  for (let i = 0; i < 12; i++) {
+    const pc = (rootPc + i) % 12;
+    if (scaleSet.has(pc)) tones.push(pc);
+  }
+  if (!tones.length) return [];
+
+  // Show ALL interlocking boxes across the visible neck (user preference): start
+  // from the open/low position and lay successive boxes UP the neck, each anchored
+  // one fret below a scale tone on the low-E string so the tone sits inside the
+  // box. Numbering therefore runs low→high across the whole neck (Position 1 is
+  // the lowest box, not necessarily the textbook root box). Keep only boxes whose
+  // full `span` window fits within 0..FRET_COUNT and spread `count` of them evenly
+  // across the available starts so the set covers the neck rather than clustering.
+  const loFrets = [];
+  for (let f = 0; f <= FRET_COUNT; f++) {
+    if (scaleSet.has(semitoneAt(0, f))) loFrets.push(f);
+  }
+  const starts = [];
+  for (const lf of loFrets) {
+    const minFret = Math.max(0, lf - 1);
+    if (minFret + span <= FRET_COUNT && !starts.includes(minFret)) starts.push(minFret);
+  }
+  // Evenly sample `count` window-starts across what fits (covers the whole neck).
+  let chosen = starts;
+  if (starts.length > count) {
+    chosen = [];
+    for (let p = 0; p < count; p++) {
+      chosen.push(starts[Math.round((p * (starts.length - 1)) / (count - 1))]);
+    }
+    chosen = [...new Set(chosen)];
+  }
+
+  const positions = [];
+  for (const minFret of chosen) {
+    const maxFret = minFret + span;
+    const notes = new Set();
+    let firstRoot = null;
+    for (let s = 0; s < 6; s++) {
+      for (let f = minFret; f <= maxFret; f++) {
+        if (scaleSet.has(semitoneAt(s, f))) {
+          notes.add(POS_KEY(s, f));
+          if (s === 0 && semitoneAt(s, f) === rootPc && firstRoot == null) firstRoot = f;
+        }
+      }
+    }
+    positions.push({ minFret, maxFret, notes, rootFret: firstRoot ?? minFret });
+  }
+  return positions;
+}
+
+// 3-notes-per-string positions (diatonic/modal only): one shape per scale degree
+// used as the starting tone on the low-E string. Works in absolute MIDI so the
+// scale climbs CONTINUOUSLY across the strings — each string carries the next 3
+// ascending scale tones, and the same pitch is placed on the next string up so
+// the shape stays a compact ~6-fret box that climbs the neck.
+function threeNpsPositions(scaleSet, rootPc, degreeCount) {
+  // Ordered pitch classes of the scale, starting from the root.
+  const tones = [];
+  for (let i = 0; i < 12; i++) {
+    const pc = (rootPc + i) % 12;
+    if (scaleSet.has(pc)) tones.push(pc);
+  }
+  if (tones.length < degreeCount) return [];
+
+  const midiAt = (s, f) => OPEN_MIDI[s] + f;         // absolute pitch
+  const inScale = (midi) => scaleSet.has(((midi % 12) + 12) % 12);
+  // Next ascending scale MIDI strictly above `midi` (or ≥ if `orEqual`).
+  const nextScaleMidi = (midi, orEqual = false) => {
+    let m = orEqual ? midi : midi + 1;
+    for (let k = 0; k < 24; k++, m++) if (inScale(m)) return m;
+    return null;
+  };
+
+  const positions = [];
+  for (let p = 0; p < degreeCount; p++) {
+    // Low-E start: the p-th scale tone at the lowest fret 0..FRET_COUNT.
+    const startPc = tones[p % tones.length];
+    const startFret = rootAnchorFret(startPc, 0, FRET_COUNT);
+    if (startFret == null) continue;
+
+    const notes = new Set();
+    let minFret = 99, maxFret = 0, firstRoot = null;
+    let cur = midiAt(0, startFret);   // first note's absolute pitch
+    let ok = true;
+
+    for (let s = 0; s < 6 && ok; s++) {
+      // Place 3 ascending scale tones on this string, starting at `cur`'s fret.
+      for (let n = 0; n < 3; n++) {
+        const f = cur - OPEN_MIDI[s];
+        if (f < 0 || f > FRET_COUNT) { ok = false; break; }
+        notes.add(POS_KEY(s, f));
+        minFret = Math.min(minFret, f);
+        maxFret = Math.max(maxFret, f);
+        if (((cur % 12) + 12) % 12 === rootPc && firstRoot == null && s === 0) firstRoot = f;
+        cur = nextScaleMidi(cur);      // climb to the next scale tone
+        if (cur == null) { ok = false; break; }
+      }
+      // `cur` already holds the first note of the next string (continuous climb).
+    }
+    if (ok && notes.size) {
+      positions.push({ minFret: Math.max(0, minFret), maxFret: Math.min(FRET_COUNT, maxFret), notes, rootFret: firstRoot ?? startFret });
+    }
+  }
+  return positions;
+}
+
+// Build all positions for the current scale + layout. Pentatonic → 5 boxes.
+// Diatonic/modal → 5 boxes OR 7×3-NPS per `layout`.
+// Boxes use a 5-fret window (span 4): a pentatonic box needs the full 5 frets to
+// hold 2 notes on EVERY string — a 4-fret window drops a note on the low-E, B and
+// high-e strings (leaving a box with holes). 7-note boxes likewise want 5 frets.
+function buildPositions(scaleSet, rootPc, isPentatonic, layout) {
+  if (isPentatonic) return boxPositions(scaleSet, rootPc, 5, 4);
+  if (layout === '3nps') return threeNpsPositions(scaleSet, rootPc, 7);
+  return boxPositions(scaleSet, rootPc, 5, 4);
 }
 
 // ── Audio ─────────────────────────────────────────────────────────────────────
@@ -679,6 +819,11 @@ function PlayMode({ tr }) {
 function ScaleMode({ tr }) {
   const [root, setRoot]           = useState('C');
   const [scaleName, setScaleName] = useState('Major');
+  // ── Position map controls ──────────────────────────────────────────────────
+  const [layout, setLayout]           = useState('box');   // 'box' | '3nps'
+  const [activePosition, setActivePos] = useState(-1);      // -1 = all positions
+  const [soloPosition, setSoloPosition] = useState(false);  // hide out-of-position notes entirely
+  const [labelMode, setLabelMode]     = useState('name');  // 'name' | 'degree'
   // Live readout: the note currently sounding (tapped or during ▶ Play).
   // { s, f, pc, degree } — degree is the 1-based scale step (null off-scale).
   const [liveNote, setLiveNote]   = useState(null);
@@ -689,12 +834,46 @@ function ScaleMode({ tr }) {
   const intervals    = SCALE_TYPES[scaleName] ?? [];
   const scaleSet     = new Set(intervals.map(i => (rootSemitone + i) % 12));
   const rootPc       = rootSemitone % 12;
+  const isPentatonic = intervals.length <= 5;
+
+  // All playable positions/shapes of this scale across the neck (box or 3-NPS).
+  // Derived from the interval set + tuning — recomputed on key/scale/layout change.
+  const positions = useMemo(
+    () => buildPositions(scaleSet, rootPc, isPentatonic, layout),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scaleName, rootPc, isPentatonic, layout],
+  );
+  const posCount = positions.length;
+  // Keep the active-position index valid when the count changes (scale/layout swap).
+  useEffect(() => {
+    if (activePosition >= posCount) setActivePos(-1);
+  }, [posCount, activePosition]);
+  // The set of "s:f" keys in the active position (null when showing all).
+  const activeNoteSet = activePosition >= 0 && activePosition < posCount
+    ? positions[activePosition].notes
+    : null;
 
   // Scale degree (1-based) of a pitch class, or null if it's not in the scale.
   const degreeOf = useCallback((pc) => {
     const i = intervals.indexOf(((pc - rootSemitone) % 12 + 12) % 12);
     return i < 0 ? null : i + 1;
   }, [intervals, rootSemitone]);
+
+  // Interval-degree label (e.g. "b3", "5", "R") for a pitch class in the scale.
+  const degreeLabel = useCallback((pc) => {
+    const iv = ((pc - rootPc) % 12 + 12) % 12;
+    if (iv === 0) return 'R';
+    return DEGREE_NAMES[iv] || String(degreeOf(pc) ?? '');
+  }, [rootPc, degreeOf]);
+
+  // Theory readout: note spelling, W/H step formula, degree spelling.
+  const spelling = intervals.map(i => NOTE_NAMES[(rootSemitone + i) % 12]);
+  const stepFormula = intervals.map((iv, k) => {
+    const next = k + 1 < intervals.length ? intervals[k + 1] : 12; // wrap to octave
+    const gap = next - iv;
+    return gap === 2 ? 'W' : gap === 1 ? 'H' : gap === 3 ? 'W½' : `${gap}`;
+  });
+  const degreeSpelling = intervals.map(iv => DEGREE_NAMES[iv] || '');
 
   // Flash a note in the live readout for `hold` ms (tap = brief).
   const flashLive = useCallback((s, f, hold = 900) => {
@@ -731,6 +910,13 @@ function ScaleMode({ tr }) {
     const pc = semitoneAt(s, f);
     if (!scaleSet.has(pc)) return null;
     const isRoot = pc === rootPc;
+    const lbl = labelMode === 'degree' ? degreeLabel(pc) : NOTE_NAMES[pc];
+
+    // Position map: is this note inside the active position box?
+    const inActive = activeNoteSet ? activeNoteSet.has(POS_KEY(s, f)) : true;
+    // Solo mode hides everything outside the active box entirely.
+    if (soloPosition && activeNoteSet && !inActive) return null;
+
     // Practice cue: the note the player should be striking right now pulses green.
     const t = targetNoteRef.current;
     const isTarget = t && t.s === s && t.f === f;
@@ -745,7 +931,7 @@ function ScaleMode({ tr }) {
         bg: matched ? '#4ade80' : '#34d399',
         color: '#0f2b20',
         glow: matched ? '0 0 26px #4ade80, 0 0 12px #4ade80' : '0 0 20px #34d399ee, 0 0 10px #34d399',
-        label: NOTE_NAMES[pc],
+        label: lbl,
       };
     }
     if (isHeard) {
@@ -754,7 +940,7 @@ function ScaleMode({ tr }) {
         bg: '#38bdf8',
         color: '#08243a',
         glow: '0 0 16px #38bdf8cc',
-        label: NOTE_NAMES[pc],
+        label: lbl,
       };
     }
     // The note currently sounding (tap/▶) lights up brightest (its exact spot).
@@ -764,17 +950,35 @@ function ScaleMode({ tr }) {
         bg: '#f8fafc',
         color: '#0f0f0f',
         glow: `0 0 18px #ffffffcc, 0 0 8px ${isRoot ? '#c9a96e' : STRING_COLORS[s]}`,
-        label: NOTE_NAMES[pc],
+        label: lbl,
+      };
+    }
+    // Out-of-position scale notes: greyed/dimmed so the active box stands out.
+    if (activeNoteSet && !inActive) {
+      return {
+        bg: 'rgba(100,116,139,0.14)',   // slate, faded
+        color: 'rgba(148,163,184,0.55)',
+        glow: 'none',
+        label: lbl,
+      };
+    }
+    // Roots pop emerald with a bold ring; other in-position tones are amber/string-hued.
+    if (isRoot) {
+      return {
+        bg: '#10b981',                  // emerald root
+        color: '#04231a',
+        glow: '0 0 16px #10b98199, 0 0 0 2px #34d399 inset',
+        label: labelMode === 'degree' ? 'R' : NOTE_NAMES[pc],
       };
     }
     return {
-      bg: isRoot ? '#c9a96e' : `${STRING_COLORS[s]}33`,
-      color: isRoot ? '#0f0f0f' : STRING_COLORS[s],
-      glow: isRoot ? '0 0 14px #c9a96e88' : 'none',
-      label: NOTE_NAMES[pc],
+      bg: activeNoteSet ? `${STRING_COLORS[s]}55` : `${STRING_COLORS[s]}33`,
+      color: STRING_COLORS[s],
+      glow: 'none',
+      label: lbl,
     };
     // cueTick is a dep so the fretboard re-renders when the cue/heard note advances.
-  }, [scaleSet, rootPc, liveNote, cueTick]);
+  }, [scaleSet, rootPc, liveNote, cueTick, labelMode, degreeLabel, activeNoteSet, soloPosition]);
 
   const handleFret = useCallback((s, f) => {
     const pc = semitoneAt(s, f);
@@ -948,6 +1152,89 @@ function ScaleMode({ tr }) {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* ── Position map: all shapes of this scale across the neck ── */}
+      <div className="mb-4 px-3 py-3 rounded-xl bg-surface-850 border border-surface-650">
+        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            {tr.positions || 'Positions'}
+            <span className="ml-1.5 text-ink-ghost normal-case font-normal">
+              {isPentatonic
+                ? (tr.pentBoxes || '5 pentatonic boxes')
+                : layout === '3nps'
+                  ? (tr.sevenNps || '7 shapes · 3 notes-per-string')
+                  : (tr.fiveBoxes || '5 CAGED boxes')}
+            </span>
+          </span>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Layout toggle (diatonic/modal only) */}
+            {!isPentatonic && (
+              <div className="flex rounded-lg overflow-hidden border border-surface-650">
+                {[['box', tr.boxShapes || 'Box'], ['3nps', tr.threeNps || '3-NPS']].map(([val, lab]) => (
+                  <button key={val}
+                    onClick={() => { setLayout(val); setActivePos(-1); }}
+                    className={`px-2.5 py-1 text-xs font-semibold transition-all ${layout === val ? 'bg-brand text-surface-base' : 'bg-surface-750 text-ink-faint'}`}>
+                    {lab}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* Name ⇄ Degree label toggle */}
+            <div className="flex rounded-lg overflow-hidden border border-surface-650">
+              {[['name', tr.labelNames || 'A B C'], ['degree', tr.labelDegrees || '1 b3 5']].map(([val, lab]) => (
+                <button key={val}
+                  onClick={() => setLabelMode(val)}
+                  className={`px-2.5 py-1 text-xs font-semibold transition-all ${labelMode === val ? 'bg-brand text-surface-base' : 'bg-surface-750 text-ink-faint'}`}>
+                  {lab}
+                </button>
+              ))}
+            </div>
+            {/* Solo (hide out-of-position) toggle — only meaningful with a position picked */}
+            <button
+              onClick={() => setSoloPosition(v => !v)}
+              disabled={activePosition < 0}
+              title={tr.soloHint || 'Hide notes outside the active position'}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${soloPosition && activePosition >= 0 ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'} ${activePosition < 0 ? 'opacity-40 cursor-not-allowed' : ''}`}>
+              {soloPosition ? (tr.soloOn || '◉ Solo box') : (tr.soloOff || '○ Solo box')}
+            </button>
+          </div>
+        </div>
+
+        {/* Position selector: All + Position 1..N + ◀/▶ stepper */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={() => setActivePos(-1)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${activePosition < 0 ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
+            {tr.allPositions || 'All'}
+          </button>
+          {posCount > 0 && (
+            <button
+              onClick={() => setActivePos(p => p <= 0 ? posCount - 1 : p - 1)}
+              className="px-2 py-1 rounded-lg text-xs font-bold bg-surface-750 text-ink-faint border border-surface-650"
+              aria-label="Previous position">◀</button>
+          )}
+          {positions.map((p, i) => (
+            <button key={i}
+              onClick={() => setActivePos(i)}
+              title={`${tr.frets || 'Frets'} ${p.minFret}–${p.maxFret}`}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${activePosition === i ? 'bg-brand text-surface-base border-transparent' : 'bg-surface-750 text-ink-faint border-surface-650'}`}>
+              {i + 1}
+            </button>
+          ))}
+          {posCount > 0 && (
+            <button
+              onClick={() => setActivePos(p => p >= posCount - 1 ? 0 : (p < 0 ? 0 : p + 1))}
+              className="px-2 py-1 rounded-lg text-xs font-bold bg-surface-750 text-ink-faint border border-surface-650"
+              aria-label="Next position">▶</button>
+          )}
+          {activePosition >= 0 && positions[activePosition] && (
+            <span className="ml-1 text-xs font-mono text-ink-ghost">
+              {tr.position || 'Position'} {activePosition + 1} · {tr.frets || 'frets'} {positions[activePosition].minFret}–{positions[activePosition].maxFret}
+            </span>
+          )}
         </div>
       </div>
 
@@ -1205,6 +1492,62 @@ function ScaleMode({ tr }) {
       </div>
 
       <Fretboard dotStyle={dotStyle} onFretClick={handleFret} onOpenClick={handleOpen} />
+
+      {/* ── Theory guide: spelling · degrees · step formula · position character ── */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="px-3 py-3 rounded-xl bg-surface-850 border border-surface-650">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-ghost mb-1.5">
+            {root} {scaleName}
+          </p>
+          <p className="text-sm font-mono text-ink mb-2">
+            {spelling.join(' – ')}
+          </p>
+          <div className="flex flex-wrap gap-1 mb-2">
+            {degreeSpelling.map((d, i) => (
+              <span key={i} className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                style={{ background: i === 0 ? 'rgba(16,185,129,0.18)' : 'var(--color-surface-700)', color: i === 0 ? '#34d399' : 'var(--color-ink-faint)' }}>
+                {d}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-ink-ghost">
+            <span className="font-semibold text-ink-faint">{tr.stepFormula || 'Steps'}: </span>
+            <span className="font-mono">{stepFormula.join(' · ')}</span>
+            <span className="ml-1 text-ink-ghost">({(tr.stepLegend || 'W = whole, H = half')})</span>
+          </p>
+        </div>
+
+        <div className="px-3 py-3 rounded-xl bg-surface-850 border border-surface-650">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-ghost mb-1.5">
+            {activePosition >= 0
+              ? `${tr.position || 'Position'} ${activePosition + 1}`
+              : (tr.wholeNeck || 'Whole neck')}
+          </p>
+          {activePosition >= 0 && positions[activePosition] ? (
+            <>
+              <p className="text-sm text-ink mb-2">
+                {(tr.positionChar || 'This shape sits at frets {lo}–{hi}. Anchor on the root ({R}) and target the chord tones of this key.')
+                  .replace('{lo}', positions[activePosition].minFret)
+                  .replace('{hi}', positions[activePosition].maxFret)
+                  .replace('{R}', root)}
+              </p>
+              <p className="text-xs text-ink-faint">
+                {tr.chordTargets || 'Lean on'}:{' '}
+                <ChordTip name={`${root}${isPentatonic || SCALE_TYPES[scaleName][3] === 3 ? 'm' : ''}`}>
+                  <span className="font-semibold text-brand cursor-help">
+                    {root}{isPentatonic || SCALE_TYPES[scaleName][3] === 3 ? 'm' : ''}
+                  </span>
+                </ChordTip>
+                {' '}{tr.chordTargetsTail || 'and its diatonic partners.'}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-ink-faint">
+              {tr.wholeNeckDesc || 'All positions shown. Pick a position above to isolate one box and dim the rest — then solo it to see the shape alone.'}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
