@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { DEFAULT_PROFILE, abilityLabel, reachMultiplier, flexibilityScore, flexibilityLabel } from '../lib/handProfile';
 import CameraHandMeasure from './CameraHandMeasure';
 import { useT } from '../lib/i18n';
@@ -657,14 +658,11 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
         </div>
         <div className="flex flex-col gap-2 shrink-0">
           <button
-            onClick={() => { setShowCamera(v => !v); setShowAICamera(false); }}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${showCamera ? 'text-brand' : 'bg-surface-750 text-ink-subtle border-surface-650'}`}
-            style={showCamera
-              ? { background: 'rgba(201,169,110,0.12)', borderColor: 'rgba(201,169,110,0.25)' }
-              : undefined}
+            onClick={() => { setShowCamera(true); setShowAICamera(false); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all border bg-surface-750 text-ink-subtle border-surface-650"
           >
             <span>📷</span>
-            <span>{showCamera ? tr.hideCamera : tr.measureWithCamera}</span>
+            <span>{tr.openCamera || tr.measureWithCamera}</span>
           </button>
           <button
             onClick={() => { setShowAICamera(v => !v); setShowCamera(false); }}
@@ -679,11 +677,26 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
         </div>
       </div>
 
-      {/* Camera measurement panel */}
-      {showCamera && (
-        <div className="mb-6">
-          <CameraHandMeasure onMeasured={handleCameraMeasured} lang={lang} />
-        </div>
+      {/* Camera measurement — full-screen overlay. Portalled to document.body so
+          a transformed ancestor (the 3D backdrop / onboarding card) can't trap
+          the fixed positioning. Applying a measurement saves + closes; the ×
+          closes without measuring. */}
+      {showCamera && createPortal(
+        <div className="fixed inset-0 z-[100] bg-surface-base overflow-y-auto">
+          <button
+            onClick={() => setShowCamera(false)}
+            aria-label={tr.close || 'Close'}
+            className="fixed top-3 right-3 z-[101] w-10 h-10 rounded-full flex items-center justify-center text-2xl leading-none bg-surface-750 text-ink-subtle border border-surface-650"
+          >
+            ×
+          </button>
+          <div className="min-h-full flex items-center justify-center p-3 sm:p-6">
+            <div className="w-full max-w-2xl">
+              <CameraHandMeasure onMeasured={handleCameraMeasured} lang={lang} />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* AI hand analysis panel */}
