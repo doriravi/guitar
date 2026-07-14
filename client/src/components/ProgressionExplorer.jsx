@@ -26,6 +26,10 @@ import SoloTabView from './SoloTabView';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
 
+// Shared empty degree set for song-search results (no progression context, so no
+// out-of-progression chord flagging). Module-scoped so its identity is stable.
+const EMPTY_DEGREE_SET = new Set();
+
 function resolveForKey(root, scaleType, maxDiff) {
   const diatonic = getDiatonicChords(root, scaleType);
   const progList = scaleType === 'major' ? MAJOR_PROGRESSIONS : MINOR_PROGRESSIONS;
@@ -644,6 +648,9 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
       // No chords in the lines — fall through to the degree-based path below.
     }
 
+    // No usable degree data (e.g. a search-index song that carries only raw
+    // chords/lyrics) — nothing to derive; the lyrics view handles its own chords.
+    if (!Array.isArray(song.degrees) || !song.degrees.length) return [];
     const diatonic = getDiatonicChords(song.key, song.scaleType);
     const baseNames = song.degrees.map(d => diatonic[d].chordName);
 
@@ -1526,6 +1533,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   }, []);
   const [tooltip,     setTooltip]     = useState(null);  // { voicing, x, y }
   const [moveNotice,  setMoveNotice]  = useState(null);  // banner after a Save moves a song
+  const [songSearch,  setSongSearch]  = useState('');    // song search box (title/artist)
 
   const allRoots   = root === 'all';
   const bothScales = scaleType === 'both';
@@ -1578,6 +1586,36 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
     }
     return counts;
   }, [filtered, customSongs, catalogSongs, reach]);
+
+  // ── Song search: a flat, de-duped index of every song (built-in + catalog +
+  // custom) so the user can find a song by title/artist without first knowing
+  // which progression it belongs to. Custom/catalog titles supersede built-ins.
+  const songIndex = useMemo(() => {
+    const byTitle = new Map();     // lowercased title → song (last write wins for priority)
+    const add = (song, progName) => {
+      const title = (song.title || '').trim();
+      if (!title) return;
+      byTitle.set(title.toLowerCase(), { ...song, __progName: progName || song.progression || '' });
+    };
+    // Lowest priority first so higher-priority sources overwrite: built-in → catalog → custom.
+    for (const [progName, list] of Object.entries(SONGS_BY_PROGRESSION)) {
+      for (const song of list) add(song, progName);
+    }
+    for (const song of catalogSongs) add(song, '');
+    for (const song of customSongs) add(song, '');
+    return [...byTitle.values()].sort((a, b) =>
+      (a.title || '').localeCompare(b.title || ''));
+  }, [catalogSongs, customSongs]);
+
+  const searchResults = useMemo(() => {
+    const q = songSearch.trim().toLowerCase();
+    if (!q) return [];
+    return songIndex
+      .filter(s =>
+        (s.title || '').toLowerCase().includes(q) ||
+        (s.artist || '').toLowerCase().includes(q))
+      .slice(0, 40);
+  }, [songSearch, songIndex]);
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -1719,6 +1757,32 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           </select>
         </div>
 
+        {/* Song search — find a song by title or artist across every progression */}
+        <div className="col-span-2 sm:col-span-1 flex flex-col gap-1 sm:min-w-[220px] sm:flex-1">
+          <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-ink-faint)' }}>
+            {tr.searchSong || 'Search a song'}
+          </label>
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: 'var(--color-ink-ghost)' }}>🔎</span>
+            <input
+              type="search"
+              value={songSearch}
+              onChange={e => setSongSearch(e.target.value)}
+              placeholder={tr.searchSongHint || 'Title or artist…'}
+              className="w-full rounded pl-8 pr-8 py-1.5 text-sm"
+              style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-550)', color: 'var(--color-ink)' }}
+            />
+            {songSearch && (
+              <button
+                onClick={() => setSongSearch('')}
+                aria-label={tr.close || 'Clear'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-sm leading-none"
+                style={{ color: 'var(--color-ink-faint)' }}
+              >×</button>
+            )}
+          </div>
+        </div>
+
         {/* My Hand filter toggle */}
         <div className="col-span-2 sm:col-span-1 flex items-end">
           <button
@@ -1765,6 +1829,37 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
         </div>
       )}
 
+      {/* ── Song search results (replaces the progression list while searching) ── */}
+      {songSearch.trim() ? (
+        <div className="mb-2">
+          <p className="text-xs mb-3" style={{ color: 'var(--color-ink-ghost)' }}>
+            {searchResults.length === 0
+              ? (tr.searchNoResults || `No songs match “${songSearch.trim()}”`)
+              : `${searchResults.length}${searchResults.length === 40 ? '+' : ''} ${searchResults.length === 1 ? (tr.songResult || 'song') : (tr.songResults || 'songs')} · “${songSearch.trim()}”`}
+          </p>
+          {searchResults.length === 0 ? (
+            <div className="text-center py-16 text-sm" style={{ color: 'var(--color-ink-ghost)' }}>
+              {tr.searchTryOther || 'Try a different title or artist. Not all songs have chord data yet.'}
+            </div>
+          ) : (
+            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-surface-700)' }}>
+              {searchResults.map((song, i) => (
+                <SongRow
+                  key={song.id || `${song.title}-${i}`}
+                  song={song}
+                  progDegreeSet={EMPTY_DEGREE_SET}
+                  tr={tr}
+                  customSongs={customSongs}
+                  currentProgName={song.__progName}
+                  onEdited={() => setCustomSongs(loadCustomSongs())}
+                  onMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* noop */ } }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* ── Result count ── */}
       <p className="text-xs mb-3" style={{ color: 'var(--color-ink-ghost)' }}>
         {filtered.length} progression{filtered.length !== 1 ? 's' : ''}
@@ -1990,6 +2085,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
           );
         })}
       </div>
+      </>
+      )}
 
       {/* ── Fretboard tooltip ── */}
       {tooltip && (

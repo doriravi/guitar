@@ -114,30 +114,110 @@ function tabToNotes(tab) {
     .filter(Boolean);
 }
 
-// Single plucked string: triangle fundamental + harmonic sines, exponential decay
-function pluck(ctx, hz, startTime, decay) {
-  const env = ctx.createGain();
-  env.connect(ctx._out);
-  env.gain.setValueAtTime(0, startTime);
-  env.gain.linearRampToValueAtTime(0.22, startTime + 0.004);
-  env.gain.exponentialRampToValueAtTime(0.001, startTime + decay);
+// ── Classical (nylon-string) guitar voice ──────────────────────────────────
+// A plucked string is modeled with Karplus–Strong: a short burst of filtered
+// noise is fed through a tuned delay line whose feedback loop is gently
+// low-passed, so high harmonics die faster than the fundamental — exactly how a
+// real nylon string decays (bright attack → warm, mellow sustain). This sounds
+// far more like a real classical guitar than summed oscillators, and it's cheap:
+// each note is rendered ONCE into an AudioBuffer and played back natively.
+//
+// Rendering identical buffers repeatedly (every strum re-plucks the same pitches)
+// would be wasteful, so completed buffers are cached by rounded (hz, decay). The
+// cache lives ON the AudioContext (ctx._ks) so it's discarded automatically if the
+// context is ever rebuilt — buffers are bound to the context that created them.
+function renderKarplusStrong(ctx, hz, decay) {
+  const sr = ctx.sampleRate;
+  const len = Math.max(1, Math.floor(sr * (decay + 0.1)));
+  const buf = ctx.createBuffer(1, len, sr);
+  const out = buf.getChannelData(0);
 
-  [
-    [1, 'triangle', 0.60],
-    [2, 'sine',     0.24],
-    [3, 'sine',     0.10],
-    [4, 'sine',     0.06],
-  ].forEach(([harmonic, type, amp]) => {
-    const osc = ctx.createOscillator();
-    const g   = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = hz * harmonic;
-    g.gain.value = amp;
-    osc.connect(g);
-    g.connect(env);
-    osc.start(startTime);
-    osc.stop(startTime + decay + 0.05);
-  });
+  // Delay-line length = one period. Fractional tuning via a 2-tap read keeps
+  // pitch accurate for high strings where the integer period is short.
+  const period = sr / hz;
+  const N = Math.max(2, Math.floor(period));
+  const frac = period - N;                 // fractional remainder for tuning
+  const line = new Float32Array(N + 1);
+
+  // Excitation: a short noise burst, low-passed a little so the pluck is round
+  // (nylon), not harsh (like a bright steel string / spinet). Pluck "position"
+  // is emulated by comb-filtering the burst so it isn't a pure hiss.
+  const burst = Math.min(N, Math.floor(N * 0.9));
+  let last = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (i < burst) {
+      const white = Math.random() * 2 - 1;
+      last = 0.5 * white + 0.5 * last;     // 1-pole LP → mellow nylon attack
+      line[i] = last;
+    } else {
+      line[i] = 0;
+    }
+  }
+
+  // Karplus–Strong loop. `damp` sets how fast the string loses energy (its
+  // sustain); `bright` (loop lowpass coefficient) mellows successive reflections.
+  // Slightly darker than a steel string to sit in nylon territory.
+  const bright = 0.50;                      // loop LP mix (0=dark … 1=bright)
+  // Per-sample loop gain tuned so the note fades to silence around `decay`.
+  const loopGain = Math.pow(0.001, 1 / (decay * hz));
+  let idx = 0;
+  let prev = 0;
+  for (let i = 0; i < len; i++) {
+    const cur = line[idx];
+    const nxt = line[(idx + 1) % line.length];
+    const sample = cur + frac * (nxt - cur);   // fractional-delay read (tuning)
+    out[i] = sample;
+    // Feedback: average with previous (lowpass) + loop damping, written back.
+    const lp = bright * sample + (1 - bright) * prev;
+    prev = sample;
+    line[idx] = lp * loopGain;
+    idx = (idx + 1) % line.length;
+  }
+
+  // Fade the last 8 ms so cached buffers never click at their tail.
+  const fade = Math.min(len, Math.floor(sr * 0.008));
+  for (let i = 0; i < fade; i++) out[len - 1 - i] *= i / fade;
+  return buf;
+}
+
+// Single plucked string (nylon). Same signature as before so every player path
+// (progression, events, solo) upgrades automatically. Also exported (as
+// `pluckNylon`) so the Scales/Composer screens share this one classical-guitar
+// voice instead of keeping a separate additive-synth pluck.
+export function pluckNylon(ctx, hz, startTime, decay) {
+  pluck(ctx, hz, startTime, decay);
+}
+function pluck(ctx, hz, startTime, decay) {
+  if (!ctx._ks) ctx._ks = new Map();
+  const key = `${Math.round(hz * 4)}:${Math.round(decay * 20)}`;
+  let buf = ctx._ks.get(key);
+  if (!buf) { buf = renderKarplusStrong(ctx, hz, decay); ctx._ks.set(key, buf); }
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+
+  // Guitar-body resonance: a gentle low-pass + a warm low-mid peak give the
+  // hollow, woody character of a classical guitar's soundboard.
+  const body = ctx.createBiquadFilter();
+  body.type = 'lowpass';
+  body.frequency.value = 3200;
+  body.Q.value = 0.7;
+  const warmth = ctx.createBiquadFilter();
+  warmth.type = 'peaking';
+  warmth.frequency.value = 220;
+  warmth.gain.value = 3;
+  warmth.Q.value = 0.9;
+
+  const env = ctx.createGain();
+  env.gain.value = 0.32;
+
+  src.connect(body);
+  body.connect(warmth);
+  warmth.connect(env);
+  env.connect(ctx._out);
+
+  src.start(startTime);
+  src.stop(startTime + decay + 0.12);
 }
 
 /**
@@ -386,22 +466,11 @@ function drumHat(ctx, t) {
   src.start(t); src.stop(t + 0.06);
 }
 
-// Bass note: soft sine fundamental + a touch of octave for definition.
+// Bass note: a plucked classical-guitar bass string (the same nylon
+// Karplus–Strong voice as the melody, just in the low register), so the backing
+// band's bass line sounds like a real guitar rather than a synth sine.
 function bassNote(ctx, hz, t, dur) {
-  const env = ctx.createGain();
-  env.connect(ctx._out);
-  env.gain.setValueAtTime(0, t);
-  env.gain.linearRampToValueAtTime(0.32, t + 0.012);
-  env.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  [[1, 'sine', 0.8], [2, 'triangle', 0.18]].forEach(([h, type, amp]) => {
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = hz * h;
-    g.gain.value = amp;
-    osc.connect(g); g.connect(env);
-    osc.start(t); osc.stop(t + dur + 0.05);
-  });
+  pluck(ctx, hz, t, Math.max(0.4, dur));
 }
 
 /**

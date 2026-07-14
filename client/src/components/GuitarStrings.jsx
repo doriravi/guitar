@@ -6,6 +6,7 @@ import ChordTip from './ChordTip';
 import Lazy3D from './Lazy3D';
 import FloatingPanel from './FloatingPanel';
 import { useT } from '../lib/i18n';
+import { pluckNylon } from '../lib/audio';
 
 // The Composer header shows an instanced GPU particle field that reacts to the
 // music the editor PLAYS (every strum / the whole song on Play), not the mic —
@@ -258,21 +259,19 @@ export function getComposerAnalyser() {
   return _analyser;
 }
 
+// Real classical-guitar (nylon) voice, shared with the main audio engine via
+// `pluckNylon` so the Scales screen, practice cues and Composer all sound like a
+// real guitar rather than a synth. Uses this module's own AudioContext + master
+// bus (ctx._out) so the analyser/visualizers still "hear" it.
 export function pluck(hz, decay = 2.2) {
   const ctx = getCtx();
-  const now = ctx.currentTime;
-  const env = ctx.createGain();
-  env.connect(ctx._out);
-  env.gain.setValueAtTime(0, now);
-  env.gain.linearRampToValueAtTime(0.28, now + 0.003);
-  env.gain.exponentialRampToValueAtTime(0.001, now + decay);
-  [[1,'triangle',0.55],[2,'sine',0.26],[3,'sine',0.12],[4,'sine',0.07]].forEach(([h,t,a]) => {
-    const osc = ctx.createOscillator(); const g = ctx.createGain();
-    osc.type = t; osc.frequency.value = hz * h; g.gain.value = a;
-    osc.connect(g); g.connect(env); osc.start(now); osc.stop(now + decay + 0.1);
-  });
+  pluckNylon(ctx, hz, ctx.currentTime, decay);
 }
 
+// Strum a chord: pluck each fretted string as a real classical-guitar (nylon)
+// note, staggered low→high like a real strum. Shares the same nylon voice as
+// the melody players (via pluckNylon) so every chord in PlayMode, the Chord
+// Finder and the Composer/Song Editor sounds like a real guitar.
 function strum(frets, capo = 0) {
   const ctx = getCtx();
   frets.forEach((fret, s) => {
@@ -280,17 +279,8 @@ function strum(frets, capo = 0) {
     // A capo on fret `capo` raises every sounding note by `capo` semitones.
     const hz = OPEN_HZ[s] * 2 ** ((fret + capo) / 12);
     const decay = 2.0 - s * 0.05;
-    const now = ctx.currentTime + s * 0.018;
-    const env = ctx.createGain();
-    env.connect(ctx._out);
-    env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(0.22, now + 0.003);
-    env.gain.exponentialRampToValueAtTime(0.001, now + decay);
-    [[1,'triangle',0.55],[2,'sine',0.26],[3,'sine',0.12],[4,'sine',0.07]].forEach(([h,t,a]) => {
-      const osc = ctx.createOscillator(); const g = ctx.createGain();
-      osc.type = t; osc.frequency.value = hz * h; g.gain.value = a;
-      osc.connect(g); g.connect(env); osc.start(now); osc.stop(now + decay + 0.1);
-    });
+    const now = ctx.currentTime + s * 0.018;   // low→high strum stagger
+    pluckNylon(ctx, hz, now, decay);
   });
 }
 
@@ -1009,16 +999,8 @@ function ScaleMode({ tr }) {
     notes.forEach(({ s, f }, i) => {
       const hz = OPEN_HZ[s] * 2 ** (f / 12);
       const t  = ctx.currentTime + i * STEP_S;
-      const env = ctx.createGain();
-      env.connect(ctx._out);
-      env.gain.setValueAtTime(0, t);
-      env.gain.linearRampToValueAtTime(0.2, t + 0.003);
-      env.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
-      [[1,'triangle',0.55],[2,'sine',0.26]].forEach(([h,tp,a]) => {
-        const osc = ctx.createOscillator(); const g = ctx.createGain();
-        osc.type = tp; osc.frequency.value = hz * h; g.gain.value = a;
-        osc.connect(g); g.connect(env); osc.start(t); osc.stop(t + 0.7);
-      });
+      // Real classical-guitar (nylon) note, scheduled on the audio clock.
+      pluckNylon(ctx, hz, t, 0.6);
       playTimers.current.push(
         setTimeout(() => flashLive(s, f, STEP_S * 1000 + 120), i * STEP_S * 1000)
       );

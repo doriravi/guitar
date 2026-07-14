@@ -140,6 +140,9 @@ export const t = {
     root: 'Root', allRoots: 'All roots', scale: 'Scale', allScales: 'All scales',
     major: 'Major', minor: 'Minor', famousSongs: 'Famous songs',
     noProgressions: 'No progressions match — try raising the max difficulty.',
+    searchSong: 'Search a song', searchSongHint: 'Title or artist…',
+    searchNoResults: 'No songs found', songResult: 'song', songResults: 'songs',
+    searchTryOther: 'Try a different title or artist. Not all songs have chord data yet.',
     loadingLyrics: 'Loading lyrics…', lyricsUnavailable: 'Lyrics not available.',
     hide: 'Hide', lyrics: 'Lyrics',
 
