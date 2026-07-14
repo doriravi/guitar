@@ -130,9 +130,6 @@ export const CHORDS = [
   { name: 'Bb5',    type: 'Power',           tab: 'x133xx', notes: [{ string:1,fret:1 },{ string:2,fret:3 },{ string:3,fret:3 }] },
   { name: 'Ab5',    type: 'Power',           tab: '466xxx', notes: [{ string:0,fret:4 },{ string:1,fret:6 },{ string:2,fret:6 }] },
 
-  // ─── More open / easy major ───────────────────────────────────
-  { name: 'B',      type: 'Major (open)',    tab: 'x24442', notes: [{ string:1,fret:2 },{ string:2,fret:4 },{ string:3,fret:4 },{ string:4,fret:4 },{ string:5,fret:2 }] },
-
   // ─── More barre major ─────────────────────────────────────────
   { name: 'C',      type: 'Major (barre)',   tab: 'x35553', notes: [{ string:1,fret:3 },{ string:2,fret:5 },{ string:3,fret:5 },{ string:4,fret:5 },{ string:5,fret:3 }] },
   { name: 'D',      type: 'Major (barre)',   tab: 'x57775', notes: [{ string:1,fret:5 },{ string:2,fret:7 },{ string:3,fret:7 },{ string:4,fret:7 },{ string:5,fret:5 }] },

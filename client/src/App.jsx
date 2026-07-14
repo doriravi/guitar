@@ -1,5 +1,7 @@
 import { useState, createContext, useContext, useEffect } from 'react';
 import StartHere from './components/StartHere';
+import LevelPlan from './components/LevelPlan';
+import FretboardMeasures from './components/FretboardMeasures';
 import ChordTable from './components/ChordTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import HandProfileSetup from './components/HandProfileSetup';
@@ -39,6 +41,13 @@ export function useHandProfile() { return useContext(HandProfileContext); }
 export const ReachLimitContext = createContext(false);
 export function useReachLimit() { return useContext(ReachLimitContext); }
 
+// Global "limit everything by my level" preference. When on, chords — and songs
+// containing them — harder than the user's current Level-Plan tier allows are
+// hidden across the app (skill-based, distinct from the hand-reach limit above).
+// Read via useLevelLimit().
+export const LevelLimitContext = createContext(false);
+export function useLevelLimit() { return useContext(LevelLimitContext); }
+
 export const AIFingerContext = createContext(null);
 export function useAIFingers() { return useContext(AIFingerContext); }
 
@@ -58,6 +67,9 @@ function loadLocalProfile() {
   return DEFAULT_PROFILE;
 }
 
+function loadLimitToLevel() {
+  try { return localStorage.getItem('guitar_limit_to_level') === '1'; } catch { return false; }
+}
 function loadLimitToReach() {
   try { return localStorage.getItem('guitar_limit_to_reach') === '1'; } catch { return false; }
 }
@@ -128,6 +140,8 @@ function getTabs(tr) {
     { id: 'micpractice',  label: tr.tabMicPractice || 'Practice',  icon: '🎸', side: true },
     { id: 'mictune',      label: tr.tabMicTune || 'Mic Tune',      icon: '⚙️', side: true },
     { id: 'listen',       label: tr.tabPlayAlong || 'Play-Along',  icon: '🎮' },
+    { id: 'levelplan',    label: tr.tabLevelPlan || 'Level Plan', icon: '🗺️', side: true },
+    { id: 'fbmeasure',    label: tr.tabFretboardMeasures || 'Fretboard Measures', icon: '📏', side: true },
     { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼', side: true },
     { id: 'chords',       label: tr.tabChords,       icon: '🎸' },
     { id: 'progressions', label: tr.tabProgressions, icon: '🎼' },
@@ -148,6 +162,8 @@ const TAB_HELP = {
   micpractice:  'Practice mode shows you a chord to play and checks with the microphone that you hit it.',
   mictune:      'Mic Tune adjusts how the chord detector hears you — sensitivity, snapshot rate, and scan range.',
   listen:       'Play-Along is a game: chords scroll in time with a song while the microphone listens, scores each change, and tracks your improvement.',
+  levelplan:    'The Level Plan is your roadmap from Beginner to Master. It tracks the milestones the app can measure and points you to the exact tab to practice the rest.',
+  fbmeasure:    'Fretboard Measures visualizes the physical geometry of the neck and measures the exact horizontal, vertical, and diagonal hand stretch between the fingers you place, in millimetres.',
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
   chords:       'The Chords tab is a table of chord shapes, each rated from one to ten for how hard it is for your hand.',
   import:       'The Import tab lets you paste a chord sheet and save it as your own playable song with hand-friendly chords.',
@@ -159,6 +175,7 @@ export default function App() {
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [limitToReach, setLimitToReach] = useState(loadLimitToReach);
+  const [limitToLevel, setLimitToLevel] = useState(loadLimitToLevel);
   const [currentUser, setCurrentUser] = useState(null);
   // Guest mode: use the app without an account. Nothing is persisted — the hand
   // profile and any edits live only in this tab's memory and vanish on close.
@@ -196,6 +213,13 @@ export default function App() {
   function handleLimitToReach(on) {
     setLimitToReach(on);
     try { localStorage.setItem('guitar_limit_to_reach', on ? '1' : '0'); } catch {}
+  }
+
+  // Toggle the app-wide "limit everything by my level" preference (persisted
+  // locally, applies whether signed in or not — the same as limitToReach).
+  function handleLimitToLevel(on) {
+    setLimitToLevel(on);
+    try { localStorage.setItem('guitar_limit_to_level', on ? '1' : '0'); } catch {}
   }
 
   // When a session is restored or a user signs in, switch the UI to the language
@@ -372,6 +396,7 @@ export default function App() {
         'guitar_ai_fingers',
         'guitar_lang',
         'guitar_limit_to_reach',
+        'guitar_limit_to_level',
         'guitar_songs',
         'guitar_custom_songs',
         'guitar_saved_sequences',
@@ -406,6 +431,13 @@ export default function App() {
               {tr.appSubtitle}
             </p>
           </div>
+          {/* Level Plan — the Beginner→Master roadmap, reachable from anywhere. */}
+          <button onClick={() => setActiveTab('levelplan')}
+            data-explain="The Level Plan button opens your roadmap from Beginner to Master."
+            className="text-xs px-2 py-1 rounded font-semibold text-brand border border-surface-550 flex items-center gap-1">
+            <span>🗺️</span>
+            <span className="hidden sm:inline">{tr.tabLevelPlan || 'Level Plan'}</span>
+          </button>
           {currentUser ? (
             <div className="flex items-center gap-2">
               <button onClick={() => setShowSettings(true)}
@@ -524,6 +556,7 @@ export default function App() {
       <AIFingerContext.Provider value={aiFingers}>
       <HandProfileContext.Provider value={handProfile}>
       <ReachLimitContext.Provider value={limitToReach}>
+      <LevelLimitContext.Provider value={limitToLevel}>
         <div className="min-h-screen bg-surface-base">
           {showSettings && currentUser && (
             <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
@@ -539,6 +572,8 @@ export default function App() {
                     onLangSelect={handleLangSelect}
                     limitToReach={limitToReach}
                     onLimitToReachChange={handleLimitToReach}
+                    limitToLevel={limitToLevel}
+                    onLimitToLevelChange={handleLimitToLevel}
                   />
                 </div>
               </div>
@@ -564,6 +599,7 @@ export default function App() {
             </div>
           </main>
         </div>
+      </LevelLimitContext.Provider>
       </ReachLimitContext.Provider>
       </HandProfileContext.Provider>
       </AIFingerContext.Provider>
@@ -577,6 +613,7 @@ export default function App() {
     <AIFingerContext.Provider value={aiFingers}>
     <HandProfileContext.Provider value={handProfile}>
     <ReachLimitContext.Provider value={limitToReach}>
+    <LevelLimitContext.Provider value={limitToLevel}>
       <div className="min-h-screen bg-surface-base">
 
         {/* Ambient 3D backdrop — a subtle shader layer behind all content.
@@ -632,6 +669,8 @@ export default function App() {
                   onLangSelect={handleLangSelect}
                   limitToReach={limitToReach}
                   onLimitToReachChange={handleLimitToReach}
+                  limitToLevel={limitToLevel}
+                  onLimitToLevelChange={handleLimitToLevel}
                 />
               </div>
             </div>
@@ -764,6 +803,8 @@ export default function App() {
             {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
+            {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={setActiveTab} />}
+            {activeTab === 'fbmeasure'    && <FretboardMeasures lang={lang} />}
             {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}
             {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" />}
             {activeTab === 'mictune'      && <ChordListener lang={lang} mode="tune" />}
@@ -781,6 +822,7 @@ export default function App() {
         {/* Floating AI advisor — music-theory + guitar + this-app consultant */}
         <AdvisorWidget activeTab={activeTab} />
       </div>
+    </LevelLimitContext.Provider>
     </ReachLimitContext.Provider>
     </HandProfileContext.Provider>
     </AIFingerContext.Provider>

@@ -3,61 +3,73 @@ export const STANDARD_TUNING = ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'];
 export const NUM_STRINGS = 6;
 export const NUM_FRETS = 22;
 
-// Average fret spacing in mm (decreases as frets go higher, approximated linearly)
-// Open position frets are ~35mm wide, 12th fret ~18mm
-function fretSpacingMm(fret) {
-  return Math.max(18, 35 - fret * 0.77);
-}
+// Physical fretboard geometry is now shared with the Fretboard Measures
+// visualizer (lib/geometry.js): exact equal-temperament ("Rule of 18") fret
+// spacing and the real tapered string span, in mm. calcDifficulty and every
+// distance below measure through it, so the number the app scores and the
+// picture the tool draws are the same physics.
+import { CLASSICAL, maxReachMm } from './geometry';
 
-// Physical distance in mm between two fret positions on the same string
+// Physical distance in mm along the neck between two fret positions on one
+// string (kept for the transition model's neck-shift term). Measured through
+// the shared geometry so it uses the real Rule-of-18 spacing.
 function fretDistanceMm(fret1, fret2) {
-  const lo = Math.min(fret1, fret2);
-  const hi = Math.max(fret1, fret2);
-  let dist = 0;
-  for (let f = lo; f < hi; f++) {
-    dist += fretSpacingMm(f);
-  }
-  return dist;
+  return Math.abs(CLASSICAL.noteX(fret2) - CLASSICAL.noteX(fret1));
 }
 
-// String spacing ~11mm apart (standard)
-const STRING_SPACING_MM = 11;
+// Calibration of the difficulty curve, tuned so the exact geometry reproduces
+// the app's established 1–10 scale (open chords ~2.4–4.8, barres ~5.1–5.8) —
+// the scale every downstream ceiling (LEVEL_CEILINGS, diffMax, "limit to my
+// reach") is calibrated against. Fitting the exact max-pair reach (mm) of the
+// real library shapes to their prior scores gives DIV≈126, EXP≈1.32:
+//   ~9mm  (Em)              → ~1.3
+//   ~18mm (A)               → ~1.7
+//   ~35mm (D)               → ~2.6
+//   ~49mm (G)               → ~3.6
+//   ~62mm (D barre)         → ~4.5
+//   ~74mm (C / full F barre)→ ~5.4
+//   ≥165mm                  → 10
+const REACH_DIVISOR = 126;
+const REACH_EXPONENT = 1.32;
+
+// Map a physical max-pair reach (mm) onto the 1–10 difficulty scale.
+function reachToScore(reachMm) {
+  const score = 1 + 9 * Math.pow(reachMm / REACH_DIVISOR, REACH_EXPONENT);
+  return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
+}
 
 /**
  * Calculate reach difficulty score (1-10) for a set of fret positions.
+ *
+ * The raw geometry is the exact Euclidean stretch (mm) between the two
+ * furthest-apart notes of the shape, measured on the real classical neck
+ * (lib/geometry.js) — the SAME distance the Fretboard Measures tool shows.
+ *
+ * When a hand `profile` is supplied, the score is additionally scaled by how
+ * far the shape over-taxes THAT hand's actual finger spans (handStrainFactor,
+ * the per-finger reach model): a small hand feels a wide shape as strictly
+ * harder, an average hand sees the population-average geometry unchanged. Called
+ * with one argument (the module-load voicing caches, the "limit to reach"
+ * filters) it returns the population-average score, unchanged in meaning.
+ *
  * @param {Array<{string: number, fret: number}>} notes  - array of {string (0-5), fret (0-22)}
+ * @param {object} [profile]  - optional hand profile (span measurements in cm)
  * @returns {number} score 1-10
  */
-export function calcDifficulty(notes) {
+export function calcDifficulty(notes, profile) {
   if (!notes || notes.length < 2) return 1;
 
-  const frets = notes.map(n => n.fret);
-  const strings = notes.map(n => n.string);
+  // Exact diagonal stretch (mm) between the two furthest notes — one geometry,
+  // shared with the visualizer.
+  const reachMm = maxReachMm(notes, CLASSICAL);
+  let score = reachToScore(reachMm);
 
-  const fretSpan = Math.max(...frets) - Math.min(...frets);
-  const stringSpan = Math.max(...strings) - Math.min(...strings);
-
-  // Physical fret reach in mm
-  const fretReachMm = fretDistanceMm(Math.min(...frets), Math.max(...frets));
-  // Physical string reach in mm
-  const stringReachMm = stringSpan * STRING_SPACING_MM;
-
-  // Diagonal reach (Euclidean)
-  const totalReachMm = Math.sqrt(fretReachMm ** 2 + stringReachMm ** 2);
-
-  // Nonlinear calibration anchored on real shapes. The min→max diagonal
-  // overstates effort for multi-finger chords (fingers share the span one
-  // gap at a time), so the curve is convex: everyday shapes sit mid-scale
-  // and only genuinely extreme spans reach the top.
-  //   ~11mm (Em)            → ~1.2
-  //   ~22mm (A)             → ~1.9
-  //   ~64mm (G)             → ~3.9
-  //   ~75mm (C, 3-fret arc) → ~4.7
-  //   ~87mm (full F barre)  → ~5.7
-  //   ~101mm (4-fret span)  → ~7.0
-  //   ≥130mm                → 10
-  const score = 1 + 9 * Math.pow(totalReachMm / 130, 1.6);
-  return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
+  // Personalize: fold in how much this shape over-taxes the given hand.
+  if (profile) {
+    score = Math.min(10, score * handStrainFactor(notes, profile));
+    score = Math.round(score * 10) / 10;
+  }
+  return score;
 }
 
 // Reference comfortable gap maxima (cm), 95th percentile
@@ -82,19 +94,46 @@ function fretDistanceCm(f1, f2) {
  * Returns { thumbToIndex, indexToMiddle, middleToRing, ringToLittle } — each 0..1+
  * Returns null when the chord has fewer than 1 fretted note.
  *
- * Finger assignment: sorted distinct fretted frets → index, middle, ring, pinky.
- * T→I uses the position of the index finger (thumb anchors ~2 frets below).
+ * Finger assignment comes from optimalFingering, so a BARRE is respected: the
+ * index barres one fret (it does not "reach" up to the next finger's fret), and
+ * gaps are measured between the frets where CONSECUTIVE fingers actually land.
+ * Earlier this naïvely mapped distinct frets → index,middle,ring,pinky, which
+ * mis-read a barre like C(x35553): it reported a 6.5 cm index→middle stretch
+ * (fret 3→5) when the index is flat-barred on 3 and the middle isn't the finger
+ * on 5 at all — flagging an easy barre as "135% of capacity".
  */
 export function fingerGapUsage(notes) {
   if (!notes || notes.length === 0) return null;
-  const frettedFrets = [...new Set(notes.map(n => n.fret).filter(f => f > 0))].sort((a, b) => a - b);
-  if (frettedFrets.length === 0) return null;
+  const fing = optimalFingering(notes);
+  if (!fing) return null;
 
-  const ff = frettedFrets.slice(0, 4);
-  const ti = fretDistanceCm(Math.max(0, ff[0] - 2), ff[0]);
-  const im = ff.length >= 2 ? fretDistanceCm(ff[0], ff[1]) : 0;
-  const mr = ff.length >= 3 ? fretDistanceCm(ff[1], ff[2]) : 0;
-  const rp = ff.length >= 4 ? fretDistanceCm(ff[2], ff[3]) : 0;
+  // The fret each finger (1=index…4=pinky) presses. For a barre, the index is
+  // pinned to the barre fret. Take the lowest fret a finger touches as its spot.
+  const fretByFinger = new Map();
+  for (const a of fing.assignment) {
+    const cur = fretByFinger.get(a.finger);
+    if (cur == null || a.fret < cur) fretByFinger.set(a.finger, a.fret);
+  }
+  const idx = fretByFinger.get(1);
+  const mid = fretByFinger.get(2);
+  const ring = fretByFinger.get(3);
+  const pinky = fretByFinger.get(4);
+
+  // A BARRE changes what the gaps mean. The index lies FLAT across the barre
+  // fret — it is not part of a finger-to-finger splay, and the notes above the
+  // barre are pressed by the free fingers (middle/ring/pinky) with the whole
+  // hand supporting them, not by an index→middle scissor stretch. So for a barre
+  // we drop the thumb→index and index→middle splay terms (they don't describe a
+  // real stretch here) and only score the splay AMONG the free fingers above the
+  // barre. This stops normal barre shapes like C(x35553) from being flagged as a
+  // 2-fret "index→middle" over-stretch the player never actually performs.
+  const barred = fing.barreFret != null;
+
+  const anchorFret = idx ?? mid ?? ring ?? pinky ?? 0;
+  const ti = barred ? 0 : fretDistanceCm(Math.max(0, anchorFret - 2), anchorFret);
+  const im = !barred && idx != null && mid != null ? fretDistanceCm(idx, mid) : 0;
+  const mr = mid != null && ring != null ? fretDistanceCm(mid, ring) : 0;
+  const rp = ring != null && pinky != null ? fretDistanceCm(ring, pinky) : 0;
 
   return {
     thumbToIndex:  ti / GAP_REF_MAX.thumbToIndex,

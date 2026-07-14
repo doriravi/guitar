@@ -134,6 +134,18 @@ export const songs = {
     apiFetch(`/api/users/me/songs/${id}`, { method: 'DELETE' }),
 };
 
+// Chord-recording SCORES (no audio) — a graded attempt at a named chord, saved
+// for later level/skill indication. Mirrors the songs group's shape.
+export const recordings = {
+  list: () => apiFetch('/api/users/me/recordings'),
+
+  save: ({ chord, score, level, quality }) =>
+    apiFetch('/api/users/me/recordings', {
+      method: 'POST',
+      body: JSON.stringify({ chord, score, level, quality }),
+    }),
+};
+
 export const user = {
   update: (data) =>
     apiFetch('/api/users/me', { method: 'PUT', body: JSON.stringify(data) }),

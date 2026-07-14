@@ -14,8 +14,9 @@ import { useT } from '../lib/i18n';
 // WebGPU it renders nothing and the styled placeholder below carries the strip.
 // Static-literal specifier so Vite can split it (see Lazy3D / vite.config.js).
 const loadParticleField = () => import('./three/ParticleField3D');
-import { useHandProfile, useAIFingers } from '../App';
+import { useHandProfile, useAIFingers, useLevelLimit } from '../App';
 import { recommendedMaxDifficulty, abilityLabel } from '../lib/handProfile';
+import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
 import { MAJOR_PROGRESSIONS } from '../lib/progressions';
 import { getDiatonicChords } from '../lib/scales';
 import { compose } from '../lib/api';
@@ -23,12 +24,12 @@ import { allLibrarySongs, songToComposerSong } from '../lib/composerLibrary';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const OPEN_HZ      = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
-const OPEN_MIDI    = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 B3 E4
+export const OPEN_HZ      = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
+export const OPEN_MIDI    = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 B3 E4
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
-const NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+export const NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const NOTE_FLAT    = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-const STRING_COLORS= ['#a78bfa','#38bdf8','#34d399','#c9a96e','#fb923c','#f87171'];
+export const STRING_COLORS= ['#a78bfa','#38bdf8','#34d399','#c9a96e','#fb923c','#f87171'];
 const STRING_THICK = [3.5, 3.0, 2.5, 2.0, 1.5, 1.0];
 const FRET_COUNT   = 12;
 const MARKER_FRETS = [3,5,7,9,12];
@@ -116,7 +117,7 @@ export function getComposerAnalyser() {
   return _analyser;
 }
 
-function pluck(hz, decay = 2.2) {
+export function pluck(hz, decay = 2.2) {
   const ctx = getCtx();
   const now = ctx.currentTime;
   const env = ctx.createGain();
@@ -269,7 +270,7 @@ function beatDifficulty(frets, capo = 0) {
 // Shared visual component used by all three modes.
 // dotStyle(s, f) → null | { bg, color, glow, label }
 
-function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0, vibrateApiRef }) {
+export function Fretboard({ dotStyle, onFretClick, onOpenClick, capo = 0, vibrateApiRef }) {
   // Horizontal center of a fret column, as a CSS calc(). The left label+open
   // area is a fixed 84px; the remaining width is split into FRET_COUNT columns.
   const fretCenter = (fretNum) =>
@@ -903,10 +904,17 @@ function ChordDiagram({ chord, isActive, onClick }) {
   );
 }
 
-function ChordFinderMode({ diffMax, tr }) {
+function ChordFinderMode({ diffMax: diffMaxProp, tr }) {
   const [search, setSearch]       = useState('');
   const [selectedName, setSelectedName] = useState('Am');
   const [activeVoicing, setActiveVoicing] = useState(null);
+
+  // "Limit by my level": cap the effective difficulty at the tier ceiling so both
+  // the name list and voicing list hide anything above the player's level.
+  const handProfile = useHandProfile();
+  const limitToLevel = useLevelLimit();
+  const levelCeil = currentLevelCeiling({ handProfile, manual: loadManual() });
+  const diffMax = (limitToLevel && levelCeil < 10) ? Math.min(diffMaxProp, levelCeil) : diffMaxProp;
 
   // All voicings for selected chord name, filtered by difficulty
   const voicings = useMemo(() =>

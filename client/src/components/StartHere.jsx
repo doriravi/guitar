@@ -4,10 +4,14 @@ import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
 import { personalDifficulty, abilityLabel, DEFAULT_PROFILE } from '../lib/handProfile';
 import { playProgression, stopAudio, audioDebug } from '../lib/audio';
-import { useHandProfile } from '../App';
+import { useHandProfile, useLevelLimit, useAuth } from '../App';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import { useT } from '../lib/i18n';
+import { useChordRecorder, qualityLabel, bestForChord, GRADE_COLOR } from '../lib/chordRecordings';
+import { gradeFor } from '../lib/practiceGame';
+import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
+import { recordings as recordingsApi } from '../lib/api';
 
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
 
@@ -44,6 +48,8 @@ export default function StartHere({ lang, onGoToHand }) {
 
   const usingDefault = isDefaultProfile(handProfile);
   const ability = abilityLabel(handProfile);
+  const limitToLevel = useLevelLimit();
+  const levelCeil = currentLevelCeiling({ handProfile, manual: loadManual() });
 
   const shortlist = useMemo(() => {
     const byName = new Map();
@@ -57,9 +63,11 @@ export default function StartHere({ lang, onGoToHand }) {
         const raw = calcDifficulty(chord.notes);
         return { ...chord, score: raw, personalScore: personalDifficulty(raw, handProfile) };
       })
+      // "Limit by my level": drop any shortlist chord above the tier ceiling.
+      .filter(chord => !(limitToLevel && levelCeil < 10) || chord.score <= levelCeil)
       .sort((a, b) => a.personalScore - b.personalScore)
       .slice(0, HOW_MANY);
-  }, [handProfile]);
+  }, [handProfile, limitToLevel, levelCeil]);
 
   // Auto-rotate the 3D carousel. Pauses while a chord is playing (so you can hear
   // the one in front) and on hover, so it never spins away from what you're doing.
@@ -79,6 +87,39 @@ export default function StartHere({ lang, onGoToHand }) {
     // temp diagnostics: read the audio state right after kicking off playback
     setTimeout(() => setAudioDbg(audioDebug()), 50);
   }, [playing]);
+
+  // ── Record a chord attempt: mic → grade with the Play-Along scorer → save the
+  // score (no audio) locally, and push to the backend when logged in. `recResult`
+  // holds the last result per chord name so each card can show its own badge.
+  const recorder = useChordRecorder();
+  const loggedIn = !!useAuth();
+  const [recChord, setRecChord] = useState(null);          // chord name currently recording
+  const [recResult, setRecResult] = useState(() => {       // { [chordName]: result }
+    const seed = {};
+    for (const name of BEGINNER_CANDIDATES) {
+      const best = bestForChord(name);
+      // Backfill a grade for records saved before grading existed.
+      if (best) seed[name] = { ...best, grade: best.grade || gradeFor(best.score) };
+    }
+    return seed;
+  });
+
+  const recordChord = useCallback(async (chord) => {
+    if (recChord) return;                 // one mic at a time
+    stopAudio(); setPlaying(null);
+    setRecChord(chord.name);
+    const out = await recorder.record(chord.name);
+    setRecChord(null);
+    if (out) {
+      setRecResult(prev => ({ ...prev, [chord.name]: out }));
+      // Best-effort backend save; local copy is the source of truth if offline.
+      if (loggedIn) {
+        recordingsApi.save({
+          chord: out.chord, score: out.score, level: out.level, quality: out.quality,
+        }).catch(() => { /* stays local, synced later */ });
+      }
+    }
+  }, [recChord, recorder, loggedIn]);
 
   return (
     <div className="p-4 sm:p-6">
@@ -172,6 +213,9 @@ export default function StartHere({ lang, onGoToHand }) {
                           {fingerHint(chord.notes)}
                         </div>
 
+                        {/* Spacer pushes the action group to the bottom of the card */}
+                        <div className="flex-1" />
+
                         <button
                           onClick={(e) => { e.stopPropagation(); playChord(chord); }}
                           disabled={!isFront}
@@ -180,6 +224,51 @@ export default function StartHere({ lang, onGoToHand }) {
                         >
                           {isPlaying ? `■ ${tr.startHereStop || 'Stop'}` : `▶ ${tr.startHerePlay || 'Hear it'}`}
                         </button>
+
+                        {/* Record it — mic-grade this chord and save the score */}
+                        {(() => {
+                          const rec = recChord === chord.name;
+                          const res = recResult[chord.name];
+                          return (
+                            <>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); recordChord(chord); }}
+                                disabled={!isFront || (!!recChord && !rec)}
+                                className={`w-full text-sm font-semibold py-2 rounded-lg transition-all mt-2 ${rec ? 'text-danger' : 'bg-surface-700 text-ink-subtle'}`}
+                                style={rec ? { background: 'rgba(239,68,68,0.15)' } : undefined}
+                              >
+                                {rec
+                                  ? `● ${recorder.state === 'scoring' ? (tr.startHereScoring || 'Scoring…') : (tr.startHereRecording || 'Listening…')}`
+                                  : `● ${tr.startHereRecord || 'Record it'}`}
+                              </button>
+                              {res && !rec && (
+                                <div
+                                  className="w-full mt-2 rounded-lg px-2 py-1.5 flex items-center gap-2 text-xs"
+                                  style={{ background: 'var(--color-surface-700)' }}
+                                >
+                                  {/* Letter grade — the headline result, same S/A/B/C/D scale as Play-Along */}
+                                  <span
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-base font-extrabold shrink-0"
+                                    style={{
+                                      color: GRADE_COLOR[res.grade] || 'var(--color-ink)',
+                                      border: `2px solid ${GRADE_COLOR[res.grade] || 'var(--color-ink)'}`,
+                                    }}
+                                    title={`${tr.startHereGrade || 'Grade'} ${res.grade}`}
+                                  >
+                                    {res.grade}
+                                  </span>
+                                  <div className="min-w-0 flex-1 flex flex-col leading-tight">
+                                    <span className="font-semibold text-ink">{qualityLabel(res.quality)}</span>
+                                    <span className="text-ink-faint">{tr.startHereLevel || 'Lvl'} {res.level}/10 · {res.score}%</span>
+                                  </div>
+                                </div>
+                              )}
+                              {rec && recorder.error && (
+                                <div className="w-full mt-2 text-xs text-danger">{recorder.error}</div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   );

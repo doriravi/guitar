@@ -28,6 +28,8 @@ import { loadCustomSongs } from '../lib/customSongs';
 import { loadCatalogSongs } from '../lib/catalogSongs';
 import { loadComposerSongs, composerSongToLyricSong } from '../lib/composerLibrary';
 import { filterSongsByReach, chordWithinReach, songAllChordNames } from '../lib/songReach';
+import { filterSongsByLevel } from '../lib/levelFilter';
+import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
 import { buildSessionReport } from '../lib/practiceReport';
 import { personalDifficulty } from '../lib/handProfile';
 import { calcDifficulty } from '../lib/fretboard';
@@ -38,7 +40,7 @@ import {
   loadDrillSets, saveDrillSet, deleteDrillSet, hydrateDrillSet,
   SPEED_STEPS, buildDrillLevel, nextDrillLevel,
 } from '../lib/transitionDrills';
-import { useHandProfile, useReachLimit } from '../App';
+import { useHandProfile, useReachLimit, useLevelLimit } from '../App';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
@@ -99,7 +101,7 @@ const SILENCE_PAUSE_MS = 8000;   // sustained silence → auto-pause
 // in +10% steps (level N = N×10% speed). The difficulty pill picks the
 // STARTING level; the game then climbs one level per RAMP_EVERY_SEC of actual
 // playing until level MAX_LEVEL (double tempo).
-const RAMP_EVERY_SEC = 10;
+const RAMP_EVERY_SEC = 60;
 // Human phrase for the ramp interval, single-sourced from RAMP_EVERY_SEC so all
 // copy stays correct if it changes (e.g. "every 10 seconds", "every minute").
 const RAMP_LABEL = RAMP_EVERY_SEC % 60 === 0
@@ -300,6 +302,8 @@ function DrillPicker({ drillItems, savedMsg, onPlay, onDeleteSet, histTick }) {
 export default function PracticeGame({ cfg }) {
   const profile = useHandProfile();
   const limitToReach = useReachLimit();
+  const limitToLevel = useLevelLimit();
+  const levelCeil = currentLevelCeiling({ handProfile: profile, manual: loadManual() });
 
   // ── Screen phase ──
   const [phase, setPhase] = useState('select');   // select | playing | paused | done
@@ -440,7 +444,11 @@ export default function PracticeGame({ cfg }) {
     const reachFiltered = limitToReach
       ? withOcc.filter(x => filterSongsByReach([x.song], profile, true).length)
       : withOcc;
-    return reachFiltered.map(({ song: s, occ }) => {
+    // "Limit by my level": also drop songs containing any above-tier chord.
+    const levelFiltered = (limitToLevel && levelCeil < 10)
+      ? reachFiltered.filter(x => filterSongsByLevel([x.song], levelCeil, true).length)
+      : reachFiltered;
+    return levelFiltered.map(({ song: s, occ }) => {
       const key = songKeyOf(s);
       const uniq = songAllChordNames(s);
       let hardest = 0;
@@ -460,7 +468,7 @@ export default function PracticeGame({ cfg }) {
       };
     }).sort((a, b) => (a.song.title || '').localeCompare(b.song.title || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customSongs, composerSongs, catalogSongs, profile, limitToReach, histTick]);
+  }, [customSongs, composerSongs, catalogSongs, profile, limitToReach, limitToLevel, levelCeil, histTick]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();

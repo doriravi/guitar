@@ -8,10 +8,11 @@
   padding: 0 8px;
 }
 
-/* The perspective scene. Height fits a card; perspective gives real depth. */
+/* The perspective scene. Height fits a card; perspective gives real depth.
+   Tall enough to hold the full front card incl. Record button + result badge. */
 .sh-stage {
   position: relative;
-  height: 340px;
+  height: 460px;
   perspective: 1100px;
   perspective-origin: 50% 45%;
 }
@@ -34,7 +35,7 @@
   top: 0;
   left: 0;
   width: 260px;
-  height: 320px;
+  height: 440px;
   backface-visibility: hidden;
   cursor: pointer;
   transition: opacity 0.5s ease, filter 0.5s ease;
@@ -109,7 +110,7 @@
 
 /* Narrow screens: smaller ring so side cards don't overflow. */
 @media (max-width: 520px) {
-  .sh-stage { height: 320px; }
+  .sh-stage { height: 440px; }
   .sh-ring, .sh-card { width: 220px; }
-  .sh-card { height: 300px; }
+  .sh-card { height: 420px; }
 }

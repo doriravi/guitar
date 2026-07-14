@@ -3,6 +3,7 @@ import { user as userApi } from '../lib/api';
 import { useT, LANGUAGES } from '../lib/i18n';
 import { useHandProfile } from '../App';
 import { recommendedMaxDifficulty, abilityLabel, flexibilityLabel } from '../lib/handProfile';
+import { currentTier, currentLevelCeiling, loadManual } from '../lib/levelPlan';
 
 function Section({ title, children }) {
   return (
@@ -27,12 +28,16 @@ const inputStyle = {
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
 
-export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect, limitToReach, onLimitToReachChange }) {
+export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect, limitToReach, onLimitToReachChange, limitToLevel, onLimitToLevelChange }) {
   const tr = useT(lang);
   const profile = useHandProfile();
   const reachCeiling = recommendedMaxDifficulty(profile);
   const reach = abilityLabel(profile);
   const flex = flexibilityLabel(profile);
+  // Current Level-Plan tier + its content ceiling, for the "limit by level" toggle.
+  const levelCtx = { handProfile: profile, manual: loadManual() };
+  const tier = currentTier(levelCtx);
+  const levelCeil = currentLevelCeiling(levelCtx);
   const [name, setName] = useState(currentUser.name || '');
   const [email, setEmail] = useState(currentUser.email || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -46,6 +51,7 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
   const [limitSavedMsg, setLimitSavedMsg] = useState(false);
+  const [levelSavedMsg, setLevelSavedMsg] = useState(false);
 
   function handleLimitToggle(on) {
     onLimitToReachChange(on);
@@ -53,6 +59,12 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
     // nearby Profile "Save changes" button isn't mistaken for saving this too.
     setLimitSavedMsg(true);
     setTimeout(() => setLimitSavedMsg(false), 2500);
+  }
+
+  function handleLevelToggle(on) {
+    onLimitToLevelChange(on);
+    setLevelSavedMsg(true);
+    setTimeout(() => setLevelSavedMsg(false), 2500);
   }
 
   async function handleUpdateProfile(e) {
@@ -193,6 +205,49 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
               {limitToReach
                 ? `Shapes harder than ${reachCeiling}/10 for your hand are avoided or flagged.`
                 : 'Turn on to steer the whole app toward what you can play.'}
+            </p>
+          </div>
+        </Section>
+      )}
+
+      {onLimitToLevelChange && (
+        <Section title={tr.myLevel || 'My level'}>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!limitToLevel}
+              onChange={e => handleLevelToggle(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+            />
+            <span>
+              <span className="block text-sm text-ink">
+                {tr.limitToLevelLabel || 'Limit everything by my level'}
+                {levelSavedMsg && (
+                  <span className="ml-2 text-xs font-semibold" style={{ color: 'var(--color-success)' }}>
+                    {tr.saved || 'Saved'} ✓
+                  </span>
+                )}
+              </span>
+              <span className="block text-xs mt-1 text-ink-faint">
+                {tr.limitToLevelHelp ||
+                  'Hide chords — and songs that use them — that are above your current level, so you only see what fits where you are on the Level Plan.'}
+              </span>
+              <span className="block text-[11px] mt-1" style={{ color: 'var(--color-ink-ghost)' }}>
+                {tr.appliesInstantly || 'Applies instantly — no need to press “Save changes”.'}
+              </span>
+            </span>
+          </label>
+          <div className="mt-3 pt-3 border-t border-surface-650 text-xs text-ink-subtle">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>Your level: <span className="font-semibold text-brand">{tier}</span></span>
+              <span>Shows chords up to: <span className="font-semibold text-brand">{levelCeil}/10</span></span>
+            </div>
+            <p className="mt-1 text-ink-faint">
+              {limitToLevel
+                ? (levelCeil >= 10
+                    ? 'You’re at the top level — everything is shown.'
+                    : `Chords harder than ${levelCeil}/10, and any song that uses one, are hidden.`)
+                : 'Turn on to hide anything above your Level-Plan tier. Advance tiers to unlock more.'}
             </p>
           </div>
         </Section>

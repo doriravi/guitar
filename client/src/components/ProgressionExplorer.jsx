@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ROOT_NOTES, getDiatonicChords } from '../lib/scales';
 import { MAJOR_PROGRESSIONS, MINOR_PROGRESSIONS } from '../lib/progressions';
 import { fingerGapUsage, GAP_REF_MAX, transitionDifficulty, scoreTransition } from '../lib/fretboard';
-import { DEFAULT_PROFILE } from '../lib/handProfile';
+import { DEFAULT_PROFILE, gapStrain } from '../lib/handProfile';
 import { suggestEasierProgression } from '../lib/substitutions';
 import { suggestUpperProgression } from '../lib/upperVoicings';
 import { suggestTriadProgression } from '../lib/triadVoicings';
@@ -16,13 +16,15 @@ import { parseChordSheet } from '../lib/chordSheetParser';
 import { lookupVoicings } from '../lib/voicingLookup';
 import { resolveChordCells } from '../lib/songTimeline';
 import { filterSongsByReach } from '../lib/songReach';
+import { filterSongsByLevel } from '../lib/levelFilter';
+import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
 import { useT } from '../lib/i18n';
-import { useHandProfile, useAIFingers, useReachLimit } from '../App';
+import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
 
 function resolveForKey(root, scaleType, maxDiff) {
   const diatonic = getDiatonicChords(root, scaleType);
@@ -67,7 +69,8 @@ function FingerGapBars({ notes, profile }) {
     const refMax = GAP_REF_MAX[p.key];
     const requiredCm = rawFraction * refMax;
     const userCm = profile[p.key];
-    const userFraction = userCm > 0 ? requiredCm / userCm : requiredCm > 0 ? 2 : 0;
+    // On-neck strain (1-fret gaps are comfortable) — see gapStrain in handProfile.js.
+    const userFraction = gapStrain(requiredCm, userCm, p.key);
     return { ...p, rawFraction, userFraction, requiredCm, userCm };
   }).filter(p => p.rawFraction > 0.05);
 
@@ -1013,8 +1016,12 @@ function matchingSongs(progName, progDegrees, progScaleType, targetRoot, customS
   // (backend down and no cache yet).
   // When "limit to my reach" is on, hide any song with a chord ANYWHERE in it the
   // hand can't comfortably play — the whole song is excluded from the list + count.
-  const applyReach = (list) =>
-    reach?.limitToReach ? filterSongsByReach(list, reach.profile, true) : list;
+  // "Limit by my level" does the same against the tier's difficulty ceiling.
+  const applyReach = (list) => {
+    let out = reach?.limitToReach ? filterSongsByReach(list, reach.profile, true) : list;
+    if (reach?.limitToLevel && reach.levelCeil < 10) out = filterSongsByLevel(out, reach.levelCeil, true);
+    return out;
+  };
 
   if (catalogSongs.length) {
     const catalog = catalogSongs
@@ -1487,6 +1494,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   const handProfile = useHandProfile();
   const aiFingers   = useAIFingers();
   const limitToReach = useReachLimit();
+  const limitToLevel = useLevelLimit();
+  const levelCeil = currentLevelCeiling({ handProfile, manual: loadManual() });
   const [root,        setRoot]        = useState('C');
   const [scaleType,   setScaleType]   = useState('major');
   const [showHandFilters, setShowHandFilters] = useState(false);
@@ -1556,8 +1565,8 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
   // catalog songs (real chord names) against every card inside the render loop
   // froze the UI — each state change re-ran cards × songs × chords regex work.
   const reach = useMemo(
-    () => ({ profile: activeProfile, limitToReach }),
-    [activeProfile, limitToReach],
+    () => ({ profile: activeProfile, limitToReach, limitToLevel, levelCeil }),
+    [activeProfile, limitToReach, limitToLevel, levelCeil],
   );
   const songCounts = useMemo(() => {
     const counts = new Map();

@@ -10,6 +10,7 @@ import com.guitarreach.api.exception.ResourceNotFoundException;
 import com.guitarreach.api.exception.UnauthorizedException;
 import com.guitarreach.api.repository.PaymentRepository;
 import com.guitarreach.api.repository.SavedSongRepository;
+import com.guitarreach.api.repository.RecordingRepository;
 import com.guitarreach.api.repository.SubscriptionRepository;
 import com.guitarreach.api.repository.UserRepository;
 import com.guitarreach.api.repository.VerificationTokenRepository;
@@ -36,6 +37,7 @@ public class UserService {
     private final VerificationTokenRepository tokenRepository;
     private final PaymentRepository paymentRepository;
     private final SavedSongRepository savedSongRepository;
+    private final RecordingRepository recordingRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
@@ -99,6 +101,7 @@ public class UserService {
         paymentRepository.deleteByUserId(userId);
         tokenRepository.deleteByUserId(userId);
         savedSongRepository.deleteByUserId(userId);
+        recordingRepository.deleteByUserId(userId);
         subscriptionRepository.findByUserId(userId).ifPresent(subscriptionRepository::delete);
 
         // handProfile + subscription also cascade via the User entity; deleting

@@ -17,6 +17,41 @@ const REF_MAX = {
   ringToLittle:   7.5,
 };
 
+// ── Per-finger-gap strain (for the diagnostic gap bars) ───────────────────────
+// How strained one adjacent-finger gap is FOR A GIVEN HAND, as a fraction of
+// capacity (1.0 = at the limit). This replaces the old naïve `requiredCm/userCm`,
+// which mis-compared an on-neck fret gap against a FLAT-HAND splay measurement —
+// making a normal 1-fret gap (every basic open chord: Dm, C, Am…) read as
+// ~100–130% "over capacity" for smaller hands and flag easy chords red.
+//
+// The real physics: adjacent fingers curled on the fretboard ALWAYS sit ~1 fret
+// apart effortlessly — a 1-fret gap is not a stretch. Strain only accrues for
+// genuinely wide gaps (2+ frets). We calibrate per pair so a comfortable
+// average-hand fret gap reads ~0.4, the reference span ~1.0, and a smaller-than-
+// average span scales the same gap up proportionally.
+const GAP_COMFORT_CM = {
+  thumbToIndex:  7.0,
+  indexToMiddle: 8.0,
+  middleToRing:  8.0,
+  ringToLittle:  9.0,
+};
+
+/**
+ * Strain a single finger-gap places on this hand, as a fraction of capacity.
+ * @param {number} requiredCm  physical gap the shape demands (cm)
+ * @param {number} userCm      this hand's measured span for the pair (cm)
+ * @param {string} key         one of thumbToIndex|indexToMiddle|middleToRing|ringToLittle
+ * @returns {number} ~0 (trivial) … 1 (at limit) … >1 (beyond). 1-fret gaps land ~0.4.
+ */
+export function gapStrain(requiredCm, userCm, key) {
+  if (!(requiredCm > 0)) return 0;
+  const comfort = GAP_COMFORT_CM[key] || 8.0;
+  const avg = DEFAULT_PROFILE[key];
+  const demand = requiredCm / comfort;                 // 1-fret ≈ 0.4, ref span ≈ 1
+  const handFactor = avg / Math.max(0.5, userCm);      // smaller hand → harder
+  return demand * handFactor;
+}
+
 /**
  * Derive a personal reach-capacity multiplier from the user's measurements.
  * Returns a value ~1.0 for average hands, <1 for smaller hands (harder), >1 for larger.
