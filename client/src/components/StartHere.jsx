@@ -8,7 +8,7 @@ import { useHandProfile, useLevelLimit, useAuth } from '../App';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import { useT } from '../lib/i18n';
-import { useChordRecorder, qualityLabel, bestForChord, GRADE_COLOR } from '../lib/chordRecordings';
+import { useChordRecorder, qualityLabel, bestForChord, GRADE_COLOR, scoreToStars } from '../lib/chordRecordings';
 import { gradeFor } from '../lib/practiceGame';
 import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
 import { recordings as recordingsApi } from '../lib/api';
@@ -98,8 +98,8 @@ export default function StartHere({ lang, onGoToHand }) {
     const seed = {};
     for (const name of BEGINNER_CANDIDATES) {
       const best = bestForChord(name);
-      // Backfill a grade for records saved before grading existed.
-      if (best) seed[name] = { ...best, grade: best.grade || gradeFor(best.score) };
+      // Backfill grade + stars for records saved before grading existed.
+      if (best) seed[name] = { ...best, grade: best.grade || gradeFor(best.score), stars: best.stars ?? scoreToStars(best.score) };
     }
     return seed;
   });
@@ -238,9 +238,16 @@ export default function StartHere({ lang, onGoToHand }) {
                                 style={rec ? { background: 'rgba(239,68,68,0.15)' } : undefined}
                               >
                                 {rec
-                                  ? `● ${recorder.state === 'scoring' ? (tr.startHereScoring || 'Scoring…') : (tr.startHereRecording || 'Listening…')}`
+                                  ? (recorder.countdown > 0
+                                      ? `● ${tr.practiceGetReadyShort || 'Get ready'} ${recorder.countdown}`
+                                      : `● ${recorder.state === 'scoring' ? (tr.startHereScoring || 'Scoring…') : (tr.startHereRecording || 'Listening…')}`)
                                   : `● ${tr.startHereRecord || 'Record it'}`}
                               </button>
+                              {rec && recorder.countdown > 0 && (
+                                <div className="w-full mt-2 text-xs font-semibold text-center" style={{ color: 'var(--color-success)' }}>
+                                  🎤 {tr.practiceStarting || 'Recording — get ready!'} {tr.practiceStrumIn || 'Strum in'} {recorder.countdown}
+                                </div>
+                              )}
                               {res && !rec && (
                                 <div
                                   className="w-full mt-2 rounded-lg px-2 py-1.5 flex items-center gap-2 text-xs"
@@ -258,9 +265,19 @@ export default function StartHere({ lang, onGoToHand }) {
                                     {res.grade}
                                   </span>
                                   <div className="min-w-0 flex-1 flex flex-col leading-tight">
-                                    <span className="font-semibold text-ink">{qualityLabel(res.quality)}</span>
-                                    <span className="text-ink-faint">{tr.startHereLevel || 'Lvl'} {res.level}/10 · {res.score}%</span>
+                                    {/* 1-5 star grade */}
+                                    <span style={{ color: '#fbbf24', letterSpacing: '-1px' }}>
+                                      {'★'.repeat(res.stars || 0)}{'☆'.repeat(Math.max(0, 5 - (res.stars || 0)))}
+                                    </span>
+                                    <span className="text-ink-faint">{qualityLabel(res.quality)} · {res.score}%</span>
                                   </div>
+                                  {res.advancedMilestone && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                                      style={{ color: 'var(--color-success)', background: 'rgba(52,211,153,0.15)' }}
+                                      title={tr.practiceAdvanced || 'Passed — Level Plan advanced'}>
+                                      ▲ {tr.levelUp || 'Level Plan'}
+                                    </span>
+                                  )}
                                 </div>
                               )}
                               {rec && recorder.error && (

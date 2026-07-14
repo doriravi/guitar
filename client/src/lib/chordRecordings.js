@@ -14,6 +14,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useMic, detectPeaksConfigured, loadConfig } from './micDetect';
 import { classifyChordPCs, windowScorer, GRADE_POINTS, gradeFor } from './practiceGame';
+import { advanceForRecording } from './levelPlan';
 
 // One recording window: how long we listen, and the detection cadence — matched
 // to Play-Along (100 ms FFT ticks). 1.6 s is long enough for a strum to ring and
@@ -21,6 +22,9 @@ import { classifyChordPCs, windowScorer, GRADE_POINTS, gradeFor } from './practi
 const RECORD_MS = 1600;
 const FFT_MS = 100;
 const COUNT_IN_MS = 250;   // brief lead-in so the first frames aren't half-silence
+// A 5-second countdown before the chord window: the mic is live (so the user
+// can get set) but nothing is scored until it elapses. Mirrors scale practice.
+export const COUNTDOWN_MS = 5000;
 
 // A single-window "timeline" the scorer understands. durSec sets the onset-beat
 // scale inside windowScorer; we treat the whole capture as one 4-beat bar so the
@@ -59,6 +63,17 @@ export function scoreToLevel(score0to100) {
   return Math.max(1, Math.min(10, Math.round(score0to100 / 10)));
 }
 
+// 0-100 score → 1-5 star grade (shown to the user + gates Level-Plan advance).
+// Same thresholds as scale practice so a "grade" means the same everywhere:
+// <40→1, <55→2, <70→3, <85→4, else 5. A clean chord (70%+) earns 4★ and PASSES.
+export function scoreToStars(score0to100) {
+  if (score0to100 >= 85) return 5;
+  if (score0to100 >= 70) return 4;
+  if (score0to100 >= 55) return 3;
+  if (score0to100 >= 40) return 2;
+  return 1;
+}
+
 // ── Store (guitar_chord_recordings_v1) ────────────────────────────────────────
 
 const KEY = 'guitar_chord_recordings_v1';
@@ -91,6 +106,7 @@ export function saveRecording(rec) {
     synced: false,
     chord: rec.chord,
     score: rec.score,           // 0..100
+    stars: rec.stars,           // 1..5
     level: rec.level,           // 1..10
     grade: rec.grade,           // S|A|B|C|D letter grade
     quality: rec.quality,       // perfect|good|partial|miss|silent
@@ -220,6 +236,8 @@ export function useChordRecorder() {
   const [state, setState] = useState('idle');   // idle | recording | scoring
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  // 5..1 during the pre-strum countdown, 0 once the chord window begins, null idle.
+  const [countdown, setCountdown] = useState(null);
   const busyRef = useRef(false);
 
   // Ensure the mic is released if the component using the hook unmounts mid-record.
@@ -246,24 +264,35 @@ export function useChordRecorder() {
     }
 
     setState('recording');
+    setCountdown(Math.ceil(COUNTDOWN_MS / 1000));   // show "5" immediately
     const durSec = RECORD_MS / 1000;
     const scorer = windowScorer(targetWindow(chordName, durSec), cfg, null);
 
-    // Drive a fixed-length capture off rAF, sampling the FFT every FFT_MS. relSec
-    // is measured from the end of the short count-in so the onset gate is fair.
+    // A 5s COUNTDOWN runs first (mic live, nothing scored), THEN the fixed chord
+    // window is captured. relSec is measured from the end of the count-in so the
+    // onset gate is fair. tCapture0 marks when scoring actually starts.
     const started = performance.now();
+    const tCapture0 = COUNTDOWN_MS + COUNT_IN_MS;
     await new Promise((resolve) => {
       let lastFFT = 0;
+      let lastCountdown = -1;
       const tick = (now) => {
         const elapsed = now - started;
-        if (elapsed >= COUNT_IN_MS + RECORD_MS) { resolve(); return; }
-        if (elapsed - lastFFT >= FFT_MS) {
+        if (elapsed < COUNTDOWN_MS) {
+          const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
+          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+        } else if (lastCountdown !== 0) {
+          lastCountdown = 0; setCountdown(0);
+        }
+        if (elapsed >= tCapture0 + RECORD_MS) { resolve(); return; }
+        // Only feed the scorer AFTER the countdown — warm-up isn't graded.
+        if (elapsed >= COUNTDOWN_MS && elapsed - lastFFT >= FFT_MS) {
           lastFFT = elapsed;
           const rms = mic.current.getRMS();
           const fd = mic.current.getFreqData();
           if (fd) {
             const peaks = detectPeaksConfigured(fd, mic.current.sampleRate, mic.current.analyser.fftSize, cfg);
-            const relSec = Math.max(0, (elapsed - COUNT_IN_MS) / 1000);
+            const relSec = Math.max(0, (elapsed - tCapture0) / 1000);
             scorer.add(peaks, rms, relSec);
           }
         }
@@ -273,6 +302,7 @@ export function useChordRecorder() {
     });
 
     setState('scoring');
+    setCountdown(null);
     try { mic.current.close(); } catch { /* noop */ }
 
     const final = scorer.final();
@@ -283,17 +313,21 @@ export function useChordRecorder() {
     const out = {
       chord: chordName,
       score,
+      stars: scoreToStars(score),   // 1-5 — the grade shown + Level-Plan gate
       level: scoreToLevel(score),
       grade: gradeFor(score),   // S|A|B|C|D — same scale as the Play-Along summary
       quality: final.quality,
     };
 
     saveRecording(out);
+    // A strong take (stars > 3) advances the Level Plan by completing the
+    // open-chords milestone. Weak takes are a no-op.
+    out.advancedMilestone = advanceForRecording({ kind: 'chord', name: chordName, stars: out.stars });
     setResult(out);
     setState('idle');
     busyRef.current = false;
     return out;
   }, [mic]);
 
-  return { record, state, result, error };
+  return { record, state, result, error, countdown };
 }

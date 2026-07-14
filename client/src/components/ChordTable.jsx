@@ -4,7 +4,7 @@ import { calcDifficulty, fingerGapUsage, GAP_REF_MAX, optimalFingering } from '.
 import { personalDifficulty, gapStrain } from '../lib/handProfile';
 import { useHandProfile, useLevelLimit, useAuth } from '../App';
 import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
-import { useChordRecorder, bestForChord, GRADE_COLOR, qualityLabel } from '../lib/chordRecordings';
+import { useChordRecorder, bestForChord, GRADE_COLOR, qualityLabel, scoreToStars } from '../lib/chordRecordings';
 import { gradeFor } from '../lib/practiceGame';
 import { recordings as recordingsApi } from '../lib/api';
 import DifficultyBadge from './DifficultyBadge';
@@ -143,7 +143,7 @@ function useRowWindow(containerRef, rowCount, rowHeight) {
 
 const ChordRow = memo(function ChordRow({
   r, isPersonal, handProfile, tr, showTooltip, hideTooltip,
-  onRecord, recording, recState, recError, result, recordDisabled,
+  onRecord, recording, recState, recCountdown, recError, result, recordDisabled,
 }) {
   return (
     <tr
@@ -187,21 +187,32 @@ const ChordRow = memo(function ChordRow({
             title={tr.practiceHint || 'Record yourself playing this chord'}
           >
             {recording
-              ? `● ${recState === 'scoring' ? (tr.scoring || 'Scoring…') : (tr.listening || 'Listening…')}`
+              ? (recCountdown > 0
+                  ? `● ${tr.practiceGetReadyShort || 'Get ready'} ${recCountdown}`
+                  : `● ${recState === 'scoring' ? (tr.scoring || 'Scoring…') : (tr.listening || 'Listening…')}`)
               : `● ${tr.practice || 'Practice'}`}
           </button>
+          {recording && recCountdown > 0 && (
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-success)' }}>
+              {tr.practiceStarting || 'Recording — get ready!'} {tr.practiceStrumIn || 'Strum in'} {recCountdown}s
+            </span>
+          )}
           {result && !recording && (
             <span
               className="inline-flex items-center gap-1 text-xs"
-              title={`${qualityLabel(result.quality)} · Lvl ${result.level}/10 · ${result.score}%`}
+              title={`${qualityLabel(result.quality)} · ${result.stars ?? '–'}/5★ · ${result.score}%`}
             >
-              <span
-                className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-extrabold shrink-0"
-                style={{ color: GRADE_COLOR[result.grade] || 'var(--color-ink)', border: `1.5px solid ${GRADE_COLOR[result.grade] || 'var(--color-ink)'}` }}
-              >
-                {result.grade}
+              {/* 1-5 star grade */}
+              <span className="tabular-nums text-[11px]" style={{ color: '#fbbf24', letterSpacing: '-1px' }}>
+                {'★'.repeat(result.stars || 0)}{'☆'.repeat(Math.max(0, 5 - (result.stars || 0)))}
               </span>
               <span className="tabular-nums text-ink-faint">{result.score}%</span>
+              {result.advancedMilestone && (
+                <span className="text-[10px] font-bold px-1 rounded" style={{ color: 'var(--color-success)', background: 'rgba(52,211,153,0.15)' }}
+                  title={tr.practiceAdvanced || 'Passed — Level Plan advanced'}>
+                  ▲ {tr.levelUp || 'Level Plan'}
+                </span>
+              )}
             </span>
           )}
           {recording && recError && <span className="text-xs text-danger">{recError}</span>}
@@ -247,7 +258,7 @@ export default function ChordTable({ lang }) {
   const resultFor = useCallback((name) => {
     if (recResults[name]) return recResults[name];
     const b = bestForChord(name);
-    return b ? { ...b, grade: b.grade || gradeFor(b.score) } : null;
+    return b ? { ...b, grade: b.grade || gradeFor(b.score), stars: b.stars ?? scoreToStars(b.score) } : null;
   }, [recResults]);
 
   const rows = useMemo(() => {
@@ -390,6 +401,7 @@ export default function ChordTable({ lang }) {
                 onRecord={recordChord}
                 recording={recChord === r.name}
                 recState={recChord === r.name ? recorder.state : null}
+                recCountdown={recChord === r.name ? recorder.countdown : null}
                 recError={recChord === r.name ? recorder.error : null}
                 result={resultFor(r.name)}
                 recordDisabled={!!recChord && recChord !== r.name}

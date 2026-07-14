@@ -21,6 +21,7 @@ import { MAJOR_PROGRESSIONS } from '../lib/progressions';
 import { getDiatonicChords } from '../lib/scales';
 import { compose } from '../lib/api';
 import { allLibrarySongs, songToComposerSong } from '../lib/composerLibrary';
+import { useScaleRecorder, bestForScale, GRADE_COLOR as SCALE_GRADE_COLOR, PER_NOTE_MS as PRACTICE_PER_NOTE_MS, COUNT_IN_MS as PRACTICE_COUNT_IN_MS } from '../lib/scalePractice';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -678,11 +679,36 @@ function PlayMode({ tr }) {
 function ScaleMode({ tr }) {
   const [root, setRoot]           = useState('C');
   const [scaleName, setScaleName] = useState('Major');
+  // Live readout: the note currently sounding (tapped or during ▶ Play).
+  // { s, f, pc, degree } — degree is the 1-based scale step (null off-scale).
+  const [liveNote, setLiveNote]   = useState(null);
+  const liveTimer  = useRef(null);
+  const playTimers = useRef([]);
 
   const rootSemitone = NOTE_TO_SEMITONE[root] ?? 0;
   const intervals    = SCALE_TYPES[scaleName] ?? [];
   const scaleSet     = new Set(intervals.map(i => (rootSemitone + i) % 12));
   const rootPc       = rootSemitone % 12;
+
+  // Scale degree (1-based) of a pitch class, or null if it's not in the scale.
+  const degreeOf = useCallback((pc) => {
+    const i = intervals.indexOf(((pc - rootSemitone) % 12 + 12) % 12);
+    return i < 0 ? null : i + 1;
+  }, [intervals, rootSemitone]);
+
+  // Flash a note in the live readout for `hold` ms (tap = brief).
+  const flashLive = useCallback((s, f, hold = 900) => {
+    const pc = semitoneAt(s, f);
+    setLiveNote({ s, f, pc, degree: degreeOf(pc) });
+    clearTimeout(liveTimer.current);
+    liveTimer.current = setTimeout(() => setLiveNote(null), hold);
+  }, [degreeOf]);
+
+  // Clear any scheduled playback highlights + live readout on unmount / retrigger.
+  useEffect(() => () => {
+    clearTimeout(liveTimer.current);
+    playTimers.current.forEach(clearTimeout);
+  }, []);
 
   // Compute the notes in the scale for display
   const scaleNotes = intervals.map(i => {
@@ -690,40 +716,95 @@ function ScaleMode({ tr }) {
     return NOTE_NAMES[pc];
   });
 
+  // The "play this note next" practice cue (set below during recording). Held in
+  // a ref so dotStyle can read the live target without a dependency cycle on the
+  // later-declared targetNote. `cueTick` state forces the fretboard to re-render
+  // as the cue advances.
+  const targetNoteRef = useRef(null);
+  const [cueTick, setCueTick] = useState(0);
+  // Pitch class the MIC is hearing right now (during recording), for live
+  // indication on the fretboard. Held in a ref (set from recorder.liveNote via an
+  // effect below) so dotStyle reads it without a dependency cycle.
+  const heardPcRef = useRef(null);
+
   const dotStyle = useCallback((s, f) => {
     const pc = semitoneAt(s, f);
     if (!scaleSet.has(pc)) return null;
     const isRoot = pc === rootPc;
+    // Practice cue: the note the player should be striking right now pulses green.
+    const t = targetNoteRef.current;
+    const isTarget = t && t.s === s && t.f === f;
+    // Live mic: does the pitch the mic hears match this position's pitch class?
+    const heardPc = heardPcRef.current;
+    const isHeard = heardPc != null && heardPc === pc;
+
+    if (isTarget) {
+      // Target note the player is hearing correctly = extra-bright confirm; else green cue.
+      const matched = isHeard;
+      return {
+        bg: matched ? '#4ade80' : '#34d399',
+        color: '#0f2b20',
+        glow: matched ? '0 0 26px #4ade80, 0 0 12px #4ade80' : '0 0 20px #34d399ee, 0 0 10px #34d399',
+        label: NOTE_NAMES[pc],
+      };
+    }
+    if (isHeard) {
+      // The mic hears this note (but it's not the current target) — blue "heard" ring.
+      return {
+        bg: '#38bdf8',
+        color: '#08243a',
+        glow: '0 0 16px #38bdf8cc',
+        label: NOTE_NAMES[pc],
+      };
+    }
+    // The note currently sounding (tap/▶) lights up brightest (its exact spot).
+    const isLive = liveNote && liveNote.s === s && liveNote.f === f;
+    if (isLive) {
+      return {
+        bg: '#f8fafc',
+        color: '#0f0f0f',
+        glow: `0 0 18px #ffffffcc, 0 0 8px ${isRoot ? '#c9a96e' : STRING_COLORS[s]}`,
+        label: NOTE_NAMES[pc],
+      };
+    }
     return {
       bg: isRoot ? '#c9a96e' : `${STRING_COLORS[s]}33`,
       color: isRoot ? '#0f0f0f' : STRING_COLORS[s],
       glow: isRoot ? '0 0 14px #c9a96e88' : 'none',
       label: NOTE_NAMES[pc],
     };
-  }, [scaleSet, rootPc]);
+    // cueTick is a dep so the fretboard re-renders when the cue/heard note advances.
+  }, [scaleSet, rootPc, liveNote, cueTick]);
 
   const handleFret = useCallback((s, f) => {
     const pc = semitoneAt(s, f);
-    if (scaleSet.has(pc)) pluck(OPEN_HZ[s] * 2 ** (f / 12));
-  }, [scaleSet]);
+    if (scaleSet.has(pc)) { pluck(OPEN_HZ[s] * 2 ** (f / 12)); flashLive(s, f); }
+  }, [scaleSet, flashLive]);
 
   const handleOpen = useCallback((s) => {
     const pc = semitoneAt(s, 0);
-    if (scaleSet.has(pc)) pluck(OPEN_HZ[s], 2.6);
-  }, [scaleSet]);
+    if (scaleSet.has(pc)) { pluck(OPEN_HZ[s], 2.6); flashLive(s, 0); }
+  }, [scaleSet, flashLive]);
 
-  // Play scale ascending
-  const playScale = useCallback(() => {
+  // ── Scale playback ────────────────────────────────────────────────────────
+  // A scale can be walked two ways on the neck:
+  //   • HORIZONTAL — melodically UP ONE STRING (fret by fret along the neck),
+  //     so you hear the scale as a rising line and see it travel the fretboard.
+  //   • VERTICAL — in ONE POSITION, ACROSS ALL SIX STRINGS (low E → high e),
+  //     the way a scale shape is actually fingered box-style.
+  // Both light up each note on the fretboard + readout in sync with the audio
+  // (setTimeout delays mirror the STEP_S audio clock).
+  const STEP_S = 0.35;
+
+  // Play a sequence of {s, f} notes in order, sounding + highlighting each.
+  const playSequence = useCallback((notes) => {
+    if (!notes.length) return;
     const ctx = getCtx();
-    // Collect scale notes on string 1 (A) across frets 0-12
-    const notes = [];
-    for (let f = 0; f <= FRET_COUNT; f++) {
-      const pc = semitoneAt(1, f);
-      if (scaleSet.has(pc)) notes.push({ s: 1, f });
-    }
+    playTimers.current.forEach(clearTimeout);
+    playTimers.current = [];
     notes.forEach(({ s, f }, i) => {
       const hz = OPEN_HZ[s] * 2 ** (f / 12);
-      const t  = ctx.currentTime + i * 0.35;
+      const t  = ctx.currentTime + i * STEP_S;
       const env = ctx.createGain();
       env.connect(ctx._out);
       env.gain.setValueAtTime(0, t);
@@ -734,8 +815,110 @@ function ScaleMode({ tr }) {
         osc.type = tp; osc.frequency.value = hz * h; g.gain.value = a;
         osc.connect(g); g.connect(env); osc.start(t); osc.stop(t + 0.7);
       });
+      playTimers.current.push(
+        setTimeout(() => flashLive(s, f, STEP_S * 1000 + 120), i * STEP_S * 1000)
+      );
     });
-  }, [scaleSet]);
+  }, [flashLive]);
+
+  // HORIZONTAL: up one string, fret by fret. Choose the lowest string on which
+  // the scale's tonic (or first available scale note) lets us climb an octave+.
+  const playHorizontal = useCallback(() => {
+    const notes = [];
+    for (let f = 0; f <= FRET_COUNT; f++) {
+      const pc = semitoneAt(1, f);            // string 1 = A (a good mid range)
+      if (scaleSet.has(pc)) notes.push({ s: 1, f });
+    }
+    playSequence(notes);
+  }, [scaleSet, playSequence]);
+
+  // VERTICAL position shape: one box across all six strings, low E → high e.
+  // Anchor the box at the tonic's lowest fret on the low-E string and take scale
+  // notes within a 5-fret window (a standard position shape), ordered string then
+  // fret — the true ascending pitch order across the neck. This is both the
+  // ▶ Vertical playback order AND the sequence the Practice target walks through.
+  const positionSeq = useMemo(() => {
+    let anchor = 0;
+    for (let f = 0; f <= FRET_COUNT; f++) {
+      if (semitoneAt(0, f) === rootPc) { anchor = f; break; }
+    }
+    const lo = Math.max(0, anchor - 1);
+    const hi = lo + 4;                        // 5-fret position window
+    const notes = [];
+    for (let s = 0; s < 6; s++) {             // low E (0) → high e (5)
+      for (let f = lo; f <= hi; f++) {
+        if (scaleSet.has(semitoneAt(s, f))) notes.push({ s, f });
+      }
+    }
+    return notes;
+  }, [scaleSet, rootPc]);
+
+  const playVertical = useCallback(() => playSequence(positionSeq), [playSequence, positionSeq]);
+
+  // ── Practice: record the player and grade their scale run ─────────────────
+  const scaleLabel = `${root} ${scaleName}`;
+  const recorder = useScaleRecorder();
+  // While recording, a cursor steps through positionSeq so the player sees which
+  // note to play next, lit up on the fretboard.
+  const [targetIdx, setTargetIdx] = useState(-1);
+  const targetTimers = useRef([]);
+
+  // Keep the dotStyle ref + a re-render tick in sync with the current cue index.
+  const advanceCue = useCallback((idx) => {
+    targetNoteRef.current = idx >= 0 && idx < positionSeq.length ? positionSeq[idx] : null;
+    setTargetIdx(idx);
+    setCueTick(t => t + 1);
+  }, [positionSeq]);
+  // Best previous score for this exact scale (updates when scale/result change).
+  const best = useMemo(() => bestForScale(scaleLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scaleLabel, recorder.result]);
+
+  const startPractice = useCallback(() => {
+    // stop any in-flight ▶ playback so it doesn't bleed into the mic
+    playTimers.current.forEach(clearTimeout);
+    targetTimers.current.forEach(clearTimeout);
+    setLiveNote(null);
+
+    // Cue the notes to play on the fretboard: step the target cursor across the
+    // position shape at ONE STEADY BEAT PER NOTE (PER_NOTE_MS), the same pace the
+    // mic records at — slow enough to find and play each note. Also gives an
+    // audible reference: pluck each cued note so the player hears the target.
+    const seq = positionSeq;
+    if (seq.length) {
+      const per = PRACTICE_PER_NOTE_MS;
+      targetTimers.current = seq.map((note, i) =>
+        setTimeout(() => {
+          advanceCue(i);
+          try { pluck(OPEN_HZ[note.s] * 2 ** (note.f / 12), 1.4); } catch { /* audio may be blocked */ }
+        }, PRACTICE_COUNT_IN_MS + i * per)
+      );
+      // clear the cue when the window ends
+      targetTimers.current.push(
+        setTimeout(() => advanceCue(-1), PRACTICE_COUNT_IN_MS + seq.length * per + 200)
+      );
+    }
+
+    recorder.record({ scaleSet, rootPc, label: scaleLabel, noteCount: seq.length });
+  }, [recorder, scaleSet, rootPc, scaleLabel, positionSeq, advanceCue]);
+
+  // Clear the target cue timers + ref on unmount.
+  useEffect(() => () => {
+    targetTimers.current.forEach(clearTimeout);
+    targetNoteRef.current = null;
+  }, []);
+
+  // Mirror the mic's live-heard pitch class into the ref + bump the render tick so
+  // the fretboard lights up (blue) whatever the mic is picking up, in real time.
+  useEffect(() => {
+    heardPcRef.current = recorder.liveNote ? recorder.liveNote.pc : null;
+    setCueTick(t => t + 1);
+  }, [recorder.liveNote]);
+
+  const isRecording = recorder.state === 'recording';
+  const isScoring   = recorder.state === 'scoring';
+  // The note the player should be playing right now (during the cue), if any.
+  const targetNote = targetIdx >= 0 && targetIdx < positionSeq.length ? positionSeq[targetIdx] : null;
 
   return (
     <div>
@@ -775,13 +958,238 @@ function ScaleMode({ tr }) {
             {root} {scaleName}
           </p>
           <p className="text-xs font-mono text-ink-faint">
-            {scaleNotes.join('  ·  ')}
+            {scaleNotes.map((n, i) => {
+              const pc = NOTE_TO_SEMITONE[n] ?? (rootSemitone + intervals[i]) % 12;
+              const isLive = liveNote && liveNote.pc === ((pc % 12 + 12) % 12);
+              return (
+                <span key={i}>
+                  {i > 0 && '  ·  '}
+                  <span style={isLive ? { color: '#f8fafc', fontWeight: 700, textShadow: '0 0 8px #f8fafc99' } : undefined}>
+                    {n}
+                  </span>
+                </span>
+              );
+            })}
           </p>
         </div>
-        <button onClick={playScale}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-600 text-brand border border-surface-550">
-          ▶ Play
-        </button>
+        <div className="flex gap-1.5 shrink-0">
+          <button onClick={playHorizontal}
+            title={tr.playHorizontalHint || 'Play up one string (along the neck)'}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-600 text-brand border border-surface-550">
+            ▶ ↔ {tr.playHorizontal || 'Horizontal'}
+          </button>
+          <button onClick={playVertical}
+            title={tr.playVerticalHint || 'Play across the strings (in position)'}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-600 text-brand border border-surface-550">
+            ▶ ↕ {tr.playVertical || 'Vertical'}
+          </button>
+        </div>
+      </div>
+
+      {/* Live note readout — the note currently sounding (tap a note or press ▶ Play). */}
+      <div className="mb-4 flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all"
+        style={liveNote
+          ? { background: 'rgba(248,250,252,0.08)', borderColor: 'rgba(248,250,252,0.35)' }
+          : { background: 'var(--color-surface-850)', borderColor: 'var(--color-surface-650)' }}>
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-ghost shrink-0">
+          {tr.nowPlayingNote || 'Now playing'}
+        </span>
+        {liveNote ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-2xl font-black leading-none"
+              style={{ color: '#f8fafc', textShadow: '0 0 12px #f8fafc66' }}>
+              {NOTE_NAMES[liveNote.pc]}
+            </span>
+            <span className="text-xs font-mono px-2 py-1 rounded-lg"
+              style={{ background: `${STRING_COLORS[liveNote.s]}22`, color: STRING_COLORS[liveNote.s], border: `1px solid ${STRING_COLORS[liveNote.s]}44` }}>
+              {STRING_NAMES[liveNote.s]}{liveNote.f === 0 ? ' open' : ` · fret ${liveNote.f}`}
+            </span>
+            {liveNote.degree && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-surface-700 text-brand">
+                {liveNote.degree === 1 ? (tr.rootNote || 'Root') : `${tr.degree || 'Degree'} ${liveNote.degree}`}
+              </span>
+            )}
+            <span className="text-xs font-mono text-ink-faint">
+              {(OPEN_HZ[liveNote.s] * 2 ** (liveNote.f / 12)).toFixed(1)} Hz
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs text-ink-ghost">
+            {tr.tapNoteHint || 'Tap any scale note, or press ▶ Horizontal / Vertical'}
+          </span>
+        )}
+      </div>
+
+      {/* Practice — record yourself playing the scale, get a score */}
+      <div className="mb-4 px-3 py-3 rounded-xl border border-surface-650 bg-surface-850">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-ghost">
+              {tr.practiceTitle || 'Practice'}
+            </p>
+            <p className="text-xs text-ink-faint mt-0.5">
+              {tr.practiceHint || `Play the ${scaleLabel} scale on your guitar — I'll listen and score you.`}
+            </p>
+          </div>
+          <button
+            onClick={startPractice}
+            disabled={isRecording || isScoring}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border"
+            style={isRecording
+              ? { background: 'var(--color-danger)', color: '#fff', borderColor: 'transparent' }
+              : isScoring
+                ? { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)', borderColor: 'var(--color-surface-550)' }
+                : { background: 'var(--color-brand)', color: 'var(--color-surface-base)', borderColor: 'transparent' }}>
+            {isRecording
+              ? (recorder.countdown > 0
+                  ? <>● {tr.practiceGetReadyShort || 'Get ready'} {recorder.countdown}</>
+                  : <>● {tr.practiceListening || 'Listening…'}</>)
+              : isScoring
+                ? <>{tr.practiceScoring || 'Scoring…'}</>
+                : <>🎤 {tr.practiceBtn || 'Practice'}</>}
+          </button>
+        </div>
+
+        {/* Practice-starting message + 5-second countdown (recording is already
+            live during this; the notes don't begin until it reaches 0). */}
+        {isRecording && recorder.countdown > 0 && (
+          <div className="mt-3 flex items-center gap-4 px-4 py-3 rounded-xl"
+            style={{ background: 'rgba(52,211,153,0.10)', border: '1px solid rgba(52,211,153,0.35)' }}>
+            <span className="flex items-center justify-center w-14 h-14 rounded-full text-3xl font-black shrink-0"
+              style={{ background: '#34d399', color: '#0f2b20', boxShadow: '0 0 22px #34d399aa' }}>
+              {recorder.countdown}
+            </span>
+            <div className="leading-tight">
+              <p className="text-sm font-bold text-ink">
+                {tr.practiceStarting || 'Recording started — get ready!'}
+              </p>
+              <p className="text-xs text-ink-faint mt-0.5">
+                {tr.practiceGetReady || `Playing begins in ${recorder.countdown}s. Position your hand.`}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Recording progress bar (only meaningful once the notes begin) */}
+        {isRecording && !(recorder.countdown > 0) && (
+          <div className="mt-3 h-2 rounded-full overflow-hidden bg-surface-700">
+            <div className="h-full rounded-full transition-[width] duration-100"
+              style={{ width: `${Math.round(recorder.progress * 100)}%`, background: 'var(--color-danger)' }} />
+          </div>
+        )}
+
+        {/* "Play this now" target cue — mirrors the green pulse on the fretboard */}
+        {isRecording && targetNote && (
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-ghost">
+              {tr.practicePlayNow || 'Play now'}
+            </span>
+            <span className="flex items-center justify-center w-9 h-9 rounded-full text-sm font-black"
+              style={{ background: '#34d399', color: '#0f2b20', boxShadow: '0 0 14px #34d399aa' }}>
+              {NOTE_NAMES[semitoneAt(targetNote.s, targetNote.f)]}
+            </span>
+            <span className="text-xs font-mono px-2 py-1 rounded-lg"
+              style={{ background: `${STRING_COLORS[targetNote.s]}22`, color: STRING_COLORS[targetNote.s], border: `1px solid ${STRING_COLORS[targetNote.s]}44` }}>
+              {STRING_NAMES[targetNote.s]}{targetNote.f === 0 ? ' open' : ` · fret ${targetNote.f}`}
+            </span>
+            <span className="text-xs text-ink-ghost">
+              {targetIdx + 1} / {positionSeq.length}
+            </span>
+          </div>
+        )}
+
+        {/* Live mic indication — what the mic is hearing right NOW, in real time */}
+        {isRecording && (() => {
+          const heard = recorder.liveNote;
+          const targetPc = targetNote ? semitoneAt(targetNote.s, targetNote.f) : null;
+          const match = heard && targetPc != null && heard.pc === targetPc;
+          const inScale = heard && scaleSet.has(heard.pc);
+          return (
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-ghost">
+                {tr.practiceHearing || 'Mic hears'}
+              </span>
+              {heard ? (
+                <>
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full text-sm font-black transition-all"
+                    style={match
+                      ? { background: '#4ade80', color: '#0f2b20', boxShadow: '0 0 18px #4ade80' }
+                      : { background: '#38bdf8', color: '#08243a', boxShadow: '0 0 12px #38bdf899' }}>
+                    {NOTE_NAMES[heard.pc]}
+                  </span>
+                  <span className="text-xs font-mono text-ink-faint">
+                    {Math.round(heard.hz)} Hz
+                    {typeof heard.cents === 'number' && (
+                      <span className="ml-1">{heard.cents > 0 ? '+' : ''}{heard.cents}¢</span>
+                    )}
+                  </span>
+                  {match ? (
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-success)' }}>✓ {tr.practiceMatch || 'match'}</span>
+                  ) : inScale ? (
+                    <span className="text-xs text-ink-ghost">{tr.practiceInScale || 'in scale'}</span>
+                  ) : (
+                    <span className="text-xs" style={{ color: 'var(--color-warning)' }}>{tr.practiceOffScale || 'off scale'}</span>
+                  )}
+                </>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-ink-ghost">
+                  <span className="w-2 h-2 rounded-full inline-block animate-pulse" style={{ background: 'var(--color-danger)' }} />
+                  {tr.practiceQuiet || 'listening… play a note'}
+                </span>
+              )}
+            </div>
+          );
+        })()}
+
+        {recorder.error && (
+          <p className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{recorder.error}</p>
+        )}
+
+        {/* Result */}
+        {recorder.result && !isRecording && !isScoring && (
+          <div className="mt-3">
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* 1-5 star grade — the headline */}
+              <div className="flex flex-col">
+                <div className="flex items-center gap-0.5 text-2xl leading-none">
+                  {[1,2,3,4,5].map(n => (
+                    <span key={n} style={{ color: n <= recorder.result.stars ? '#fbbf24' : 'var(--color-surface-550)' }}>
+                      {n <= recorder.result.stars ? '★' : '☆'}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[10px] uppercase tracking-wide text-ink-ghost mt-1">
+                  {recorder.result.stars}/5 · {recorder.result.score}<span className="lowercase">/100</span>
+                </p>
+              </div>
+              <div className="flex gap-2 text-xs">
+                <span className="px-2 py-1 rounded-lg bg-surface-700 text-ink-subtle">
+                  {tr.practiceCoverage || 'Notes hit'}: <span className="font-bold text-ink">{recorder.result.coverage}%</span>
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-surface-700 text-ink-subtle">
+                  {tr.practiceClean || 'In-scale'}: <span className="font-bold text-ink">{recorder.result.cleanliness}%</span>
+                </span>
+              </div>
+              {best && best.stars >= recorder.result.stars && best.score >= recorder.result.score && (
+                <span className="text-xs text-ink-ghost">
+                  {tr.practiceBest || 'Best'}: <span className="font-bold text-amber-400">{best.stars}★</span> ({best.score})
+                </span>
+              )}
+            </div>
+
+            {/* Advanced the Level Plan (stars > 3) */}
+            {recorder.result.advancedMilestone ? (
+              <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{ background: 'rgba(52,211,153,0.12)', color: 'var(--color-success)', border: '1px solid rgba(52,211,153,0.35)' }}>
+                🎉 {tr.practiceAdvanced || 'Nice! This passed — your Level Plan advanced.'}
+              </div>
+            ) : recorder.result.stars <= 3 ? (
+              <p className="mt-2 text-xs text-ink-ghost">
+                {tr.practiceNeedMore || 'Score above 3★ to advance your Level Plan.'}
+              </p>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* Legend */}

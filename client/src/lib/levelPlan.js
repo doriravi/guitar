@@ -344,6 +344,48 @@ export function setManualDone(milestoneId, done) {
   return data.manual;
 }
 
+// ── Recording → Level Plan auto-advance ───────────────────────────────────────
+// A recording (scale practice or a chord take) is graded 1–5 STARS. A run scoring
+// ABOVE 3 (i.e. 4 or 5) is a genuine pass and advances the plan by completing the
+// milestone that trains that exact skill — so real, measured play moves the
+// roadmap forward, not just manual check-offs.
+//
+// PASS threshold is expressed once here so the UI and the auto-advance agree.
+export const RECORDING_PASS_STARS = 3;   // must score ABOVE this (→ 4 or 5) to pass
+
+// Which milestone a strong recording completes, by what was recorded.
+//   scale "<Root> <ScaleName>" → the scale-learning milestone for that family
+//   chord  "<name>"            → the open-chords milestone (its core CAGED set)
+function milestoneForRecording({ kind, name }) {
+  if (kind === 'scale') {
+    const scaleName = (name || '').toLowerCase();
+    if (scaleName.includes('pentatonic')) return 'int-pentatonic';
+    if (scaleName.includes('major') && !scaleName.includes('pentatonic')) return 'int-major-scale';
+    return null;   // other scales have no dedicated milestone (yet)
+  }
+  if (kind === 'chord') {
+    // The core open-chord milestone tracks the CAGED set; any of them passing
+    // contributes to it. (Its own `chords` sub-goals still track per-chord.)
+    return 'beg-open-chords';
+  }
+  return null;
+}
+
+/**
+ * Called after a recording is graded. If it PASSED (stars > RECORDING_PASS_STARS)
+ * and maps to a milestone, mark that milestone done so the Level Plan advances.
+ * No-op for a weak take or an unmapped recording. Safe to call every recording.
+ * @param {{ kind:'scale'|'chord', name:string, stars:number }} rec
+ * @returns {string|null} the milestoneId advanced, or null.
+ */
+export function advanceForRecording({ kind, name, stars }) {
+  if (!(stars > RECORDING_PASS_STARS)) return null;
+  const milestoneId = milestoneForRecording({ kind, name });
+  if (!milestoneId) return null;
+  setManualDone(milestoneId, true);
+  return milestoneId;
+}
+
 // ── Roadmap status (combines AUTO + manual) ───────────────────────────────────
 
 /**

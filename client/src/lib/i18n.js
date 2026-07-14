@@ -181,6 +181,15 @@ export const t = {
     capo: 'Capo', capoOff: 'Off', capoOn: 'Capo on fret {n} · +{n} semitones',
     advisorTitle: 'AI Advisor', advisorSubtitle: 'Music theory & guitar consultant', advisorGreeting: 'Hi! I\'m your music advisor.', advisorHint: 'Ask me about theory, chords, or how to use this app.', advisorPlaceholder: 'Ask anything about music or guitar…', advisorSend: 'Send', advisorThinking: 'Thinking…', advisorUnavailable: 'The advisor is unavailable right now.', advisorClear: 'Clear chat', advisorPrompt1: 'What chords go well with the ones I\'ve added?', advisorPrompt2: 'Suggest an easy progression for my hand size.', advisorPrompt3: 'Explain the key I\'m composing in.',
     playBtn: '▶ Play', rootNote: 'Root note', scaleNote: 'Scale note (tap to hear)',
+    nowPlayingNote: 'Now playing', tapNoteHint: 'Tap any scale note, or press ▶ Play', degree: 'Degree',
+    playHorizontal: 'Horizontal', playVertical: 'Vertical',
+    playHorizontalHint: 'Play up one string (along the neck)', playVerticalHint: 'Play across the strings (in position)',
+    practiceTitle: 'Practice', practiceBtn: 'Practice', practiceHint: 'Follow the green notes on the fretboard — one per beat — and play each on your guitar. The mic shows what it hears live, then scores you.',
+    practiceListening: 'Listening…', practiceScoring: 'Scoring…', practiceScore: 'Score',
+    practiceCoverage: 'Notes hit', practiceClean: 'In-scale', practiceBest: 'Best', practicePlayNow: 'Play now',
+    practiceAdvanced: 'Nice! This passed — your Level Plan advanced.', practiceNeedMore: 'Score above 3★ to advance your Level Plan.', levelUp: 'Level Plan',
+    practiceHearing: 'Mic hears', practiceMatch: 'match', practiceInScale: 'in scale', practiceOffScale: 'off scale', practiceQuiet: 'listening… play a note',
+    practiceStarting: 'Recording started — get ready!', practiceGetReady: 'Playing begins shortly. Position your hand.', practiceGetReadyShort: 'Get ready', practiceStrumIn: 'Strum in',
   },
 
   es: {

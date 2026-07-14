@@ -46,11 +46,36 @@ export default defineConfig({
         navigateFallback: '/index.html',
         // Never let the SW intercept API/auth calls — always hit the network.
         navigateFallbackDenylist: [/^\/api/],
+        // A new build's service worker takes over IMMEDIATELY instead of waiting
+        // behind the old one until every tab closes. Combined with the
+        // NetworkFirst navigation rule below, this stops the app from serving a
+        // stale page on browser restart: the newest deployed version wins on the
+        // very next load, not one-load-behind.
+        skipWaiting: true,
+        clientsClaim: true,
+        // Drop caches created by previous SW versions so an old precache can't
+        // resurface after an update.
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
-            // Same-origin assets (not /api): serve fast, refresh in background.
-            urlPattern: ({ url, sameOrigin }) =>
-              sameOrigin && !url.pathname.startsWith('/api'),
+            // Navigations (the HTML app shell): fetch from the NETWORK FIRST so a
+            // fresh page always wins when online; fall back to cache only when
+            // offline. This is what fixes "I keep landing on the old page".
+            urlPattern: ({ request, url }) =>
+              request.mode === 'navigate' && !url.pathname.startsWith('/api'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell',
+              networkTimeoutSeconds: 3, // offline? fall back to cache fast
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 7 },
+            },
+          },
+          {
+            // Fingerprinted static assets (JS/CSS/images, not /api): safe to
+            // serve fast and refresh in the background — their hashed filenames
+            // change on every build, so a stale one is never the wrong version.
+            urlPattern: ({ request, url, sameOrigin }) =>
+              sameOrigin && request.mode !== 'navigate' && !url.pathname.startsWith('/api'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'app-assets',

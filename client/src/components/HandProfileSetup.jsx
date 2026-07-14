@@ -615,8 +615,9 @@ function AIHandAnalysis({ lang, onMeasured }) {
 export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, saveError, lang }) {
   const tr = useT(lang);
   const [local, setLocal] = useState({ ...DEFAULT_PROFILE, ...profile });
-  const [saved, setSaved] = useState(false);
-  const [showCamera, setShowCamera]   = useState(false);
+  // Open the camera immediately so the user lands straight in the measurement
+  // flow — no extra "Measure with camera" tap. The toggle button still hides it.
+  const [showCamera, setShowCamera]   = useState(true);
   const [showAICamera, setShowAICamera] = useState(false);
 
   // Sync when profile loads from server after login
@@ -626,20 +627,17 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
 
   const handleChange = useCallback((key, val) => {
     setLocal(prev => ({ ...prev, [key]: val }));
-    setSaved(false);
   }, []);
 
-  const handleSave = () => {
-    onSave(local);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
+  // Camera "Apply measurements" is now the commit action: fold the reading into
+  // the profile AND persist it. Saving a real (non-default) measurement clears the
+  // onboarding gate in App.jsx, so this also advances to the next screen.
   const handleCameraMeasured = useCallback((measurements) => {
-    setLocal(prev => ({ ...prev, ...measurements }));
+    const next = { ...local, ...measurements };
+    setLocal(next);
     setShowCamera(false);
-    setSaved(false);
-  }, []);
+    onSave(next);
+  }, [local, onSave]);
 
   const ability = abilityLabel(local);
   const m = reachMultiplier(local);
@@ -693,7 +691,6 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
         <div className="mb-6">
           <AIHandAnalysis lang={lang} onMeasured={(measurements, fingers) => {
             setLocal(prev => ({ ...prev, ...measurements }));
-            setSaved(false);
             onSave({ ...local, ...measurements });
             if (fingers && onSaveAIFingers) onSaveAIFingers(fingers);
           }} />
@@ -750,19 +747,13 @@ export default function HandProfileSetup({ profile, onSave, onSaveAIFingers, sav
       {/* Reach level */}
       <GuitarReachLevel profile={local} tr={tr} />
 
-      {/* Save */}
-      <div className="mt-6 flex flex-col items-end gap-2">
-        {saveError && (
+      {/* No separate Save button: the camera "Apply measurements" action commits
+          the profile and advances. Surface a save error if one occurs. */}
+      {saveError && (
+        <div className="mt-6 flex justify-end">
           <p className="text-xs text-danger">{tr.failedToSave}</p>
-        )}
-        <button
-          onClick={handleSave}
-          className={`px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${saved ? 'text-success' : 'bg-brand text-surface-base'}`}
-          style={saved ? { background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.2)' } : undefined}
-        >
-          {saved ? tr.saved : tr.saveProfile}
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
