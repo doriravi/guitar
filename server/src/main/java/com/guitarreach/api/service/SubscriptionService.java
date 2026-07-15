@@ -41,6 +41,9 @@ public class SubscriptionService {
     @Value("${stripe.price.monthly}")
     private String monthlyPriceId;
 
+    @Value("${stripe.price.yearly}")
+    private String yearlyPriceId;
+
     @Value("${app.frontend.url}")
     private String frontendUrl;
 
@@ -67,12 +70,17 @@ public class SubscriptionService {
             subscriptionRepository.save(sub);
         }
 
-        String priceId = monthlyPriceId; // extend for YEARLY when needed
+        // Select the Stripe price for the requested plan. FREE (or a null plan)
+        // has no checkout — treat it as monthly so an errant request still lands
+        // on a valid price rather than an empty checkout.
+        String priceId = req.getPlan() == SubscriptionPlan.YEARLY ? yearlyPriceId : monthlyPriceId;
+        // The SPA reads ?checkout=success|cancel on load (AccountSettings) to show
+        // a confirmation banner and refresh subscription status.
         return stripeService.createCheckoutSession(
                 sub.getStripeCustomerId(),
                 priceId,
-                frontendUrl + "/subscription/success",
-                frontendUrl + "/subscription/cancel"
+                frontendUrl + "/?checkout=success",
+                frontendUrl + "/?checkout=cancel"
         );
     }
 
@@ -119,7 +127,7 @@ public class SubscriptionService {
         subscriptionRepository.findByStripeCustomerId(session.getCustomer()).ifPresent(sub -> {
             sub.setStripeSubscriptionId(session.getSubscription());
             sub.setStatus(SubscriptionStatus.ACTIVE);
-            sub.setPlan(SubscriptionPlan.MONTHLY);
+            sub.setPlan(resolvePlanFromSubscription(session.getSubscription()));
             subscriptionRepository.save(sub);
 
             Payment payment = Payment.builder()
@@ -131,6 +139,22 @@ public class SubscriptionService {
                     .build();
             paymentRepository.save(payment);
         });
+    }
+
+    /**
+     * Maps a Stripe subscription to our plan enum by comparing its billed price
+     * against the configured monthly/yearly price IDs. Falls back to MONTHLY if
+     * the price can't be read (e.g. Stripe API hiccup) so the user is still
+     * marked Premium rather than left on FREE after a successful payment.
+     */
+    private SubscriptionPlan resolvePlanFromSubscription(String stripeSubscriptionId) {
+        try {
+            String priceId = stripeService.getSubscriptionPriceId(stripeSubscriptionId);
+            if (priceId != null && priceId.equals(yearlyPriceId)) return SubscriptionPlan.YEARLY;
+        } catch (StripeException e) {
+            log.warn("Could not resolve plan for subscription {}: {}", stripeSubscriptionId, e.getMessage());
+        }
+        return SubscriptionPlan.MONTHLY;
     }
 
     private void handleInvoiceSucceeded(Invoice invoice) {

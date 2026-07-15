@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { user as userApi } from '../lib/api';
+import { useState, useEffect } from 'react';
+import { user as userApi, subscriptions as subscriptionsApi } from '../lib/api';
 import { useT, LANGUAGES } from '../lib/i18n';
 import { useHandProfile } from '../App';
 import { recommendedMaxDifficulty, abilityLabel, flexibilityLabel } from '../lib/handProfile';
@@ -27,6 +27,223 @@ const inputStyle = {
   background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-600)', color: 'var(--color-ink)',
   width: '100%', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none',
 };
+
+// One-time read of the ?checkout=success|cancel param Stripe appends when it
+// redirects back to the app after the hosted checkout. Consumed on mount so a
+// reload doesn't re-show the banner.
+function consumeCheckoutResult() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('checkout');
+    if (result === 'success' || result === 'cancel') {
+      params.delete('checkout');
+      params.delete('session_id');
+      const qs = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+      return result;
+    }
+  } catch { /* no-op */ }
+  return null;
+}
+
+// Human-readable plan label + renewal blurb for the current subscription.
+function planLabel(plan, tr) {
+  switch (plan) {
+    case 'MONTHLY': return tr.planMonthly || 'Monthly — Premium';
+    case 'YEARLY': return tr.planYearly || 'Yearly — Premium';
+    default: return tr.planFree || 'Free';
+  }
+}
+
+function statusMeta(status, tr) {
+  switch (status) {
+    case 'ACTIVE': return { label: tr.subActive || 'Active', color: 'var(--color-success)' };
+    case 'TRIALING': return { label: tr.subTrialing || 'Trial', color: 'var(--color-success)' };
+    case 'PAST_DUE': return { label: tr.subPastDue || 'Payment past due', color: '#fb923c' };
+    case 'CANCELED': return { label: tr.subCanceled || 'Canceled', color: 'var(--color-ink-muted)' };
+    default: return { label: tr.subInactive || 'No active subscription', color: 'var(--color-ink-muted)' };
+  }
+}
+
+function SubscriptionSection({ lang }) {
+  const tr = useT(lang);
+  const [sub, setSub] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busyPlan, setBusyPlan] = useState(null); // plan key currently redirecting
+  const [canceling, setCanceling] = useState(false);
+  const [error, setError] = useState('');
+  const [banner, setBanner] = useState(() => consumeCheckoutResult());
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await subscriptionsApi.getStatus();
+      setSub(data);
+    } catch (err) {
+      setError(err.message || (tr.subLoadFailed || 'Could not load your subscription.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleUpgrade(plan) {
+    setBusyPlan(plan);
+    setError('');
+    try {
+      const { url } = await subscriptionsApi.createCheckout(plan);
+      if (url) {
+        window.location.href = url; // hand off to Stripe Checkout
+      } else {
+        setError(tr.subCheckoutFailed || 'Could not start checkout. Please try again.');
+        setBusyPlan(null);
+      }
+    } catch (err) {
+      setError(err.message || (tr.subCheckoutFailed || 'Could not start checkout. Please try again.'));
+      setBusyPlan(null);
+    }
+  }
+
+  async function handleCancel() {
+    setCanceling(true);
+    setError('');
+    try {
+      await subscriptionsApi.cancel();
+      setShowCancelConfirm(false);
+      await refresh();
+    } catch (err) {
+      setError(err.message || (tr.subCancelFailed || 'Could not cancel. Please try again.'));
+    } finally {
+      setCanceling(false);
+    }
+  }
+
+  const plan = sub?.plan || 'FREE';
+  const status = sub?.status || 'INACTIVE';
+  const isPremium = plan !== 'FREE' && (status === 'ACTIVE' || status === 'TRIALING');
+  const canCancel = plan !== 'FREE' && (status === 'ACTIVE' || status === 'TRIALING' || status === 'PAST_DUE');
+  const sm = statusMeta(status, tr);
+  const renewsAt = sub?.currentPeriodEnd
+    ? new Date(sub.currentPeriodEnd).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+
+  const PLANS = [
+    { key: 'MONTHLY', label: tr.planMonthlyName || 'Monthly', price: tr.planMonthlyPrice || '$4.99 / month', blurb: tr.planMonthlyBlurb || 'Billed monthly. Cancel anytime.' },
+    { key: 'YEARLY', label: tr.planYearlyName || 'Yearly', price: tr.planYearlyPrice || '$49.99 / year', blurb: tr.planYearlyBlurb || 'Two months free vs. monthly.' },
+  ];
+
+  return (
+    <Section title={tr.subscription || 'Subscription'}>
+      {banner && (
+        <div className="rounded-xl px-4 py-3 mb-4 text-xs" style={{
+          background: banner === 'success' ? 'rgba(74,222,128,0.1)' : 'rgba(251,146,60,0.08)',
+          border: `1px solid ${banner === 'success' ? 'rgba(74,222,128,0.3)' : 'rgba(251,146,60,0.2)'}`,
+          color: banner === 'success' ? 'var(--color-success)' : '#fb923c',
+        }}>
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {banner === 'success'
+                ? (tr.subThanks || 'Thanks! Your subscription is being activated — it may take a moment to appear.')
+                : (tr.subCheckoutCanceled || 'Checkout canceled. You have not been charged.')}
+            </span>
+            <button onClick={() => setBanner(null)} className="text-base leading-none opacity-70">×</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-xs text-ink-muted">{tr.loading || 'Loading…'}</p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <span className="text-sm text-ink">{planLabel(plan, tr)}</span>
+            <span className="text-xs font-semibold" style={{ color: sm.color }}>{sm.label}</span>
+          </div>
+          {isPremium && renewsAt && (
+            <p className="text-xs text-ink-faint">
+              {status === 'CANCELED'
+                ? `${tr.subEndsOn || 'Access ends on'} ${renewsAt}`
+                : `${tr.subRenewsOn || 'Renews on'} ${renewsAt}`}
+            </p>
+          )}
+
+          {error && <p className="text-xs mt-2 text-danger">{error}</p>}
+
+          {!isPremium && (
+            <>
+              <p className="text-xs mt-3 mb-3 text-ink-subtle">
+                {tr.subUpgradeIntro || 'Upgrade to Premium to unlock everything.'}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {PLANS.map(p => (
+                  <div key={p.key} className="rounded-xl p-4 bg-surface-900 border border-surface-650 flex flex-col">
+                    <span className="text-sm font-semibold text-ink">{p.label}</span>
+                    <span className="text-brand text-base font-bold mt-1">{p.price}</span>
+                    <span className="text-[11px] text-ink-faint mt-1 mb-3 flex-1">{p.blurb}</span>
+                    <button
+                      onClick={() => handleUpgrade(p.key)}
+                      disabled={!!busyPlan}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold bg-brand text-surface-base"
+                      style={{ opacity: busyPlan ? 0.6 : 1, cursor: busyPlan ? 'wait' : 'pointer' }}>
+                      {busyPlan === p.key ? (tr.subRedirecting || 'Redirecting…') : (tr.subscribe || 'Subscribe')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] mt-3 text-ink-ghost">
+                {tr.subSecureNote || 'Payments are processed securely by Stripe. You’ll be redirected to complete checkout.'}
+              </p>
+            </>
+          )}
+
+          {canCancel && (
+            <div className="mt-4 pt-4 border-t border-surface-650 flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-faint">
+                {tr.subCancelNote || 'Cancel keeps access until the end of the current period.'}
+              </span>
+              <button
+                onClick={() => setShowCancelConfirm(true)}
+                disabled={canceling}
+                className="px-4 py-2 rounded-xl text-sm font-semibold shrink-0"
+                style={{ background: 'rgba(248,113,113,0.1)', color: 'var(--color-danger)', border: '1px solid rgba(248,113,113,0.3)', opacity: canceling ? 0.5 : 1 }}>
+                {canceling ? (tr.subCanceling || 'Canceling…') : (tr.subCancel || 'Cancel subscription')}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {showCancelConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 bg-surface-base border border-surface-550">
+            <h3 className="text-sm font-bold mb-2 text-ink">{tr.subCancelTitle || 'Cancel your subscription?'}</h3>
+            <p className="text-xs mb-4 text-ink-subtle">
+              {tr.subCancelBody || 'You’ll keep Premium access until the end of your current billing period, then drop to the Free plan. You can resubscribe anytime.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowCancelConfirm(false)} disabled={canceling}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-600)' }}>
+                {tr.subKeep || 'Keep subscription'}
+              </button>
+              <button onClick={handleCancel} disabled={canceling}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--color-danger)', color: 'white', opacity: canceling ? 0.5 : 1 }}>
+                {canceling ? (tr.subCanceling || 'Canceling…') : (tr.subConfirmCancel || 'Yes, cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
 
 export default function AccountSettings({ currentUser, onUpdated, onDeleted, lang, onLangSelect, limitToReach, onLimitToReachChange, limitToLevel, onLimitToLevelChange }) {
   const tr = useT(lang);
@@ -167,6 +384,8 @@ export default function AccountSettings({ currentUser, onUpdated, onDeleted, lan
           </div>
         </form>
       </Section>
+
+      <SubscriptionSection lang={lang} />
 
       {onLimitToReachChange && (
         <Section title={tr.playability || 'Playability'}>

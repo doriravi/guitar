@@ -41,6 +41,20 @@ public class StripeService {
         return Session.create(params).getUrl();
     }
 
+    /**
+     * The price ID a subscription is currently billed on, or null if it can't be
+     * determined. Used to record MONTHLY vs YEARLY from a checkout webhook, where
+     * the Session object doesn't carry the line-item price without expansion.
+     */
+    public String getSubscriptionPriceId(String stripeSubscriptionId) throws StripeException {
+        if (stripeSubscriptionId == null) return null;
+        com.stripe.model.Subscription sub =
+                com.stripe.model.Subscription.retrieve(stripeSubscriptionId);
+        if (sub.getItems() == null || sub.getItems().getData().isEmpty()) return null;
+        var price = sub.getItems().getData().get(0).getPrice();
+        return price == null ? null : price.getId();
+    }
+
     public void cancelSubscription(String stripeSubscriptionId) throws StripeException {
         com.stripe.model.Subscription sub =
                 com.stripe.model.Subscription.retrieve(stripeSubscriptionId);
