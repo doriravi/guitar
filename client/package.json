@@ -15,9 +15,17 @@
     "gen-icons": "node scripts/gen-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "cap:sync": "vite build && cap sync",
+    "cap:android": "vite build && cap sync android && cap open android",
+    "cap:ios": "vite build && cap sync ios && cap open ios",
+    "cap:assets": "capacitor-assets generate --iconBackgroundColor '#0f0f0f' --iconBackgroundColorDark '#0f0f0f' --splashBackgroundColor '#0f0f0f' --splashBackgroundColorDark '#0f0f0f'"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/ios": "^8.4.2",
     "@mediapipe/camera_utils": "^0.3.1675466862",
     "@mediapipe/hands": "^0.4.1675469240",
     "@react-three/drei": "^10.7.7",

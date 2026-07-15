@@ -25,6 +25,29 @@ tab-service/vendor/config.yaml
 tab-service/vendor/temp/
 tab-service/.cache/
 
+# Capacitor native build artifacts (the native PROJECTS are committed; their
+# build outputs, dependency caches, and generated web-asset copies are not).
+client/android/.gradle/
+client/android/build/
+client/android/app/build/
+client/android/capacitor-cordova-android-plugins/
+client/android/app/src/main/assets/public/
+client/android/local.properties
+client/ios/App/build/
+client/ios/App/Pods/
+client/ios/App/App/public/
+client/ios/App/output/
+client/ios/DerivedData/
+client/*.apk
+client/*.aab
+client/*.ipa
+
+# Android release signing — NEVER commit these. The keystore is a permanent,
+# irreplaceable signing key; the properties file holds its passwords in plaintext.
+client/android/*.jks
+client/android/*.keystore
+client/android/keystore.properties
+
 # Misc
 .vscode/
 projects_summary.csv
