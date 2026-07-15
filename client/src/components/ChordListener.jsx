@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CHORDS } from '../lib/chords';
 import { calcDifficulty } from '../lib/fretboard';
+import { CHORDS_WITH_SCORE, groupedChords } from '../lib/chordGroups';
 import {
   evaluateStrings,
   hzToNote,
@@ -31,18 +31,6 @@ import { useT } from '../lib/i18n';
 const STRING_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#a855f7'];
 const NOTE_NAMES    = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
-const CHORD_GROUPS = [
-  { label: 'Open Major',  types: ['Major','Major (easy)'] },
-  { label: 'Open Minor',  types: ['Minor'] },
-  { label: 'Dom 7',       types: ['Dom 7'] },
-  { label: 'Minor 7',     types: ['Minor 7','Minor 7 (barre)'] },
-  { label: 'Major 7',     types: ['Maj 7'] },
-  { label: 'Barre',       types: ['Major (barre)','Minor (barre)'] },
-  { label: 'Power',       types: ['Power'] },
-  { label: 'Other',       types: [] },
-];
-
-const CHORDS_WITH_SCORE = CHORDS.map(c => ({ ...c, score: calcDifficulty(c.notes) }));
 const SAVED_KEY = 'guitar_saved_sequences';
 
 // Detection config + mic hook + configured peak/chord matching all live in
@@ -57,16 +45,6 @@ function persistSaved(list) {
   try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)); } catch {}
 }
 
-function groupedChords(maxDiff) {
-  const known = new Set(CHORD_GROUPS.flatMap(g => g.types));
-  return CHORD_GROUPS.map(g => ({
-    ...g,
-    chords: (g.label === 'Other'
-      ? CHORDS_WITH_SCORE.filter(c => !known.has(c.type))
-      : CHORDS_WITH_SCORE.filter(c => g.types.includes(c.type))
-    ).filter(c => c.score <= maxDiff),
-  })).filter(g => g.chords.length > 0);
-}
 
 function noteSetFromHz(hzList) {
   const pcs = new Set();
