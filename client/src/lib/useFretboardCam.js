@@ -15,6 +15,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { detectChord } from './chordAnalyzer';
 import { computeHomography, mapHandToPositions } from './fretboardMap';
+import { detectNeck, cornersAgree } from './neckDetect';
 
 // One shared CDN loader (same version the hand-measure tool uses). Module-level
 // promise so the script is fetched at most once across every consumer.
@@ -71,6 +72,15 @@ export function useFretboardCam(opts = {}) {
   const [cameraId, setCameraId] = useState(null);  // currently-selected deviceId
   const cameraIdRef = useRef(null);
   cameraIdRef.current = cameraId;
+
+  // Automatic neck detection (replaces manual corner tapping).
+  const [detectedCorners, setDetectedCorners] = useState(null); // [{x,y}×4] | null
+  const [detectConfidence, setDetectConfidence] = useState(0);
+  const [detectStatus, setDetectStatus] = useState('searching'); // searching | notfound
+  const detectCanvasRef = useRef(null);   // hidden offscreen canvas for frame grabs
+  const detectAgreeRef = useRef(0);        // consecutive agreeing detections
+  const lastDetectRef = useRef(null);      // previous frame's corners (for stability)
+  const detectStartRef = useRef(0);        // when the current search began
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -231,28 +241,75 @@ export function useFretboardCam(opts = {}) {
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [phase]);
 
-  // Record a tapped corner (normalized to the tapped element's box). Once four
-  // are placed, solve the homography and go live; a degenerate quad resets.
-  const tapCorner = useCallback((e) => {
-    if (phaseRef.current !== 'calibrate') return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    setCorners((prev) => {
-      if (prev.length >= 4) return prev;
-      const next = [...prev, { x, y }];
-      if (next.length === 4) {
-        const h = computeHomography(next);
-        if (!h) {
-          setStatus('Those corners are too close together — tap again.');
-          return [];
-        }
-        homographyRef.current = h.H;
-        setStatus('');
-        setPhase('live');
+  // Automatic neck detection during the calibrate phase. A throttled loop grabs
+  // a downscaled frame, runs detectNeck, and — once several consecutive frames
+  // agree on a confident board — auto-commits the homography and goes live. No
+  // taps. If nothing is found for a few seconds, flips to a 'notfound' hint.
+  useEffect(() => {
+    if (phase !== 'calibrate') return undefined;
+    setDetectStatus('searching');
+    setDetectedCorners(null);
+    detectAgreeRef.current = 0;
+    lastDetectRef.current = null;
+    detectStartRef.current = performance.now();
+
+    const DW = 160; // downscaled width for detection
+    let timer;
+    const tick = () => {
+      timer = setTimeout(tick, 180); // ~5–6 Hz
+      const video = videoRef.current;
+      if (!video || video.readyState < 2 || !video.videoWidth) return;
+      const dh = Math.max(1, Math.round((video.videoHeight / video.videoWidth) * DW));
+      let cv = detectCanvasRef.current;
+      if (!cv) { cv = detectCanvasRef.current = document.createElement('canvas'); }
+      cv.width = DW; cv.height = dh;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, DW, dh);
+      let img;
+      try { img = ctx.getImageData(0, 0, DW, dh); } catch { return; } // tainted canvas guard
+      const res = detectNeck(img.data, DW, dh);
+
+      if (!res) {
+        detectAgreeRef.current = 0;
+        lastDetectRef.current = null;
+        setDetectedCorners(null);
+        if (performance.now() - detectStartRef.current > 4000) setDetectStatus('notfound');
+        return;
       }
-      return next;
-    });
+      setDetectedCorners(res.corners);
+      setDetectConfidence(res.confidence);
+      setDetectStatus('searching');
+
+      // Stability gate: require a few consecutive agreeing, confident detections
+      // so a single fluke frame can't lock a wrong board.
+      if (lastDetectRef.current && cornersAgree(res.corners, lastDetectRef.current, 0.06)) {
+        detectAgreeRef.current += 1;
+      } else {
+        detectAgreeRef.current = 1;
+      }
+      lastDetectRef.current = res.corners;
+
+      if (detectAgreeRef.current >= 4 && res.confidence >= 0.15) {
+        const h = computeHomography(res.corners);
+        if (h) {
+          homographyRef.current = h.H;
+          setCorners(res.corners);   // draw the locked board in 'live'
+          setStatus('');
+          setPhase('live');          // auto-commit — no tap
+        }
+      }
+    };
+    timer = setTimeout(tick, 300); // small delay so the video has frames
+    return () => { if (timer) clearTimeout(timer); };
+  }, [phase]);
+
+  // Re-arm detection (used by the "Retry" affordance on the notfound state).
+  const retryDetect = useCallback(() => {
+    detectAgreeRef.current = 0;
+    lastDetectRef.current = null;
+    detectStartRef.current = performance.now();
+    setDetectedCorners(null);
+    setDetectStatus('searching');
   }, []);
 
   const recalibrate = useCallback(() => {
@@ -281,7 +338,8 @@ export function useFretboardCam(opts = {}) {
     // state
     phase, status, corners, handVisible, positions, chord, spanFrets,
     cameras, cameraId,
+    detectedCorners, detectConfidence, detectStatus,
     // actions
-    start, stop, close, tapCorner, recalibrate, switchCamera,
+    start, stop, close, recalibrate, switchCamera, retryDetect,
   };
 }

@@ -15,13 +15,6 @@ import { FRETTING_TIPS } from '../lib/fretboardMap';
 import ChordTip from './ChordTip';
 import CameraPicker from './CameraPicker';
 
-const CORNER_LABELS = [
-  'nut · low-E (thick) corner',
-  'nut · high-e (thin) corner',
-  '5th fret · high-e (thin) corner',
-  '5th fret · low-E (thick) corner',
-];
-
 export default function FretboardChordCam({ lang }) {
   const tr = useT(lang);
   const cam = useFretboardCam();
@@ -40,15 +33,20 @@ export default function FretboardChordCam({ lang }) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, W, H);
 
-      if (cam.corners.length) {
-        ctx.strokeStyle = '#38bdf8';
+      // While calibrating, draw the auto-detected neck box (amber = tentative,
+      // green = confident/locking). Once live, draw the committed board in blue.
+      const quad = cam.phase === 'live' ? cam.corners : cam.detectedCorners;
+      if (quad && quad.length === 4) {
+        ctx.strokeStyle = cam.phase === 'live'
+          ? '#38bdf8'
+          : (cam.detectConfidence >= 0.15 ? '#34d399' : '#f59e0b');
         ctx.lineWidth = 3;
         ctx.beginPath();
-        cam.corners.forEach((c, i) => {
+        quad.forEach((c, i) => {
           const x = c.x * W, y = c.y * H;
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
-        if (cam.corners.length === 4) ctx.closePath();
+        ctx.closePath();
         ctx.stroke();
       }
       const lm = latestLandmarks.current;
@@ -68,7 +66,7 @@ export default function FretboardChordCam({ lang }) {
     };
     if (cam.phase === 'calibrate' || cam.phase === 'live') raf = requestAnimationFrame(draw);
     return () => { if (raf) cancelAnimationFrame(raf); };
-  }, [cam.phase, cam.corners, overlayRef, videoRef, latestLandmarks]);
+  }, [cam.phase, cam.corners, cam.detectedCorners, cam.detectConfidence, overlayRef, videoRef, latestLandmarks]);
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
@@ -91,12 +89,12 @@ export default function FretboardChordCam({ lang }) {
         <div className="p-6">
           <p className="text-sm mb-3 text-center" style={{ color: 'var(--color-ink-muted)' }}>
             {tr.chordCamIntro ||
-              'Point your camera at the fretboard, mark its corners once, then hold any chord — the app names what you’re playing.'}
+              'Aim your camera down the neck, let it find the fretboard, then hold any chord — the app names what you’re playing.'}
           </p>
           <ol className="text-sm space-y-2 mb-4 mx-auto" style={{ color: 'var(--color-ink-muted)', maxWidth: '22rem' }}>
             {[
-              tr.chordCamStep1 || 'Prop your phone so the whole fretboard is clearly in view, well lit.',
-              tr.chordCamStep2 || 'Tap the four corners of the neck when asked — this maps the strings and frets.',
+              tr.chordCamStep1 || 'Position the camera over your shoulder, looking down the neck so your fingertips are visible.',
+              tr.chordCamStep2 || 'Hold steady while the app finds your fretboard — it locks on automatically.',
               tr.chordCamStep3 || 'Hold any chord shape and keep your hand still — the chord name appears.',
             ].map((step, i) => (
               <li key={i} className="flex gap-2.5">
@@ -137,30 +135,29 @@ export default function FretboardChordCam({ lang }) {
 
       {(cam.phase === 'calibrate' || cam.phase === 'live') && (
         <div>
-          <div className="relative" onClick={cam.tapCorner}
-            style={{ cursor: cam.phase === 'calibrate' ? 'crosshair' : 'default' }}>
+          <div className="relative">
             {/* Rear camera → no mirror (unlike the selfie hand-measure view). */}
             <video ref={videoRef} playsInline muted className="w-full block" />
             <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none" />
-
-            {cam.phase === 'calibrate' && cam.corners.map((c, i) => (
-              <div key={i}
-                className="absolute w-3.5 h-3.5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, background: 'var(--color-info, #38bdf8)', border: '2px solid #fff' }} />
-            ))}
           </div>
 
           {cam.phase === 'calibrate' && (
             <div className="p-4 text-center">
               <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-ink)' }}>
-                {tr.chordCamTapPrompt || 'Tap the fretboard corners'}
+                {cam.detectStatus === 'notfound'
+                  ? (tr.neckNotFound || 'Can’t find the neck')
+                  : (tr.neckFinding || 'Finding your fretboard…')}
               </p>
-              <p className="text-xs" style={{ color: 'var(--color-brand)' }}>
-                {cam.corners.length < 4
-                  ? `${cam.corners.length + 1}/4 — ${CORNER_LABELS[cam.corners.length]}`
-                  : 'Locking board…'}
+              <p className="text-xs" style={{ color: 'var(--color-ink-muted)' }}>
+                {tr.neckAngleHint ||
+                  'Aim the camera down the neck from over your shoulder so your fingertips are visible.'}
               </p>
-              {cam.status && <p className="text-xs mt-2" style={{ color: 'var(--color-danger, #ef4444)' }}>{cam.status}</p>}
+              {cam.detectStatus === 'notfound' && (
+                <button onClick={cam.retryDetect} className="text-xs px-4 py-2 rounded-lg mt-3 font-semibold"
+                  style={{ background: 'var(--color-brand)', color: '#0b0b0b' }}>
+                  {tr.retry || 'Retry'}
+                </button>
+              )}
               <CameraPicker cam={cam} lang={lang} />
             </div>
           )}
