@@ -15,6 +15,7 @@ import {
   improvMap,
   trustDetection,
   makeChordLatch,
+  livePitchClasses,
   SCALE_FORMULAS,
   NUM_STRINGS,
 } from './improvEngine';
@@ -293,6 +294,22 @@ describe('trustDetection against the REAL detector + REAL chord library', () => 
   });
 });
 
+describe('livePitchClasses', () => {
+  const pcOf2 = (n) => NOTE_NAMES.indexOf(n);
+  it('maps detected Hz to distinct pitch classes', () => {
+    // Open A (110), A one octave up (220), and C#4 (~277) -> {A, C#}.
+    const s = livePitchClasses([110.0, 220.0, 277.18]);
+    expect(s.has(pcOf2('A'))).toBe(true);
+    expect(s.has(pcOf2('C#'))).toBe(true);
+    expect(s.size).toBe(2); // the two A's collapse to one class
+  });
+  it('is empty for no input or non-positive Hz', () => {
+    expect(livePitchClasses([]).size).toBe(0);
+    expect(livePitchClasses(null).size).toBe(0);
+    expect(livePitchClasses([0, -5]).size).toBe(0);
+  });
+});
+
 describe('makeChordLatch — hold the chord through its own decay', () => {
   const ok = { trust: true, reason: null };
   const no = (reason) => ({ trust: false, reason });
@@ -406,6 +423,52 @@ describe('makeChordLatch — hold the chord through its own decay', () => {
     const l2 = makeChordLatch({ confirmFrames: 0 });
     l2.update(ok, 'Am');
     expect(l2.update({ trust: false, reason: 'silence' }, null).chord).toBe('Am');
+  });
+
+  it('only a STRUM replaces the held chord — soloing over it does not', () => {
+    // The player holds Am, then solos: single notes that the detector may name
+    // as other chords must NOT swap the display. Only >= strumNotes counts.
+    const l = makeChordLatch({ confirmFrames: 2, strumNotes: 3 });
+    l.update(ok, 'Am', 5);                       // strum Am
+    // Solo line: confident C/G/F names arriving 1-2 notes at a time.
+    expect(l.update(ok, 'C', 1).chord).toBe('Am');
+    expect(l.update(ok, 'G', 2).chord).toBe('Am');
+    expect(l.update(ok, 'C', 1).chord).toBe('Am');
+    expect(l.update(ok, 'C', 2).chord).toBe('Am'); // even 2 confident C's: no swap
+    expect(l.current().chord).toBe('Am');
+  });
+
+  it('a single-note frame still reads as live playing, not silence', () => {
+    const l = makeChordLatch({ strumNotes: 3 });
+    l.update(ok, 'Am', 5);
+    expect(l.update(ok, 'C', 1).live).toBe(true); // you ARE playing (a solo note)
+  });
+
+  it('a full strum of a different chord still replaces after confirmFrames', () => {
+    const l = makeChordLatch({ confirmFrames: 2, strumNotes: 3 });
+    l.update(ok, 'Am', 5);
+    expect(l.update(ok, 'C', 4).chord).toBe('Am'); // 1st strum frame
+    expect(l.update(ok, 'C', 4).chord).toBe('C');  // 2nd — swaps
+  });
+
+  it('a sub-strum frame cancels a pending strum-driven change', () => {
+    // Halfway to confirming C, the player drops to a single note — the pending C
+    // must reset, so a later stray strum doesn't get a head start.
+    const l = makeChordLatch({ confirmFrames: 3, strumNotes: 3 });
+    l.update(ok, 'Am', 5);
+    l.update(ok, 'C', 4);            // candidate C, 1 hit
+    l.update(ok, 'C', 1);            // single note — resets the pending change
+    l.update(ok, 'C', 4);            // candidate C restarts at 1
+    expect(l.current().chord).toBe('Am');
+    l.update(ok, 'C', 4);            // 2
+    expect(l.update(ok, 'C', 4).chord).toBe('C'); // 3 — now it swaps
+  });
+
+  it('defaults noteCount to the strum threshold so old callers still swap', () => {
+    // update() called without a noteCount must behave as before this option.
+    const l = makeChordLatch({ confirmFrames: 1 });
+    l.update(ok, 'Am');
+    expect(l.update(ok, 'C').chord).toBe('C');
   });
 
   it('reset clears everything', () => {

@@ -54,6 +54,7 @@ export const t = {
     improvUnsupported: 'Heard a chord I can’t map scales for yet — still showing your last',
     improvLegendTone: 'Chord tone — lands, sounds resolved',
     improvLegendScale: 'Scale note — safe to pass through',
+    improvLegendLive: 'Playing now (all positions of that note)',
     micDenied: 'Microphone permission was blocked. Allow mic access for this site, then try again.',
     noteMapShowAll: '🎵 Show all notes',
     noteMapHideAll: 'Hide notes',

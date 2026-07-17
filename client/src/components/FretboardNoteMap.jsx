@@ -31,6 +31,21 @@
 // stopped strumming, you didn't change chord — because a HUD that mirrors the
 // strum envelope frame-by-frame strobes and is useless to improvise against.
 //
+// Strum to change, solo freely
+// ----------------------------
+// Only a STRUM (>=strumNotes sounding at once) replaces the held chord. While you
+// improvise OVER it you play single notes, and the detector may name those as
+// other chords — so single-note frames are treated as live playing that never
+// swaps the scale overlay. This is what lets you solo without the board jumping.
+//
+// Live notes
+// ----------
+// The grid also lights the notes you're sounding RIGHT NOW, in real time. Audio
+// gives PITCH CLASSES, not fret positions — an A is an A whether it's the open A
+// string or the low-E 5th fret — so every position of a sounding note lights (a
+// white ring over its base colour), not a guessed single fingering. Over the
+// scale overlay this shows which scale tones you're actually hitting as you play.
+//
 // That is a hold, not a fabrication: the chord shown is one you really played.
 // The genuine gap is the window between changing chord and the detector becoming
 // confident about the new one, when the display still shows the previous chord.
@@ -47,7 +62,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useT } from '../lib/i18n';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from '../lib/chordAnalyzer';
-import { improvMap, trustDetection, makeChordLatch } from '../lib/improvEngine';
+import { improvMap, trustDetection, makeChordLatch, livePitchClasses } from '../lib/improvEngine';
 import ChordTip from './ChordTip';
 import {
   useMic,
@@ -55,7 +70,6 @@ import {
   detectPeaksConfigured,
   matchChordConfigured,
 } from '../lib/micDetect';
-import { hzToMidi } from '../lib/pitchDetect';
 
 const FRETS = 12;                                     // nut → 12th = one octave
 const STRING_LABELS = ['E', 'A', 'D', 'G', 'B', 'e']; // 0 = low E … 5 = high e
@@ -76,16 +90,21 @@ export default function FretboardNoteMap({ lang }) {
   // between strums. Holding the last chord until a DIFFERENT one is confidently
   // heard means the HUD stays put while you actually improvise over it, instead
   // of strobing with the strum envelope.
-  const latchRef = useRef(makeChordLatch({ confirmFrames: 2 }));
+  // strumNotes: only a strum (>=3 notes at once) changes the held chord; soloing
+  // over it — single notes — must not be read as a chord change.
+  const latchRef = useRef(makeChordLatch({ confirmFrames: 2, strumNotes: 3 }));
   // Last values pushed to React state, so the 60fps loop only calls setState when
   // something actually changed — a held chord otherwise re-dispatches identical
   // state every frame for the whole session.
-  const lastPushRef = useRef({ chord: null, live: false, hint: null });
+  const lastPushRef = useRef({ chord: null, live: false, hint: null, liveKey: '' });
 
   const [listening, setListening] = useState(false);
   const [permDenied, setPermDenied] = useState(false);
   const [detected, setDetected] = useState(null);   // the LATCHED chord name
   const [live, setLive] = useState(false);          // is it sounding right now?
+  // Pitch classes sounding RIGHT NOW (0..11), lit live on the grid at every
+  // position. Audio can't give the exact fret, so we light all of a class.
+  const [livePcs, setLivePcs] = useState([]);
   // Why the CURRENT input isn't being acted on, even though a chord is held.
   // Lets the UI say "the thing you're playing now isn't recognised" instead of
   // silently keeping the old chord's scales up with no explanation.
@@ -99,10 +118,11 @@ export default function FretboardNoteMap({ lang }) {
     latchRef.current.reset();
     // Reset the change-detector too, so the next session's first real update
     // isn't suppressed by stale last-pushed values.
-    lastPushRef.current = { chord: null, live: false, hint: null };
+    lastPushRef.current = { chord: null, live: false, hint: null, liveKey: '' };
     setListening(false);
     setDetected(null);
     setLive(false);
+    setLivePcs([]);
     setInputHint(null);
   }, [mic]);
 
@@ -121,16 +141,17 @@ export default function FretboardNoteMap({ lang }) {
         );
         const hzList = peaks.map((p) => p.hz);
         const match = matchChordConfigured(hzList, cfgRef.current);
-        // Distinct pitch classes — a triad needs 3; fewer means we're hearing a
-        // string or two, not a chord (the case a raw score of 1.000 can't catch).
-        const noteCount = new Set(
-          hzList.map((hz) => ((Math.round(hzToMidi(hz)) % 12) + 12) % 12),
-        ).size;
+        // The notes sounding right now, as pitch classes. Drives both the
+        // strum-vs-solo decision (how many) and the live grid lights (which).
+        // Silence shows nothing live rather than the fading tail of a decay.
+        const silent = rms < (cfgRef.current.silenceRms ?? 0.008);
+        const pcs = silent ? new Set() : livePitchClasses(hzList);
+        const noteCount = pcs.size;
         const verdict = trustDetection(match, { noteCount, rms });
         // The latch owns hold-vs-replace. Silence never clears the display (you
-        // stopped strumming, you didn't change chord); only a different chord,
-        // confidently heard on consecutive frames, takes over.
-        const state = latchRef.current.update(verdict, match?.chord?.name ?? null);
+        // stopped strumming, you didn't change chord); only a STRUM of a different
+        // chord (>=strumNotes) takes over — soloing single notes does not.
+        const state = latchRef.current.update(verdict, match?.chord?.name ?? null, noteCount);
 
         // What is the CURRENT input doing, separate from what's latched? If a
         // chord is held but you're now playing something we can't act on (noise,
@@ -148,6 +169,13 @@ export default function FretboardNoteMap({ lang }) {
         if (state.chord !== last.chord) { setDetected(state.chord); last.chord = state.chord; }
         if (state.live !== last.live) { setLive(state.live); last.live = state.live; }
         if (hint !== last.hint) { setInputHint(hint); last.hint = hint; }
+        // Live notes: push a stable, sorted array only when the set of sounding
+        // classes actually changes, so we're not allocating a new array 60x/sec.
+        const liveKey = [...pcs].sort((a, b) => a - b).join(',');
+        if (liveKey !== last.liveKey) {
+          setLivePcs(liveKey ? liveKey.split(',').map(Number) : []);
+          last.liveKey = liveKey;
+        }
       };
       rafRef.current = requestAnimationFrame(loop);
     } catch (e) {
@@ -196,6 +224,9 @@ export default function FretboardNoteMap({ lang }) {
     }
     return { toneAt: tone, scaleAt: scale };
   }, [map, activeScale]);
+
+  // Pitch classes sounding right now, as a Set for O(1) per-cell lookup.
+  const liveSet = useMemo(() => new Set(livePcs), [livePcs]);
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
@@ -310,6 +341,9 @@ export default function FretboardNoteMap({ lang }) {
                 const open = f === 0;
                 const tone = toneAt.get(key(s, f));      // a chord tone: landing note
                 const scaleNote = scaleAt.get(key(s, f)); // in the improv scale
+                // Is this note SOUNDING right now? (every position of the class —
+                // audio can't say which one you actually fretted).
+                const nowPlaying = liveSet.has(pc);
                 // Chord tones win: they're the notes that resolve.
                 const lit = tone || scaleNote;
                 let style;
@@ -338,6 +372,17 @@ export default function FretboardNoteMap({ lang }) {
                       : IS_SHARP(pc) ? 'var(--color-ink-faint)' : 'var(--color-ink)',
                     border: '1px solid var(--color-surface-650)',
                     opacity: map ? 0.35 : 1,
+                  };
+                }
+                // Live overlay: a bright white ring + full opacity ON TOP of the
+                // base colour, so a sounding note reads as "playing now" without
+                // losing whether it's a chord tone or a scale note underneath.
+                if (nowPlaying) {
+                  style = {
+                    ...style,
+                    opacity: 1,
+                    border: '2px solid #fff',
+                    boxShadow: '0 0 12px 2px rgba(255,255,255,0.7)',
                   };
                 }
                 return (
@@ -369,6 +414,11 @@ export default function FretboardNoteMap({ lang }) {
               <span className="inline-block w-3 h-3 rounded"
                 style={{ background: 'rgba(56,189,248,0.18)', border: '1px solid rgba(56,189,248,0.45)' }} />
               {tr.improvLegendScale || 'Scale note — safe to pass through'}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded"
+                style={{ background: 'var(--color-surface-700)', border: '2px solid #fff', boxShadow: '0 0 6px rgba(255,255,255,0.7)' }} />
+              {tr.improvLegendLive || 'Playing now (all positions of that note)'}
             </span>
           </div>
         ) : (

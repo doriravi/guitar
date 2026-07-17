@@ -35,6 +35,7 @@ import {
   CHORD_QUALITIES,
 } from './chordAnalyzer';
 import { NUM_FRETS } from './fretboard';
+import { hzToMidi } from './pitchDetect';
 
 export const NUM_STRINGS = 6;
 
@@ -184,6 +185,26 @@ export function scalePositions(root, scaleId, opts = {}) {
   }));
 }
 
+/**
+ * The distinct pitch classes currently sounding, from a list of detected Hz.
+ *
+ * This is what "show the notes I'm playing live" can honestly surface: audio
+ * gives PITCH CLASSES (which note), not POSITIONS (which string/fret) — an A is
+ * an A whether it's the open A string or the low-E 5th fret. So the HUD lights
+ * every position of these classes, not one guessed fingering.
+ *
+ * @param {number[]} hzList detected frequencies
+ * @returns {Set<number>} pitch classes 0..11
+ */
+export function livePitchClasses(hzList) {
+  const s = new Set();
+  if (!hzList) return s;
+  for (const hz of hzList) {
+    if (hz > 0) s.add(((Math.round(hzToMidi(hz)) % 12) + 12) % 12);
+  }
+  return s;
+}
+
 // ── Trusting the detector ────────────────────────────────────────────────────
 // matchChord() always returns a best match — it never returns null, just
 // something weak. Measured against the live pipeline, at the shared minScore of
@@ -276,12 +297,18 @@ export function trustDetection(match, opts = {}) {
  * @param {number} [opts.confirmFrames=2] consecutive trusted frames of a NEW
  *        chord before it replaces the current one. Guards against a single bad
  *        frame mid-transition swapping the display to a chord you never played.
+ * @param {number} [opts.strumNotes=3] distinct notes that must be sounding for a
+ *        frame to count toward REPLACING the held chord. A strum sounds the whole
+ *        chord at once (>=3 notes); soloing over the held chord is one or two
+ *        notes at a time and must NOT be mistaken for a chord change. The very
+ *        first latch is exempt — there's nothing held to protect yet.
  * @returns {{update:Function, current:Function, reset:Function}}
  */
 export function makeChordLatch(opts = {}) {
   // At least 1: confirmFrames < 1 would make every stray single frame replace
   // the held chord instantly, defeating the guard this option exists to provide.
   const confirmFrames = Math.max(1, opts.confirmFrames ?? 2);
+  const strumNotes = opts.strumNotes ?? 3;
   let held = null;        // the chord currently on screen
   let candidate = null;   // a different chord we're becoming confident about
   let candidateHits = 0;
@@ -292,9 +319,12 @@ export function makeChordLatch(opts = {}) {
      * Feed one frame's verdict.
      * @param {{trust:boolean, reason:string|null}} verdict from trustDetection
      * @param {string|null} chordName the detected name (when trusted)
+     * @param {number} [noteCount=strumNotes] distinct notes sounding this frame.
+     *        A REPLACEMENT requires >= strumNotes (a real strum); defaults to the
+     *        threshold so callers that don't pass it behave as before.
      * @returns {{chord:string|null, live:boolean, changed:boolean}}
      */
-    update(verdict, chordName) {
+    update(verdict, chordName, noteCount = strumNotes) {
       const prev = held;
       if (!verdict?.trust || !chordName) {
         // No confident reading. Keep showing what we have — the player is between
@@ -314,7 +344,8 @@ export function makeChordLatch(opts = {}) {
       // Nothing on screen yet: latch immediately. confirmFrames exists to stop a
       // stray frame REPLACING a chord you're looking at; with an empty display
       // there's nothing to protect, and making the first chord wait would just
-      // feel broken.
+      // feel broken. (The strum requirement is a REPLACE guard, so it doesn't
+      // apply to this first latch either.)
       if (held === null) {
         held = chordName;
         candidate = null;
@@ -323,7 +354,19 @@ export function makeChordLatch(opts = {}) {
         return { chord: held, live, changed: true };
       }
 
-      // A different chord, confidently heard.
+      // A DIFFERENT chord is confidently heard — but only a STRUM replaces the
+      // held one. Soloing over the held chord sounds one or two notes at a time;
+      // those are the notes you're improvising WITH, not a new chord. Treat a
+      // sub-strum frame like a same-chord frame: it's live playing, it just
+      // doesn't move the display or advance a pending change.
+      if (noteCount < strumNotes) {
+        candidate = null;
+        candidateHits = 0;
+        live = true;
+        return { chord: held, live, changed: false };
+      }
+
+      // A different chord, confidently strummed.
       if (chordName === candidate) candidateHits += 1;
       else { candidate = chordName; candidateHits = 1; }
 
