@@ -1,20 +1,35 @@
 // useHandTrack — camera + MediaPipe Hands, and nothing else.
 //
-// The virtual-fretboard path deliberately does NOT use useFretboardCam: that
-// hook is built around finding a physical neck (a 'calibrate' phase running
-// detectNeck, a homography, corner fine-tuning). The whole point of the virtual
-// board is that there is no physical board to find, so dragging that machinery
-// along would be dead weight and a source of phantom failure states
-// ("can't find the neck") in a feature that never looks for one.
+// This replaced the old useFretboardCam, which was built around finding a
+// PHYSICAL neck (a 'calibrate' phase running edge/orientation detection, a
+// homography, 4-corner fine-tuning). That detection was removed from the app: it
+// could not find a real neck reliably — clutter won the dominant axis, lighting
+// moved the band, and the board drifted while playing. The virtual fretboard
+// draws its own board instead, so there is nothing to detect and nothing to
+// calibrate.
 //
 // This hook is therefore the minimum: open a camera, run MediaPipe Hands, hand
 // back the raw landmarks. State machine: idle → loading → live | error.
-//
-// It reuses loadMediaPipeScript() from useFretboardCam so the CDN script is
-// still fetched at most once across the whole app.
 
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { loadMediaPipeScript } from './useFretboardCam';
+
+// One shared CDN loader (same version the hand-measure tool uses). Module-level
+// promise so the script is fetched at most once across every consumer.
+const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';
+let scriptPromise = null;
+export function loadMediaPipeScript() {
+  if (scriptPromise) return scriptPromise;
+  scriptPromise = new Promise((resolve, reject) => {
+    if (window.Hands) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = CDN;
+    s.crossOrigin = 'anonymous';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load MediaPipe from CDN'));
+    document.head.appendChild(s);
+  });
+  return scriptPromise;
+}
 
 export function useHandTrack(opts = {}) {
   const videoRef = useRef(null);
@@ -59,8 +74,8 @@ export function useHandTrack(opts = {}) {
     }
   }, []);
 
-  // See useFretboardCam.prime — browsers hide camera labels until access has been
-  // granted once, so we open a stream briefly to unlock the names.
+  // Browsers hide camera labels until access has been granted at least once, so
+  // we open a stream briefly (and release it) purely to unlock the real names.
   const prime = useCallback(async () => {
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: true });

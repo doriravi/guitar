@@ -10,6 +10,8 @@ import {
   handToDiagram,
   handFrame,
   toHandSpace,
+  boardTransform,
+  cameraAngleAdvice,
   KNUCKLES,
   WRIST,
 } from './virtualFretboard';
@@ -222,6 +224,98 @@ describe('observeHand is hand-relative (the static-mapping bug)', () => {
     moved[FRETTING_TIPS.index] = { x: MCP_X.index, y: 0.58, z: -0.05 };
     const b = observeHand(moved, BOUNDS, BOARD);
     expect(cells(b)).not.toBe(cells(a));
+  });
+});
+
+describe('boardTransform — the hand-anchored DRAWING box', () => {
+  it('returns null for an unusable hand', () => {
+    expect(boardTransform(null)).toBeNull();
+    expect(boardTransform([])).toBeNull();
+  });
+
+  it('follows the hand across the screen', () => {
+    const a = boardTransform(makeHand());
+    const b = boardTransform(transformHand(makeHand(), { dx: 0.2, dy: -0.1 }));
+    expect(b.cx).toBeCloseTo(a.cx + 0.2, 5);
+    expect(b.cy).toBeCloseTo(a.cy - 0.1, 5);
+  });
+
+  it('grows when the hand is closer to the camera and shrinks when further', () => {
+    const base = boardTransform(makeHand());
+    const near = boardTransform(transformHand(makeHand(), { scale: 1.8 }));
+    const far = boardTransform(transformHand(makeHand(), { scale: 0.6 }));
+    expect(near.w).toBeCloseTo(base.w * 1.8, 5);
+    expect(far.w).toBeCloseTo(base.w * 0.6, 5);
+    expect(near.h).toBeGreaterThan(base.h);
+    expect(far.h).toBeLessThan(base.h);
+  });
+
+  it('rotates with the hand', () => {
+    const base = boardTransform(makeHand());
+    const rot = 0.5;
+    const turned = boardTransform(transformHand(makeHand(), { rot }));
+    // Angles wrap, so compare the wrapped difference.
+    const d = Math.atan2(Math.sin(turned.angle - base.angle), Math.cos(turned.angle - base.angle));
+    expect(d).toBeCloseTo(rot, 5);
+  });
+
+  it('keeps its aspect ratio under a size trim (scale is a uniform trim)', () => {
+    const a = boardTransform(makeHand());
+    const b = boardTransform(makeHand(), { scale: 1.5 });
+    expect(b.w / b.h).toBeCloseTo(a.w / a.h, 6);
+    expect(b.w).toBeCloseTo(a.w * 1.5, 6);
+  });
+
+  it('does NOT change the reported cells — drawing is not mapping', () => {
+    // The whole point of the separation: where we draw the box must not be able
+    // to change what the app claims the user played.
+    const lm = makeHand();
+    const cells = (o) => o.fingers.map((f) => `${f.name}:${f.string}:${f.fret}`).join('|');
+    const a = observeHand(lm, { x: 0.1, y: 0.3, w: 0.8, h: 0.4 }, BOARD);
+    const t = boardTransform(lm, { scale: 2.2 });
+    const b = observeHand(lm, { x: t.cx, y: t.cy, w: t.w, h: t.h }, BOARD);
+    expect(cells(b)).toBe(cells(a));
+  });
+});
+
+describe('cameraAngleAdvice — the real blocker, surfaced', () => {
+  it('says no hand when there is none', () => {
+    expect(cameraAngleAdvice(observeHand(null, BOUNDS, BOARD)).level).toBe('nohand');
+    expect(cameraAngleAdvice({ present: false }).level).toBe('nohand');
+  });
+
+  it('calls a fully-occluded hand BLIND rather than reporting a chord', () => {
+    // This is the user's actual screenshot: "Fingers seen: 0%".
+    const occluded = {};
+    for (const tipIdx of Object.values(FRETTING_TIPS)) {
+      occluded[tipIdx] = { x: 0.5, y: 0.45, z: 0.5 };
+    }
+    const o = observeHand(makeHand(occluded), BOUNDS, BOARD);
+    const a = cameraAngleAdvice(o);
+    expect(a.level).toBe('blind');
+    expect(a.visible).toBe(0);
+    expect(a.advice).toMatch(/shoulder|down the neck/i);
+  });
+
+  it('flags a partially-occluded hand', () => {
+    const lm = makeHand({ [FRETTING_TIPS.pinky]: { x: 0.5, y: 0.45, z: 0.5 } });
+    expect(cameraAngleAdvice(observeHand(lm, BOUNDS, BOARD)).level).toBe('partial'); // 3/4
+  });
+
+  it('passes a hand whose fingertips are all visible', () => {
+    const a = cameraAngleAdvice(observeHand(makeHand(), BOUNDS, BOARD));
+    expect(a.level).toBe('good');
+    expect(a.visible).toBe(1);
+  });
+
+  it('judges OCCLUSION only — a visible finger outside the board is not bad angle', () => {
+    // The fixture's pinky maps outside the board window (v > 1), so observeHand's
+    // `confidence` (visible && inside) is 0.75 while all four tips are plainly
+    // visible. Reading confidence here would tell the user to move their camera
+    // over their shoulder to fix what is really a framing/hand-position matter.
+    const o = observeHand(makeHand(), BOUNDS, BOARD);
+    expect(o.confidence).toBeCloseTo(0.75, 2);      // inside-the-board share
+    expect(cameraAngleAdvice(o).level).toBe('good'); // but the ANGLE is fine
   });
 });
 

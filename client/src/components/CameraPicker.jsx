@@ -1,7 +1,7 @@
 // CameraPicker — a compact <select> for choosing which camera the fretboard
 // vision uses. Only renders when more than one camera exists (so phones with a
 // single rear cam don't see clutter; laptops/desktops with multiple webcams or
-// an external cam get to switch). Driven by useFretboardCam's `cameras` list +
+// an external cam get to switch). Driven by useHandTrack's `cameras` list +
 // `switchCamera` action.
 
 import { useT } from '../lib/i18n';

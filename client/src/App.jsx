@@ -8,10 +8,8 @@ import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
 import TabTranscriber from './components/TabTranscriber';
 import GuitarStrings from './components/GuitarStrings';
-import FretboardChordCam from './components/FretboardChordCam';
 import FretboardNoteMap from './components/FretboardNoteMap';
 import VirtualFretboard from './components/VirtualFretboard';
-import VerifiedPractice from './components/VerifiedPractice';
 import OscilloscopeTuner from './components/OscilloscopeTuner';
 import AuthModal from './components/AuthModal';
 import LandingPage from './components/LandingPage';
@@ -144,10 +142,8 @@ function getTabs(tr) {
     { id: 'micpractice',  label: tr.tabMicPractice || 'Practice',  icon: '🎸', side: true },
     { id: 'mictune',      label: tr.tabMicTune || 'Mic Tune',      icon: '⚙️', side: true },
     { id: 'listen',       label: tr.tabPlayAlong || 'Play-Along',  icon: '🎮' },
-    { id: 'chordcam',     label: tr.tabChordCam || 'Chord Cam',    icon: '📸', side: true },
     { id: 'notemap',      label: tr.tabNoteMap || 'Note Map',      icon: '🎼', side: true },
     { id: 'virtual',      label: tr.tabVirtual || 'Virtual Neck',  icon: '🎸', side: true },
-    { id: 'verify',       label: tr.tabVerifyPractice || 'Verified Practice', icon: '✅', side: true },
     { id: 'levelplan',    label: tr.tabLevelPlan || 'Level Plan', icon: '🗺️', side: true },
     { id: 'fbmeasure',    label: tr.tabFretboardMeasures || 'Fretboard Measures', icon: '📏', side: true },
     { id: 'audiotab',     label: tr.tabAudioTab || 'Audio → Tab', icon: '🎼', side: true },
@@ -170,10 +166,8 @@ const TAB_HELP = {
   micpractice:  'Practice mode shows you a chord to play and checks with the microphone that you hit it.',
   mictune:      'Mic Tune adjusts how the chord detector hears you — sensitivity, snapshot rate, and scan range.',
   listen:       'Play-Along is a game: chords scroll in time with a song while the microphone listens, scores each change, and tracks your improvement.',
-  chordcam:     'The Chord Cam watches the fretboard through your camera. Mark the neck corners once, then hold any shape and it names the chord you are fingering.',
   notemap:      'The Note Map labels every note on the fretboard (all strings and frets). Open the camera to see your hand on the neck and light up the notes you press.',
   virtual:      'The Virtual Neck draws its own fretboard instead of detecting your real one — no calibration. It tracks your hand and maps your fingertips onto the virtual grid, marking any finger it cannot actually see as unconfirmed.',
-  verify:       'Verified Practice checks a chord two ways at once: the camera watches your fingering and the microphone listens to the sound. A chord counts as correct only when both agree, and it tells you which string is letting you down.',
   levelplan:    'The Level Plan is your roadmap from Beginner to Master. It tracks the milestones the app can measure and points you to the exact tab to practice the rest.',
   fbmeasure:    'Fretboard Measures visualizes the physical geometry of the neck and measures the exact horizontal, vertical, and diagonal hand stretch between the fingers you place, in millimetres.',
   audiotab:     'The Audio to Tab tool turns a recording or a YouTube link into guitar tablature, and scores each shape for your hand.',
@@ -815,10 +809,8 @@ export default function App() {
             {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
-            {activeTab === 'chordcam'     && <FretboardChordCam lang={lang} />}
             {activeTab === 'notemap'      && <FretboardNoteMap lang={lang} />}
             {activeTab === 'virtual'      && <VirtualFretboard lang={lang} />}
-            {activeTab === 'verify'       && <VerifiedPractice lang={lang} />}
             {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={setActiveTab} />}
             {activeTab === 'fbmeasure'    && <FretboardMeasures lang={lang} />}
             {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}

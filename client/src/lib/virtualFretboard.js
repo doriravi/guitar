@@ -115,6 +115,76 @@ export function toHandSpace(pt, frame) {
   };
 }
 
+// ── Where to DRAW the board ──────────────────────────────────────────────────
+// Purely presentational. The mapping (observeHand) is already invariant to where
+// the hand is, so nothing below can make a cell more or less correct — it only
+// decides where the picture goes. Keeping that separation is deliberate: a fixed
+// screen rect looked broken when the hand sat elsewhere, so we pin the drawing to
+// the hand. The numbers the app REPORTS do not change either way.
+
+/**
+ * A drawing transform that pins the board to the hand: it sits just off the
+ * index knuckle, tilts with the hand, and grows/shrinks with camera distance.
+ *
+ * Honest limits, because this is easy to over-read:
+ *  - The angle is the HAND's, not the guitar neck's. We can't see the neck (that
+ *    detection was removed for being unreliable), so when you rotate your wrist
+ *    the drawn board rotates with it even though the real neck did not. It tracks
+ *    your hand faithfully; it does not track your guitar.
+ *  - Wrist→pinky-MCP is the size ruler because it's a real hand dimension seen
+ *    end-on, so it shrinks with distance. Unlike a bounding box, it doesn't also
+ *    shrink when you curl your fingers into a chord shape.
+ *
+ * @param {Array} landmarks the 21 MediaPipe landmarks
+ * @param {object} [opts]
+ * @param {number} [opts.lengthRatio=3.4]  board length ÷ wrist→pinky-MCP
+ * @param {number} [opts.heightRatio=1.15] board height ÷ wrist→pinky-MCP
+ * @param {number} [opts.offsetRatio=0.55] gap from the index knuckle, same units
+ * @param {number} [opts.scale=1]          user size trim
+ * @returns {{cx,cy,angle,w,h}|null} centre, rotation (radians), size — all in
+ *          normalized frame units; null when the hand isn't usable
+ */
+export function boardTransform(landmarks, opts = {}) {
+  const frame = handFrame(landmarks);
+  if (!frame) return null;
+  const wrist = landmarks[WRIST];
+  const idxMcp = landmarks[KNUCKLES.index];
+  const pinkyMcp = landmarks[KNUCKLES.pinky];
+  if (!wrist || !idxMcp || !pinkyMcp) return null;
+
+  // Size ruler: wrist → pinky knuckle. A real distance on the hand, so it scales
+  // with camera distance and stays put as the fingers curl.
+  const ruler = Math.hypot(pinkyMcp.x - wrist.x, pinkyMcp.y - wrist.y);
+  if (ruler < 1e-6) return null;
+
+  const {
+    lengthRatio = 3.4,
+    heightRatio = 1.15,
+    offsetRatio = 0.55,
+    scale = 1,
+  } = opts;
+
+  // Tilt: the hand's own axis (wrist → index knuckle), which is what the caller
+  // asked to rotate by. atan2 of that vector, in screen radians.
+  const angle = Math.atan2(idxMcp.y - wrist.y, idxMcp.x - wrist.x);
+
+  const w = ruler * lengthRatio * scale;
+  const h = ruler * heightRatio * scale;
+
+  // Anchor: the board's fret-0 edge sits a small gap "below" the index knuckle,
+  // along the hand's own axis (wrist → fingers), so the grid lies where the
+  // fingers reach rather than on top of the knuckles.
+  const offset = ruler * offsetRatio * scale;
+  const ax = idxMcp.x - frame.uxx * offset;
+  const ay = idxMcp.y - frame.uxy * offset;
+
+  // The board is drawn rotated by `angle`, so its own length runs along
+  // (cos, sin). fret 0 is at the anchor; the centre is half a length further on.
+  const cx = ax + Math.cos(angle) * (w / 2);
+  const cy = ay + Math.sin(angle) * (w / 2);
+  return { cx, cy, angle, w, h, ruler };
+}
+
 /**
  * Build a virtual board model. Cell geometry is derived from the REAL instrument
  * proportions in geometry.js, so the virtual neck is dimensionally a guitar and
@@ -292,6 +362,59 @@ export function observeHand(landmarks, bounds, board) {
   const confidence = fingers.length ? seen / fingers.length : 0;
 
   return { present: true, anchorFret, spreadFrets, confidence, fingers, frame };
+}
+
+/**
+ * Judge the CAMERA ANGLE from the same observation — the actual blocker.
+ *
+ * A virtual board fixes calibration; it cannot fix a camera that can't see the
+ * fingertips. At a face-on angle (laptop webcam, guitar across the body) the
+ * fretting fingers curl around the far side of the neck and MediaPipe invents
+ * them, so every reading is fiction no matter how well the board is drawn. The
+ * only geometry that works is looking DOWN the neck — over the shoulder.
+ *
+ * We don't guess at this: each finger's `visible` flag is a measured signal, so
+ * the share of visible tips IS the angle verdict. This just turns it into advice.
+ *
+ * Note it reads `visible` ONLY — deliberately not observeHand's `confidence`,
+ * which is (visible && inside). A finger can be perfectly visible yet outside the
+ * board window (pinky past the 4th fret, hand up at the 7th); that's a framing
+ * matter, not an angle one, and telling the user to move their camera over their
+ * shoulder to fix it would be wrong advice for the wrong problem.
+ *
+ * @param {object} observation from observeHand()
+ * @returns {{level:'nohand'|'blind'|'partial'|'good', visible:number, advice:string}}
+ */
+export function cameraAngleAdvice(observation) {
+  if (!observation?.present || !observation.fingers?.length) {
+    return {
+      level: 'nohand',
+      visible: 0,
+      advice: 'No hand seen yet — bring your fretting hand into view.',
+    };
+  }
+  const seen = observation.fingers.filter((f) => f.visible).length;
+  const visible = seen / observation.fingers.length;
+  if (visible < 0.25) {
+    return {
+      level: 'blind',
+      visible,
+      advice:
+        'Your fingertips are hidden behind the neck, so nothing here is a real reading. ' +
+        'Aim the camera over your shoulder, looking down the neck.',
+    };
+  }
+  // Strictly-less-than-1: with four fretting fingers, one hidden tip is 0.75 and
+  // is exactly the case worth warning about — a chord read from three real tips
+  // and one invented one is still a wrong chord. Only a fully-visible hand passes.
+  if (visible < 1) {
+    return {
+      level: 'partial',
+      visible,
+      advice: 'Some fingertips are hidden. Tilt further down the neck to see them all.',
+    };
+  }
+  return { level: 'good', visible, advice: 'Good angle — your fingertips are visible.' };
 }
 
 /**

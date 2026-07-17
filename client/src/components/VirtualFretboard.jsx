@@ -1,9 +1,20 @@
 // VirtualFretboard — the virtual-neck view.
 //
-// The physical neck is NOT detected. We render our own fretboard at a fixed
-// place on screen and track only the hand, mapping fingertips onto that virtual
-// grid. This removes every failure mode of physical detection (clutter winning
-// the dominant axis, lighting moving the band, the board drifting as you play).
+// The physical neck is NOT detected. We render our own fretboard and track only
+// the hand, mapping fingertips onto that virtual grid. This removes every failure
+// mode of physical detection (clutter winning the dominant axis, lighting moving
+// the band, the board drifting as you play).
+//
+// The board is drawn PINNED TO THE HAND (boardTransform): it sits at the fretting
+// fingers, tilts with the hand's axis, and scales with camera distance. Note the
+// tilt is the HAND's, not the guitar neck's — we can't see the neck. Rotate your
+// wrist and the drawn board follows your wrist, not your guitar. It's a drawing
+// aid; it is not a claim about where the neck is.
+//
+// Drawing is deliberately separate from mapping. observeHand() already works in
+// the hand's own frame, so the reported cells are translation/rotation/scale
+// invariant and CANNOT be changed by where the box is drawn (there's a test that
+// pins exactly that). Moving the board is cosmetics; it never moves the answer.
 //
 // What it honestly claims
 // -----------------------
@@ -14,6 +25,10 @@
 //                             unconfirmed". It never becomes a printed note.
 // The hand's POSITION along the neck is anchored on the knuckle row, which stays
 // visible either way, so that part of the readout is trustworthy.
+//
+// Because visibility is the real blocker, cameraAngleAdvice() surfaces it up
+// front: a face-on webcam view scores ~0% visible tips and says so, rather than
+// letting a nicely-aligned board imply a reading that isn't there.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useT } from '../lib/i18n';
@@ -22,14 +37,15 @@ import {
   makeVirtualBoard,
   observeHand,
   handToDiagram,
-  KNUCKLES,
+  boardTransform,
+  cameraAngleAdvice,
 } from '../lib/virtualFretboard';
 import { FRETTING_TIPS } from '../lib/fretboardMap';
 import FretboardDiagram from './FretboardDiagram';
 import CameraPicker from './CameraPicker';
 
-// The virtual board's fixed rectangle, in normalized frame coords. Also the
-// Safe Zone the user places their hand into.
+// Fallback rect (normalized frame coords) for when no hand is visible — with a
+// hand, the board is drawn from boardTransform() instead, pinned to the hand.
 const DEFAULT_BOUNDS = { x: 0.12, y: 0.30, w: 0.76, h: 0.40 };
 const BOARD = makeVirtualBoard({ spanFrets: 4 });
 const STRINGS = 6;
@@ -39,25 +55,24 @@ const FINGER_COLOR = ['#f87171', '#fbbf24', '#34d399', '#60a5fa']; // 1..4
 export default function VirtualFretboard({ lang }) {
   const tr = useT(lang);
   const [obs, setObs] = useState(null);
-  // NOTE: `scale` is purely COSMETIC now. Since the mapping became hand-relative
-  // (see virtualFretboard.handFrame), fingertip→cell accuracy is already
-  // translation-, rotation- and scale-invariant — camera distance cancels out in
-  // the math, so no calibration is needed to keep it correct. All this does is
-  // size the DRAWN board to your hand so the picture looks right.
+  // A manual size trim for the DRAWN board, nothing more.
+  //
+  // There used to be a 2-second "fit to my hand" measurement here. It's gone:
+  // boardTransform now sizes the board from the hand's own wrist→pinky ruler on
+  // every frame, so the board already tracks hand size continuously — measuring a
+  // one-off multiplier would have been re-deriving what the transform does live,
+  // and then multiplying it in on top. Accuracy never needed it either: the
+  // mapping is scale-invariant (see virtualFretboard.handFrame), so this only
+  // changes the picture, never the reading.
   const [scale, setScale] = useState(1);
-  const [calibrating, setCalibrating] = useState(false);
-  const calibSamplesRef = useRef([]);
   const obsRef = useRef(null);
 
-  // The drawn rect, scaled about its own centre. Kept in a ref for the draw loop.
-  const bounds = useCallback(() => {
-    const b = DEFAULT_BOUNDS;
-    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    const w = b.w * scale, h = b.h * scale;
-    return { x: cx - w / 2, y: cy - h / 2, w, h };
-  }, [scale]);
-  const boundsRef = useRef(bounds());
-  useEffect(() => { boundsRef.current = bounds(); }, [bounds]);
+  // Fallback rect for the no-hand case. Kept in a ref for the draw loop.
+  const boundsRef = useRef(DEFAULT_BOUNDS);
+  // The draw loop reads `scale` every frame; keep it in a ref so the rAF closure
+  // never goes stale against it.
+  const scaleRef = useRef(scale);
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
 
   // Per-frame: observe the hand. The mapping is HAND-RELATIVE — it reads the
   // fingertips in the hand's own frame, so moving the guitar or leaning back no
@@ -70,51 +85,6 @@ export default function VirtualFretboard({ lang }) {
 
   const cam = useHandTrack({ onFrame });
   const { videoRef, overlayRef, latestLandmarks } = cam;
-
-  // ── "Fit to my hand" — sizes the DRAWN board only ──────────────────────────
-  // We measure the KNUCKLE-ROW width, not the full hand bounding box: a bbox
-  // conflates distance with POSE (a fist is a small bbox at the same distance as
-  // a spread hand), so a bbox-driven box would resize every time you changed
-  // chord shape. The knuckle row barely changes width as fingers curl.
-  const knuckleSpan = (lm) => {
-    if (!lm) return null;
-    const pts = Object.values(KNUCKLES).map((i) => lm[i]).filter(Boolean);
-    if (pts.length < 2) return null;
-    let max = 0;
-    for (let i = 0; i < pts.length; i++) {
-      for (let j = i + 1; j < pts.length; j++) {
-        max = Math.max(max, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
-      }
-    }
-    return max;
-  };
-
-  const startCalibration = useCallback(() => {
-    calibSamplesRef.current = [];
-    setCalibrating(true);
-  }, []);
-
-  useEffect(() => {
-    if (!calibrating) return undefined;
-    const REFERENCE_SPAN = 0.14; // knuckle span (normalized) the default box suits
-    const t = setInterval(() => {
-      const s = knuckleSpan(latestLandmarks.current);
-      if (s) calibSamplesRef.current.push(s);
-    }, 100);
-    const done = setTimeout(() => {
-      clearInterval(t);
-      const xs = calibSamplesRef.current;
-      if (xs.length >= 5) {
-        // Median: robust to the odd bad frame during the 2s window.
-        const sorted = [...xs].sort((a, b) => a - b);
-        const med = sorted[Math.floor(sorted.length / 2)];
-        const next = med / REFERENCE_SPAN;
-        setScale(Math.max(0.5, Math.min(2.5, next)));
-      }
-      setCalibrating(false);
-    }, 2000);
-    return () => { clearInterval(t); clearTimeout(done); };
-  }, [calibrating, latestLandmarks]);
 
   // ── Draw loop: virtual board + fingertip dots ──────────────────────────────
   useEffect(() => {
@@ -130,14 +100,31 @@ export default function VirtualFretboard({ lang }) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, W, H);
 
+      // The board is pinned to the hand: it sits at the fretting fingers, tilts
+      // with the hand's axis, and scales with camera distance. When there's no
+      // hand we fall back to the default rect so the screen isn't blank.
+      const lmNow = latestLandmarks.current;
+      const t = lmNow ? boardTransform(lmNow, { scale: scaleRef.current }) : null;
       const b = boundsRef.current;
-      const bx = b.x * W, by = b.y * H, bw = b.w * W, bh = b.h * H;
+      const drawn = t
+        ? { cx: t.cx * W, cy: t.cy * H, w: t.w * W, h: t.h * H, angle: t.angle }
+        : {
+            cx: (b.x + b.w / 2) * W, cy: (b.y + b.h / 2) * H,
+            w: b.w * W, h: b.h * H, angle: 0,
+          };
+
+      ctx.save();
+      ctx.translate(drawn.cx, drawn.cy);
+      ctx.rotate(drawn.angle);
+      // From here the board is axis-aligned in a rotated frame, centred on origin.
+      const bx = -drawn.w / 2, by = -drawn.h / 2, bw = drawn.w, bh = drawn.h;
 
       // The virtual neck.
       ctx.fillStyle = 'rgba(28,18,12,0.82)';
       ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = calibrating ? '#fbbf24' : '#38bdf8';
-      ctx.lineWidth = calibrating ? 4 : 2;
+      // Solid cyan when pinned to a hand; faded when it's the no-hand fallback.
+      ctx.strokeStyle = t ? '#38bdf8' : 'rgba(56,189,248,0.4)';
+      ctx.lineWidth = 2;
       ctx.strokeRect(bx, by, bw, bh);
 
       // Fret wires: spaced by the SAME equal-temperament model as the rest of the
@@ -163,6 +150,7 @@ export default function VirtualFretboard({ lang }) {
         ctx.lineTo(bx + bw, y);
         ctx.stroke();
       }
+      ctx.restore();
 
       // Fingertips. Solid = seen; hollow = occluded (position is a guess).
       const o = obsRef.current;
@@ -200,10 +188,17 @@ export default function VirtualFretboard({ lang }) {
     };
     raf = requestAnimationFrame(draw);
     return () => { if (raf) cancelAnimationFrame(raf); };
-  }, [cam.phase, calibrating, overlayRef, videoRef, latestLandmarks]);
+  }, [cam.phase, overlayRef, videoRef, latestLandmarks]);
 
   const { chord, marks } = handToDiagram(obs || { present: false });
   const occluded = (obs?.fingers || []).filter((f) => f.inside && !f.visible).length;
+  const angle = cameraAngleAdvice(obs || { present: false });
+  const ANGLE_STYLE = {
+    good:    { bg: 'rgba(16,185,129,0.12)', fg: '#34d399', border: 'rgba(52,211,153,0.35)', icon: '✅' },
+    partial: { bg: 'rgba(245,158,11,0.12)', fg: '#fbbf24', border: 'rgba(251,191,36,0.35)', icon: '⚠️' },
+    blind:   { bg: 'rgba(239,68,68,0.12)',  fg: '#f87171', border: 'rgba(248,113,113,0.35)', icon: '🚫' },
+    nohand:  { bg: 'var(--color-surface-700)', fg: 'var(--color-ink-faint)', border: 'var(--color-surface-550)', icon: '👋' },
+  }[angle.level];
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
@@ -270,24 +265,49 @@ export default function VirtualFretboard({ lang }) {
           </div>
 
           <div className="p-4">
+            {/* Camera-angle guide — the actual blocker. A virtual board fixes
+                calibration, not visibility: at a face-on angle the fretting tips
+                are hidden behind the neck and every reading is invented. This
+                keys off the measured visible-tip share, so it's a fact, not a
+                nag. */}
+            <div className="flex items-start gap-2 mb-3 px-3 py-2 rounded-lg"
+              style={{ background: ANGLE_STYLE.bg, border: `1px solid ${ANGLE_STYLE.border}` }}>
+              <span className="text-sm leading-none mt-0.5">{ANGLE_STYLE.icon}</span>
+              <div className="flex-1">
+                <div className="text-xs font-semibold mb-0.5" style={{ color: ANGLE_STYLE.fg }}>
+                  {angle.level === 'good'
+                    ? (tr.angleGood || 'Good angle')
+                    : angle.level === 'partial'
+                      ? (tr.anglePartial || 'Fingertips partly hidden')
+                      : angle.level === 'blind'
+                        ? (tr.angleBlind || 'Camera can’t see your fingertips')
+                        : (tr.angleNoHand || 'Waiting for your hand')}
+                  {obs?.present && (
+                    <span style={{ color: 'var(--color-ink-faint)', fontWeight: 400 }}>
+                      {' '}· {Math.round(angle.visible * 100)}% {tr.angleVisible || 'visible'}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px]" style={{ color: 'var(--color-ink-muted)' }}>
+                  {angle.advice}
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-                {calibrating
-                  ? (tr.virtualCalibrating || 'Hold your hand in the box…')
-                  : cam.handVisible
-                    ? (tr.virtualTracking || 'Tracking your hand')
-                    : (tr.virtualNoHand || 'Put your fretting hand in the box')}
+                {cam.handVisible
+                  ? (tr.virtualTracking || 'Board is following your hand')
+                  : (tr.virtualNoHand || 'Bring your fretting hand into view')}
               </div>
-              <div className="flex gap-2">
-                <button onClick={startCalibration} disabled={calibrating}
-                  title={tr.virtualCalibrateTip || 'Resizes the drawn board to your hand. Tracking accuracy needs no calibration — it follows your hand automatically.'}
-                  className="text-xs px-3 py-2 rounded-lg font-semibold"
-                  style={calibrating
-                    ? { background: 'var(--color-surface-650)', color: 'var(--color-ink-faint)' }
-                    : { color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}>
-                  {calibrating ? (tr.virtualCalibrating2 || 'Hold…') : (tr.virtualCalibrate || '⤢ Resize board')}
-                </button>
-              </div>
+              {/* Size trim only — the board already scales itself to your hand. */}
+              <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-ink-faint)' }}
+                title={tr.virtualSizeTip || 'Cosmetic size trim. The board already follows and scales to your hand; this never changes the reading.'}>
+                <span>⤢ {tr.virtualSize || 'Size'}</span>
+                <input type="range" min="0.6" max="1.8" step="0.05" value={scale}
+                  onChange={(e) => setScale(parseFloat(e.target.value))}
+                  style={{ width: '5rem' }} />
+              </label>
             </div>
 
             <div className="flex items-start gap-4 flex-wrap">
