@@ -35,7 +35,12 @@ export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F',
 // the root that must ALL be present (and, for an exact match, be the ONLY ones).
 // Ordered most-specific first so a dominant 7th (which contains a major triad)
 // matches as "7" rather than collapsing to a plain major.
-const CHORD_QUALITIES = [
+//
+// Exported because this is the app's ONE definition of what a chord quality IS.
+// improvEngine.js reads it to decide which scales fit a detected chord; if it
+// declared its own copy, the two would drift and the improv HUD would eventually
+// light up scale paths for a chord spelled differently than the detector heard.
+export const CHORD_QUALITIES = [
   { suffix: '7', intervals: new Set([0, 4, 7, 10]) }, // dominant 7th: root, M3, P5, m7
   { suffix: 'm', intervals: new Set([0, 3, 7]) },      // minor triad:  root, m3, P5
   { suffix: '',  intervals: new Set([0, 4, 7]) },      // major triad:  root, M3, P5

@@ -1,0 +1,236 @@
+// improvEngine.js
+// ===============
+// "You're playing an Am — here's where to solo over it."
+//
+// Given a chord NAME (from the mic, via matchChord/detectChord), work out which
+// notes to light up on a fretboard HUD: the chord's own tones, and the scale
+// paths that fit over it.
+//
+// Where the theory comes from
+// ---------------------------
+// Chord spelling is NOT redefined here. `CHORD_QUALITIES` in chordAnalyzer.js is
+// the app's single definition of what major/minor/dominant-7th MEAN, and this
+// module reads it. Same for OPEN_STRING_MIDI (the tuning) and NOTE_NAMES (the
+// spelling). A second copy of those tables would drift from the detector, and
+// the HUD would confidently light up an A minor pentatonic over a chord the
+// detector had actually heard as something else.
+//
+// Scale choice is a genuine judgement, not a lookup
+// ------------------------------------------------
+// There is no single "correct" scale for a chord — it depends on harmonic
+// context this module cannot see (we get one chord name, not a key). So the
+// choices below are the conventional, defensible ones a teacher would give a
+// player improvising over a static vamp, and each carries a `why` string so the
+// UI can say WHY rather than presenting an arbitrary pick as authoritative:
+//   - major      -> major pentatonic (safe), Ionian/major (full)
+//   - minor      -> minor pentatonic (safe), natural minor/Aeolian (full)
+//   - dominant 7 -> minor pentatonic (the blues move), Mixolydian (the "correct"
+//                   mode: major triad + the b7 the chord actually contains)
+// A player in a real key may well want something else; this is a starting point,
+// and it says so.
+
+import {
+  OPEN_STRING_MIDI,
+  NOTE_NAMES,
+  CHORD_QUALITIES,
+} from './chordAnalyzer';
+import { NUM_FRETS } from './fretboard';
+
+export const NUM_STRINGS = 6;
+
+// ── Scale formulas ───────────────────────────────────────────────────────────
+// Semitone offsets from the ROOT. These are scale definitions (which the app did
+// not previously have anywhere — scales.js holds diatonic CHORD harmony, a
+// different thing), so unlike chord spelling there is nothing here to reuse.
+export const SCALE_FORMULAS = {
+  majorPentatonic: [0, 2, 4, 7, 9],
+  minorPentatonic: [0, 3, 5, 7, 10],
+  major:           [0, 2, 4, 5, 7, 9, 11], // Ionian
+  naturalMinor:    [0, 2, 3, 5, 7, 8, 10], // Aeolian
+  mixolydian:      [0, 2, 4, 5, 7, 9, 10], // major with a b7
+  blues:           [0, 3, 5, 6, 7, 10],    // minor pentatonic + the b5
+};
+
+// Which scales fit which chord quality. Keyed by the SAME `suffix` values
+// CHORD_QUALITIES uses, so the two can't fall out of step.
+const SCALES_FOR_QUALITY = {
+  '': [
+    { id: 'majorPentatonic', label: 'Major pentatonic', role: 'safe',
+      why: 'Every note fits a major chord — the safest place to start.' },
+    { id: 'major', label: 'Major (Ionian)', role: 'full',
+      why: 'The full major scale; adds the 4th and 7th for more colour.' },
+  ],
+  m: [
+    { id: 'minorPentatonic', label: 'Minor pentatonic', role: 'safe',
+      why: 'The standard minor-key soloing shape — nothing in it clashes.' },
+    { id: 'naturalMinor', label: 'Natural minor (Aeolian)', role: 'full',
+      why: 'The full minor scale; adds the 2nd and b6.' },
+    { id: 'blues', label: 'Blues', role: 'colour',
+      why: 'Minor pentatonic plus the b5 "blue note" — lean on it, don’t sit on it.' },
+  ],
+  7: [
+    { id: 'mixolydian', label: 'Mixolydian', role: 'full',
+      why: 'The mode that actually spells a dominant 7th: major 3rd with a b7.' },
+    { id: 'minorPentatonic', label: 'Minor pentatonic', role: 'colour',
+      why: 'The blues move — the b3 against the chord’s major 3rd is the grit.' },
+    { id: 'blues', label: 'Blues', role: 'colour',
+      why: 'Minor pentatonic plus the b5. Classic over a dominant vamp.' },
+  ],
+};
+
+// Degree names for the chord tones, so the HUD can label a dot "b3" not just "3".
+const INTERVAL_NAMES = {
+  0: 'R', 1: 'b2', 2: '2', 3: 'b3', 4: '3', 5: '4',
+  6: 'b5', 7: '5', 8: 'b6', 9: '6', 10: 'b7', 11: '7',
+};
+
+/**
+ * Split a chord name into its root pitch class and quality suffix.
+ *
+ * Accepts the spellings the app actually produces: NOTE_NAMES uses sharps, but
+ * chords.js and the catalog carry flats (Bb, Eb), so both resolve here. Anything
+ * we can't parse returns null rather than guessing — a wrong root would light up
+ * an entire wrong fretboard.
+ *
+ * @param {string} name e.g. "Am", "C", "G7", "Bbm", "F#7"
+ * @returns {{root:number, suffix:string, rootName:string}|null}
+ */
+export function parseChordName(name) {
+  if (typeof name !== 'string') return null;
+  const m = name.trim().match(/^([A-G])([#b]?)(.*)$/);
+  if (!m) return null;
+  const [, letter, accidental, rest] = m;
+
+  const base = NOTE_NAMES.indexOf(letter);
+  if (base < 0) return null;
+  let root = base;
+  if (accidental === '#') root = (root + 1) % 12;
+  if (accidental === 'b') root = (root + 11) % 12;
+
+  // The suffix must be one CHORD_QUALITIES knows — that table is the authority
+  // on what qualities exist, so an unsupported one (m7b5, sus4, add9…) is an
+  // honest null rather than a silent downgrade to a triad we didn't hear.
+  const suffix = rest.trim();
+  const known = CHORD_QUALITIES.some((q) => q.suffix === suffix);
+  if (!known) return null;
+
+  return { root, suffix, rootName: NOTE_NAMES[root] };
+}
+
+/**
+ * The pitch classes a chord contains, straight from CHORD_QUALITIES.
+ *
+ * @param {string} name chord name
+ * @returns {{pc:number, interval:number, degree:string}[]|null}
+ */
+export function chordTones(name) {
+  const parsed = parseChordName(name);
+  if (!parsed) return null;
+  const quality = CHORD_QUALITIES.find((q) => q.suffix === parsed.suffix);
+  if (!quality) return null;
+  return [...quality.intervals]
+    .sort((a, b) => a - b)
+    .map((interval) => ({
+      pc: (parsed.root + interval) % 12,
+      interval,
+      degree: INTERVAL_NAMES[interval],
+    }));
+}
+
+/**
+ * Every place a set of pitch classes appears on the fretboard.
+ *
+ * Returns positions in the app's standard convention ({ string, fret }, string
+ * 0 = low E), so the results drop straight into FretboardDiagram, calcDifficulty
+ * and the rest of the app without translation.
+ *
+ * @param {number[]|Set<number>} pcs   pitch classes to find
+ * @param {object} [opts]
+ * @param {number} [opts.minFret=0]    lowest fret to search (0 = include open)
+ * @param {number} [opts.maxFret=NUM_FRETS]
+ * @returns {{string:number, fret:number, pc:number}[]}
+ */
+export function findPitchClasses(pcs, opts = {}) {
+  const want = pcs instanceof Set ? pcs : new Set(pcs);
+  const minFret = opts.minFret ?? 0;
+  const maxFret = opts.maxFret ?? NUM_FRETS;
+  const out = [];
+  for (let string = 0; string < NUM_STRINGS; string++) {
+    for (let fret = minFret; fret <= maxFret; fret++) {
+      const pc = (OPEN_STRING_MIDI[string] + fret) % 12;
+      if (want.has(pc)) out.push({ string, fret, pc });
+    }
+  }
+  return out;
+}
+
+/**
+ * Build a scale's fretboard positions for a given root.
+ *
+ * @param {number} root      root pitch class 0..11
+ * @param {string} scaleId   a key of SCALE_FORMULAS
+ * @param {object} [opts]    passed to findPitchClasses (minFret/maxFret)
+ * @returns {{string:number, fret:number, pc:number, interval:number, degree:string}[]|null}
+ */
+export function scalePositions(root, scaleId, opts = {}) {
+  const formula = SCALE_FORMULAS[scaleId];
+  if (!formula) return null;
+  const byPc = new Map();
+  for (const interval of formula) byPc.set((root + interval) % 12, interval);
+  return findPitchClasses([...byPc.keys()], opts).map((p) => ({
+    ...p,
+    interval: byPc.get(p.pc),
+    degree: INTERVAL_NAMES[byPc.get(p.pc)],
+  }));
+}
+
+/**
+ * THE MAIN ENTRY POINT — what onChordDetected(chordName) feeds the HUD.
+ *
+ * Returns the chord's own tones plus the scales that fit over it, every note
+ * already resolved to { string, fret } so the HUD just draws dots.
+ *
+ * Returns null for a chord it cannot honestly analyse (unparseable name, or a
+ * quality CHORD_QUALITIES doesn't define). The caller must render nothing in
+ * that case: a half-right overlay of "notes that fit" is worse than no overlay,
+ * because the player has no way to tell which half is wrong.
+ *
+ * @param {string} chordName e.g. "Am" (as produced by the mic detector)
+ * @param {object} [opts]
+ * @param {number} [opts.minFret=0]
+ * @param {number} [opts.maxFret=NUM_FRETS]
+ * @returns {{chord, tones, scales}|null}
+ */
+export function improvMap(chordName, opts = {}) {
+  const parsed = parseChordName(chordName);
+  if (!parsed) return null;
+  const tones = chordTones(chordName);
+  if (!tones) return null;
+
+  const tonePcs = new Set(tones.map((t) => t.pc));
+  const toneByPc = new Map(tones.map((t) => [t.pc, t]));
+
+  // Chord tones, everywhere they appear — the high-contrast dots.
+  const tonePositions = findPitchClasses(tonePcs, opts).map((p) => ({
+    ...p,
+    interval: toneByPc.get(p.pc).interval,
+    degree: toneByPc.get(p.pc).degree,
+  }));
+
+  const scales = (SCALES_FOR_QUALITY[parsed.suffix] || []).map((s) => {
+    const positions = scalePositions(parsed.root, s.id, opts) || [];
+    return {
+      ...s,
+      // `isChordTone` lets the HUD draw the same note differently depending on
+      // whether it's a landing note or a passing one — the distinction that
+      // makes a scale overlay useful rather than just a wall of dots.
+      positions: positions.map((p) => ({ ...p, isChordTone: tonePcs.has(p.pc) })),
+    };
+  });
+
+  return {
+    chord: { name: chordName, root: parsed.root, rootName: parsed.rootName, suffix: parsed.suffix },
+    tones: tonePositions,
+    scales,
+  };
+}
