@@ -9,6 +9,8 @@ import {
   uToFret,
   mapFingertip,
   mapHandToPositions,
+  boardToImage,
+  fretCenterU,
 } from './fretboardMap';
 
 // A simple axis-aligned "board" rectangle in normalized image space, corners in
@@ -42,6 +44,60 @@ describe('homography', () => {
     const got = project(H, { x: (0.2 + 0.9) / 2, y: (0.2 + 0.8) / 2 });
     expect(got.u).toBeCloseTo(0.5, 6);
     expect(got.v).toBeCloseTo(0.5, 6);
+  });
+
+  it('boardToImage is the inverse of project (round-trips u,v)', () => {
+    const { H } = computeHomography(RECT);
+    for (const [u, v] of [[0, 0], [1, 1], [0.3, 0.7], [0.5, 0.5], [1, 0]]) {
+      const img = boardToImage(RECT, u, v);
+      expect(img).not.toBeNull();
+      const back = project(H, img);
+      expect(back.u).toBeCloseTo(u, 6);
+      expect(back.v).toBeCloseTo(v, 6);
+    }
+  });
+
+  it('fretCenterU is 0 at the open string and increases toward the end', () => {
+    expect(fretCenterU(0, 5)).toBe(0);
+    const f1 = fretCenterU(1, 5);
+    const f5 = fretCenterU(5, 5);
+    expect(f1).toBeGreaterThan(0);
+    expect(f5).toBeGreaterThan(f1);
+    expect(f5).toBeLessThanOrEqual(1);
+  });
+
+  it('edge-referenced v maps every real string to its own index', () => {
+    // On a classical the outer STRING centres span 43mm across a 52mm BOARD at
+    // the nut — ~4.5mm inset per side. If the calibration corners were dragged
+    // to the board edges, a string's v is NOT i/5; it's inset. Each real string
+    // position must still quantize to its own index.
+    const boardW = 52, stringW = 43;
+    const inset = (boardW - stringW) / 2;
+    for (let i = 0; i < 6; i++) {
+      const mmFromEdge = inset + (i * stringW) / 5;
+      const v = mmFromEdge / boardW;
+      expect(vToString(v, { reference: 'edges', u: 0, spanFrets: 12 })).toBe(i);
+    }
+  });
+
+  it('ignoring the inset is what misaligns the outer strings', () => {
+    // The low-E sits at v≈0.087 in board-edge space. Read naively (as if the
+    // strings spanned the full board) that rounds to string 0 too — but the
+    // NEXT string in, at v≈0.252, naively reads 1 while a point at the true
+    // board edge (v=0) is not a string at all. The telling case is the far side:
+    // high-e sits at v≈0.913, and the board edge v=1.0 is 4.5mm past it.
+    const highEv = ((52 - 43) / 2 + 43) / 52; // ≈0.913
+    expect(vToString(highEv, { reference: 'edges', u: 0, spanFrets: 12 })).toBe(5);
+    // Naive reading of the true board edge still clamps to 5, which is exactly
+    // why the error is silent — it shows up as mid-board strings being shifted.
+    const midV = 0.5;
+    expect(vToString(midV, { reference: 'edges', u: 0, spanFrets: 12 })).toBe(3);
+  });
+
+  it('defaults to string-referenced corners (unchanged behaviour)', () => {
+    for (let i = 0; i < 6; i++) {
+      expect(vToString(i / 5)).toBe(i);
+    }
   });
 
   it('returns null for a degenerate quad', () => {

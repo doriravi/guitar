@@ -285,6 +285,25 @@ export default function VerifiedPractice({ lang }) {
               </li>
             ))}
           </ol>
+
+          {/* Camera chooser — pick a webcam before opening (see FretboardChordCam
+              for the browser-label-permission rationale). */}
+          <div className="text-center mb-4">
+            {!cam.primed ? (
+              <button onClick={cam.prime}
+                className="text-xs px-4 py-2 rounded-lg"
+                style={{ color: 'var(--color-ink-muted)', border: '1px solid var(--color-surface-550)' }}>
+                📷 {tr.chooseCamera || 'Choose camera'}
+              </button>
+            ) : cam.cameras.length >= 2 ? (
+              <CameraPicker cam={cam} lang={lang} />
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                {tr.oneCameraFound || 'One camera found — it will be used.'}
+              </p>
+            )}
+          </div>
+
           <div className="text-center">
             <button onClick={startBoth}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold"

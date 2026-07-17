@@ -10,7 +10,10 @@ import {
   dominantAxis,
   detectNeck,
   cornersAgree,
+  neckAspectRatio,
+  shapePlausible,
 } from './neckDetect';
+import { INSTRUMENTS } from './geometry';
 
 const W = 120, H = 90;
 
@@ -106,6 +109,55 @@ describe('detectNeck', () => {
     // Noise has no coherent parallel structure → low sharpness → null (or, if it
     // squeaks past, no stable band). Accept null as the contract.
     expect(detectNeck(data, W, H)).toBeNull();
+  });
+});
+
+describe('neckAspectRatio — real proportions from geometry.js', () => {
+  it('classical nut→12th is ~5.7 : 1 (325mm span / ~57mm mean width)', () => {
+    const r = neckAspectRatio(INSTRUMENTS.classical, 12);
+    expect(r).toBeGreaterThan(5.4);
+    expect(r).toBeLessThan(6.0);
+  });
+
+  it('a nut→5th span is much squatter than nut→12th', () => {
+    const five = neckAspectRatio(INSTRUMENTS.classical, 5);
+    const twelve = neckAspectRatio(INSTRUMENTS.classical, 12);
+    expect(five).toBeLessThan(twelve);
+    expect(five).toBeGreaterThan(2.5); // ~3.0
+  });
+
+  it('a narrower electric neck yields a higher ratio than a classical', () => {
+    expect(neckAspectRatio(INSTRUMENTS.electric, 12))
+      .toBeGreaterThan(neckAspectRatio(INSTRUMENTS.classical, 12));
+  });
+});
+
+describe('shapePlausible — rejects quads that cannot be a fretboard', () => {
+  it('accepts a true-proportioned nut→12th band', () => {
+    expect(shapePlausible(neckAspectRatio(INSTRUMENTS.classical, 12), { spanFrets: 12 })).toBe(true);
+  });
+
+  it('accepts a foreshortened band (perspective shortens, never lengthens)', () => {
+    expect(shapePlausible(2.0, { spanFrets: 12 })).toBe(true);
+  });
+
+  it('rejects a squat, keyboard-like quad', () => {
+    // A laptop keyboard's edges yield a wide, blocky band (~1:1 .. 1.5:1) — the
+    // exact false lock-on this gate exists to prevent.
+    expect(shapePlausible(1.0, { spanFrets: 12 })).toBe(false);
+    expect(shapePlausible(1.4, { spanFrets: 12 })).toBe(false);
+  });
+
+  it('rejects an absurdly elongated sliver', () => {
+    expect(shapePlausible(20, { spanFrets: 12 })).toBe(false);
+  });
+
+  it('is span-aware: a 3:1 band fits nut→5th but is squat for nut→12th', () => {
+    expect(shapePlausible(3.0, { spanFrets: 5 })).toBe(true);
+    // 3.0 is still within the generous foreshortening allowance for span 12,
+    // but the EXPECTED ratio differs — the gate scales with the span.
+    expect(neckAspectRatio(INSTRUMENTS.classical, 5))
+      .not.toBeCloseTo(neckAspectRatio(INSTRUMENTS.classical, 12), 1);
   });
 });
 

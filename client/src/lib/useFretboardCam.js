@@ -77,6 +77,7 @@ export function useFretboardCam(opts = {}) {
   const [detectedCorners, setDetectedCorners] = useState(null); // [{x,y}×4] | null
   const [detectConfidence, setDetectConfidence] = useState(0);
   const [detectStatus, setDetectStatus] = useState('searching'); // searching | notfound
+  const [detectDebug, setDetectDebug] = useState(null);          // {sharpness, textureRatio, confidence, reason}
   const detectCanvasRef = useRef(null);   // hidden offscreen canvas for frame grabs
   const detectAgreeRef = useRef(0);        // consecutive agreeing detections
   const lastDetectRef = useRef(null);      // previous frame's corners (for stability)
@@ -99,8 +100,11 @@ export function useFretboardCam(opts = {}) {
   // feature still works for testing on a laptop.
   const acquireStream = useCallback(async (deviceId) => {
     const base = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    // If a specific device is chosen, try it first — but still fall back to a
+    // generic/any camera if that exact device can't start (e.g. it's busy in
+    // another app, or was unplugged). Never dead-end on one device.
     const attempts = deviceId
-      ? [{ ...base, deviceId: { exact: deviceId } }]
+      ? [{ ...base, deviceId: { exact: deviceId } }, { ...base, facingMode: { ideal: 'environment' } }, base, true]
       : [{ ...base, facingMode: { ideal: 'environment' } }, base, true];
     let lastErr = null;
     for (const video of attempts) {
@@ -111,6 +115,23 @@ export function useFretboardCam(opts = {}) {
       }
     }
     throw lastErr || new Error('No camera available');
+  }, []);
+
+  // Turn a raw getUserMedia DOMException into a message the user can act on.
+  // The most common laptop failure is another app (Zoom/Teams/Windows Camera)
+  // holding the webcam → NotReadableError / "Could not start video source".
+  const cameraErrorMessage = useCallback((err) => {
+    const name = err?.name || '';
+    if (name === 'NotReadableError' || name === 'AbortError' || /video source/i.test(err?.message || '')) {
+      return 'Camera is in use by another app. Close Zoom, Teams, or the Camera app, then try again.';
+    }
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return 'Camera permission was blocked. Allow camera access for this site in your browser, then try again.';
+    }
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      return 'No usable camera found. Plug in or enable a camera, then try again.';
+    }
+    return err?.message || 'Camera failed to start.';
   }, []);
 
   // List available cameras (labels only populate after permission is granted).
@@ -126,6 +147,26 @@ export function useFretboardCam(opts = {}) {
       return [];
     }
   }, []);
+
+  // Prime the camera list on the intro screen so the user can pick a webcam
+  // BEFORE the detection view opens. Browsers hide camera *labels* until access
+  // has been granted at least once, so we open a stream briefly (permission
+  // primer), immediately release it, then enumerate — now with real names. On
+  // repeat visits permission is already granted, so this is instant + silent.
+  const [primed, setPrimed] = useState(false);
+  const prime = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((t) => t.stop()); // release immediately
+    } catch {
+      // Permission denied / no camera — still try to enumerate (blank labels).
+    }
+    const cams = await refreshCameras();
+    // Default the selection to the first camera if the user hasn't chosen one.
+    if (!cameraIdRef.current && cams[0]) setCameraId(cams[0].deviceId);
+    setPrimed(true);
+    return cams;
+  }, [refreshCameras]);
 
   useEffect(() => () => stop(), [stop]);
 
@@ -144,6 +185,12 @@ export function useFretboardCam(opts = {}) {
       onFrameRef.current?.(lm, []);
       return;
     }
+    // The board quad is STRING-referenced: the auto-detector's band edges track
+    // the outermost strings (it finds the band from string-texture density, not
+    // the wood), and the Fine-tune hint tells the user to drag each dot onto a
+    // string. So v=0/v=1 are the low-E/high-e centres — vToString's default.
+    // (If corners were ever placed on the fretboard EDGES instead, this would
+    // need `{ reference: 'edges' }` to undo the ~4.5mm-per-side string inset.)
     const pos = mapHandToPositions(homographyRef.current, lm, spanRef.current);
     setPositions(pos);
     const detected = detectChord(pos);
@@ -194,10 +241,10 @@ export function useFretboardCam(opts = {}) {
       setPhase('calibrate');
     } catch (err) {
       console.error(err);
-      setStatus(err.message || 'Camera or model failed to load.');
+      setStatus(cameraErrorMessage(err));
       setPhase('error');
     }
-  }, [onResults, acquireStream, refreshCameras]);
+  }, [onResults, acquireStream, refreshCameras, cameraErrorMessage]);
 
   // Switch to a different camera mid-session (e.g. laptop → external webcam).
   // Re-acquires the stream and re-enters calibration (the neck map is tied to
@@ -218,9 +265,10 @@ export function useFretboardCam(opts = {}) {
       setStatus('');
       setPhase('calibrate');
     } catch (err) {
-      setStatus(err.message || 'Could not switch camera.');
+      setStatus(cameraErrorMessage(err));
+      setPhase('error');
     }
-  }, [acquireStream]);
+  }, [acquireStream, cameraErrorMessage]);
 
   // Attach the stream + start the rAF pump once the video element is mounted.
   useEffect(() => {
@@ -267,7 +315,11 @@ export function useFretboardCam(opts = {}) {
       ctx.drawImage(video, 0, 0, DW, dh);
       let img;
       try { img = ctx.getImageData(0, 0, DW, dh); } catch { return; } // tainted canvas guard
-      const res = detectNeck(img.data, DW, dh);
+      const dbg = {};
+      // Pass the calibration span so the shape gate expects the right
+      // length:width ratio (a nut→5th band is much squatter than a nut→12th one).
+      const res = detectNeck(img.data, DW, dh, { debug: dbg, spanFrets: spanRef.current });
+      setDetectDebug(dbg);
 
       if (!res) {
         detectAgreeRef.current = 0;
@@ -289,7 +341,7 @@ export function useFretboardCam(opts = {}) {
       }
       lastDetectRef.current = res.corners;
 
-      if (detectAgreeRef.current >= 4 && res.confidence >= 0.15) {
+      if (detectAgreeRef.current >= 4 && res.confidence >= 0.12) {
         const h = computeHomography(res.corners);
         if (h) {
           homographyRef.current = h.H;
@@ -322,6 +374,48 @@ export function useFretboardCam(opts = {}) {
     setPhase('calibrate');
   }, []);
 
+  // Manual fine-tune: move one board corner (normalized 0..1) and rebuild the
+  // homography live, so the user can drag the auto-detected quad onto the exact
+  // strings/frets — this is what turns "approximately right" fret mapping into
+  // correct chord detection. Corner order is fretboardMap's
+  // [nut·lowE, nut·highE, end·highE, end·lowE].
+  const adjustCorner = useCallback((index, pt) => {
+    setCorners((prev) => {
+      const base = (prev && prev.length === 4) ? prev : detectedCorners;
+      if (!base || base.length !== 4) return prev;
+      const next = base.map((c, i) => (i === index
+        ? { x: Math.max(0, Math.min(1, pt.x)), y: Math.max(0, Math.min(1, pt.y)) }
+        : c));
+      const h = computeHomography(next);
+      if (h) {
+        homographyRef.current = h.H;
+        candidateRef.current = { name: null, count: 0 }; // re-evaluate the chord
+      }
+      return next;
+    });
+    // Dragging implies the board is set — make sure we're live.
+    setPhase((p) => (p === 'calibrate' ? 'live' : p));
+  }, [detectedCorners]);
+
+  // Start manual adjustment from the current best guess (auto-detected corners,
+  // or a sensible default rectangle if nothing was detected). Enters 'live' with
+  // a committed homography the user can then drag into place.
+  const startManualAdjust = useCallback(() => {
+    const base = (corners && corners.length === 4)
+      ? corners
+      : (detectedCorners && detectedCorners.length === 4)
+        ? detectedCorners
+        // Default quad: a horizontal band across the middle of the frame, in the
+        // required corner order [nut·lowE, nut·highE, end·highE, end·lowE].
+        : [{ x: 0.10, y: 0.40 }, { x: 0.10, y: 0.60 }, { x: 0.90, y: 0.60 }, { x: 0.90, y: 0.40 }];
+    const h = computeHomography(base);
+    if (h) homographyRef.current = h.H;
+    candidateRef.current = { name: null, count: 0 };
+    setCorners(base);
+    setStatus('');
+    setPhase('live');
+  }, [corners, detectedCorners]);
+
   const close = useCallback(() => {
     stop();
     setCorners([]);
@@ -337,9 +431,10 @@ export function useFretboardCam(opts = {}) {
     videoRef, overlayRef, latestLandmarks,
     // state
     phase, status, corners, handVisible, positions, chord, spanFrets,
-    cameras, cameraId,
-    detectedCorners, detectConfidence, detectStatus,
+    cameras, cameraId, primed,
+    detectedCorners, detectConfidence, detectStatus, detectDebug,
     // actions
-    start, stop, close, recalibrate, switchCamera, retryDetect,
+    start, stop, close, recalibrate, switchCamera, retryDetect, prime,
+    adjustCorner, startManualAdjust,
   };
 }

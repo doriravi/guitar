@@ -23,7 +23,7 @@
 // Everything here is pure math (no React, no DOM), so it is unit-testable and
 // shared-geometry-consistent with lib/geometry.js and lib/fretboard.js.
 
-import { fretWireMm } from './geometry';
+import { fretWireMm, INSTRUMENTS } from './geometry';
 
 export const NUM_STRINGS = 6;
 
@@ -116,10 +116,55 @@ export function project(H, pt) {
 
 // ── Quantization: board space -> (string, fret) ───────────────────────────────
 
-// Cross-string position v (0..1) -> string index 0..5. Six lanes centred on
-// v = i/5, so the nearest lane is round(v * 5).
-export function vToString(v) {
-  return Math.max(0, Math.min(NUM_STRINGS - 1, Math.round(v * (NUM_STRINGS - 1))));
+/**
+ * Cross-string position v (0..1) -> string index 0..5.
+ *
+ * v=0/v=1 mean whatever the CALIBRATION CORNERS were placed on, and that changes
+ * the math:
+ *
+ * - `reference: 'strings'` (default) — the corners sit on the low-E and high-e
+ *   STRING centres. The strings then span the full 0..1, so six lanes sit at
+ *   v = i/5 and the nearest lane is round(v·5).
+ *
+ * - `reference: 'edges'` — the corners sit on the fretboard EDGES (the natural
+ *   thing to drag to, since the wood edge is what you can actually see). The
+ *   strings do NOT reach the edges: on a classical the outer string centres span
+ *   43 mm across a 52 mm board at the nut (~4.5 mm inset per side), and 50 mm
+ *   across 62 mm at the 12th. Treating edge-referenced v as if the strings
+ *   spanned it maps every string toward the centre — the classic "grid doesn't
+ *   line up with the strings" misalignment. Here we rescale v from board-edge
+ *   space into string space before quantizing.
+ *
+ * The inset tapers along the neck, so `u` (0..1 along the calibrated span)
+ * selects the right ratio; `spanFrets` says which fret the far corner sits on.
+ *
+ * @param {number} v          0..1 across the board (low-E side -> high-e side)
+ * @param {object} [opts]
+ * @param {'strings'|'edges'} [opts.reference='strings'] what the corners lie on
+ * @param {object} [opts.inst]      an INSTRUMENTS entry (default classical)
+ * @param {number} [opts.u=0.5]     0..1 along the neck, for the taper
+ * @param {number} [opts.spanFrets=5] fret the far corner sits on
+ */
+export function vToString(v, opts = {}) {
+  let vv = v;
+  if (opts.reference === 'edges') {
+    const inst = opts.inst ?? INSTRUMENTS.classical;
+    const u = opts.u ?? 0.5;
+    const spanFrets = opts.spanFrets ?? 5;
+    // Where along the neck (in mm) this point sits, so the taper is evaluated at
+    // the right place — both the board and the string span widen toward the body.
+    const xMm = u * fretWireMm(inst.scaleLength, spanFrets);
+    const twelfthX = fretWireMm(inst.scaleLength, 12);
+    const t = xMm / twelfthX;
+    const boardW = inst.nutWidth + (inst.twelfthWidth - inst.nutWidth) * t;
+    const stringW = inst.nutStringSpan + (inst.bridgeStringSpan - inst.nutStringSpan) * t;
+    // Strings are centred on the board, inset by half the difference each side.
+    const inset = (boardW - stringW) / 2;
+    // v (board-edge space) -> mm from the low-E edge -> fraction of string span.
+    const mmFromEdge = v * boardW;
+    vv = stringW > 1e-6 ? (mmFromEdge - inset) / stringW : v;
+  }
+  return Math.max(0, Math.min(NUM_STRINGS - 1, Math.round(vv * (NUM_STRINGS - 1))));
 }
 
 /**
@@ -151,15 +196,63 @@ export function uToFret(u, spanFrets = 5) {
 }
 
 /**
+ * Board space (u,v) -> normalized IMAGE point, i.e. the inverse of `project`.
+ * Uses the homography that maps the unit square back onto the four corners, so a
+ * note at a known (u,v) can be drawn at its real place on the camera frame.
+ *
+ * @param {Array<{x:number,y:number}>} corners the calibrated board corners
+ * @param {number} u  along-neck 0..1 (nut -> end)
+ * @param {number} v  across-strings 0..1 (low-E -> high-e)
+ * @returns {{x:number,y:number}|null} normalized image point, or null if degenerate
+ */
+export function boardToImage(corners, u, v) {
+  if (!corners || corners.length !== 4) return null;
+  const unit = [
+    { x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 },
+  ];
+  const Hinv = solveHomography(unit, corners); // unit square -> image corners
+  if (!Hinv) return null;
+  const [a, b, c, d, e, f, g, h, i] = Hinv;
+  const w = g * u + h * v + i;
+  if (Math.abs(w) < 1e-9) return null;
+  return { x: (a * u + b * v + c) / w, y: (d * u + e * v + f) / w };
+}
+
+/**
+ * The along-neck u (0..1) at the CENTRE of a fret's bracket — where a note label
+ * for that fret should sit — using the same equal-temperament spacing as the
+ * rest of the app. Fret 0 (open) sits just behind the nut.
+ *
+ * @param {number} fret       fret number (0..spanFrets)
+ * @param {number} spanFrets  frets covered by the calibration
+ */
+export function fretCenterU(fret, spanFrets = 5) {
+  const endDist = fretWireMm(1, spanFrets) || 1;
+  if (fret <= 0) return 0; // open: at the nut
+  const near = fretWireMm(1, fret - 1);
+  const far = fretWireMm(1, fret);
+  return ((near + far) / 2) / endDist;
+}
+
+/**
  * Map a single fingertip landmark to a { string, fret } cell.
  * @param {number[]} H          homography from computeHomography
  * @param {{x:number,y:number}} tip normalized fingertip landmark
  * @param {number} spanFrets    frets covered by the calibration
+ * @param {object} [opts]       passed to vToString — notably
+ *                              `reference: 'edges'` when the calibration corners
+ *                              were placed on the fretboard edges rather than on
+ *                              the outer string centres.
  * @returns {{string:number, fret:number, u:number, v:number}}
  */
-export function mapFingertip(H, tip, spanFrets = 5) {
+export function mapFingertip(H, tip, spanFrets = 5, opts = {}) {
   const { u, v } = project(H, tip);
-  return { string: vToString(v), fret: uToFret(u, spanFrets), u, v };
+  return {
+    string: vToString(v, { ...opts, u, spanFrets }),
+    fret: uToFret(u, spanFrets),
+    u,
+    v,
+  };
 }
 
 /**
@@ -175,9 +268,12 @@ export function mapFingertip(H, tip, spanFrets = 5) {
  * @param {number[]} H
  * @param {Array<{x:number,y:number}>} landmarks the 21 MediaPipe landmarks
  * @param {number} spanFrets
+ * @param {object} [opts] passed to vToString — set `reference: 'edges'` when the
+ *                       calibration corners lie on the fretboard EDGES rather
+ *                       than on the outer string centres.
  * @returns {Array<{string:number, fret:number}>}
  */
-export function mapHandToPositions(H, landmarks, spanFrets = 5) {
+export function mapHandToPositions(H, landmarks, spanFrets = 5, opts = {}) {
   if (!H || !landmarks) return [];
   const MARGIN = 0.06; // allow slightly outside the tapped quad (tap imprecision)
   const perString = new Map(); // string -> best (lowest) fret
@@ -186,7 +282,7 @@ export function mapHandToPositions(H, landmarks, spanFrets = 5) {
     if (!tip) continue;
     const { u, v } = project(H, tip);
     if (u < -MARGIN || u > 1 + MARGIN || v < -MARGIN || v > 1 + MARGIN) continue;
-    const string = vToString(v);
+    const string = vToString(v, { ...opts, u, spanFrets });
     const fret = uToFret(Math.max(0, Math.min(1, u)), spanFrets);
     if (fret <= 0) continue; // an open/behind-nut projection isn't a fretted finger
     const prev = perString.get(string);
