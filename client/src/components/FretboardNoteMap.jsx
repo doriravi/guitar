@@ -19,9 +19,23 @@
 // The raw detector never says "I don't know" — it always returns a best guess.
 // Measured: three frequencies of pure noise score 0.750 as "Bbm7", a single open
 // low-E scores a perfect 1.000 as "E5". At the shared 0.25 threshold all of that
-// passes. So this screen gates on improvEngine.trustDetection() and shows
-// NOTHING when the signal isn't a real, complete, analysable chord — a HUD that
-// lights up a whole scale for a chord you never played is worse than a blank one.
+// passes. So this screen gates on improvEngine.trustDetection() and never acts
+// on a reading that isn't a real, complete, analysable chord — a HUD that lights
+// up a whole scale for a chord you never played is worse than a blank one.
+//
+// Holding vs. clearing
+// --------------------
+// A chord decays, so detection drops out between strums. The display therefore
+// LATCHES (improvEngine.makeChordLatch): once a chord is trusted it stays lit
+// until a DIFFERENT chord is confidently heard. Silence never clears it — you
+// stopped strumming, you didn't change chord — because a HUD that mirrors the
+// strum envelope frame-by-frame strobes and is useless to improvise against.
+//
+// That is a hold, not a fabrication: the chord shown is one you really played.
+// The genuine gap is the window between changing chord and the detector becoming
+// confident about the new one, when the display still shows the previous chord.
+// It's bounded by detection latency (about a strum), and the status dot marks a
+// held chord as held rather than passing it off as heard-right-now.
 //
 // History: this screen used to carry a camera half that projected note labels
 // onto the real fretboard, which depended on detecting the physical neck. That
@@ -33,7 +47,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useT } from '../lib/i18n';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from '../lib/chordAnalyzer';
-import { improvMap, trustDetection } from '../lib/improvEngine';
+import { improvMap, trustDetection, makeChordLatch } from '../lib/improvEngine';
 import {
   useMic,
   loadConfig,
@@ -57,19 +71,26 @@ export default function FretboardNoteMap({ lang }) {
   const rafRef = useRef(null);
   const cfgRef = useRef(loadConfig());
 
+  // The latch is what makes this usable: a chord decays, so detection drops out
+  // between strums. Holding the last chord until a DIFFERENT one is confidently
+  // heard means the HUD stays put while you actually improvise over it, instead
+  // of strobing with the strum envelope.
+  const latchRef = useRef(makeChordLatch({ confirmFrames: 2 }));
+
   const [listening, setListening] = useState(false);
   const [permDenied, setPermDenied] = useState(false);
-  const [detected, setDetected] = useState(null);   // trusted chord name, or null
-  const [why, setWhy] = useState(null);             // why we're not showing one
+  const [detected, setDetected] = useState(null);   // the LATCHED chord name
+  const [live, setLive] = useState(false);          // is it sounding right now?
   const [scaleId, setScaleId] = useState(null);     // which scale the user picked
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     mic.current.close();
+    latchRef.current.reset();
     setListening(false);
     setDetected(null);
-    setWhy(null);
+    setLive(false);
   }, [mic]);
 
   const start = useCallback(async () => {
@@ -93,16 +114,12 @@ export default function FretboardNoteMap({ lang }) {
           hzList.map((hz) => ((Math.round(hzToMidi(hz)) % 12) + 12) % 12),
         ).size;
         const verdict = trustDetection(match, { noteCount, rms });
-        if (verdict.trust) {
-          setDetected(match.chord.name);
-          setWhy(null);
-        } else {
-          // Deliberately clear the chord rather than holding the last one: a
-          // stale scale lit over a chord you've already left is a lie that looks
-          // exactly like a correct reading.
-          setDetected(null);
-          setWhy(verdict.reason);
-        }
+        // The latch owns hold-vs-replace. Silence never clears the display (you
+        // stopped strumming, you didn't change chord); only a different chord,
+        // confidently heard on consecutive frames, takes over.
+        const state = latchRef.current.update(verdict, match?.chord?.name ?? null);
+        setDetected(state.chord);
+        setLive(state.live);
       };
       rafRef.current = requestAnimationFrame(loop);
     } catch (e) {
@@ -165,13 +182,24 @@ export default function FretboardNoteMap({ lang }) {
       {listening && (
         <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--color-surface-650)', background: 'var(--color-surface-800)' }}>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-              {map ? (tr.improvPlaying || 'Playing') : (tr.improvWaiting || 'Listening')}
-            </div>
+            {/* A dot that tracks the strum: lit while the chord is actually
+                sounding, hollow while we're holding it through the decay. The
+                board doesn't move either way — this is how the user can tell
+                "heard right now" from "still showing what you played". */}
+            <span className="inline-block rounded-full" title={live ? 'Hearing it now' : 'Holding your last chord'}
+              style={{
+                width: 8, height: 8,
+                background: live ? '#34d399' : 'transparent',
+                border: `2px solid ${live ? '#34d399' : 'var(--color-surface-550)'}`,
+                boxShadow: live ? '0 0 8px rgba(52,211,153,0.8)' : 'none',
+              }} />
             {map ? (
               <>
                 <div className="text-lg font-bold" style={{ color: 'var(--color-brand)' }}>
                   {map.chord.name}
+                </div>
+                <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                  {live ? (tr.improvPlaying || 'Playing') : (tr.improvHolding || 'Holding — play a new chord to change')}
                 </div>
                 {map.scales.length > 1 && (
                   <select value={activeScale?.id || ''} onChange={(e) => setScaleId(e.target.value)}
@@ -185,10 +213,7 @@ export default function FretboardNoteMap({ lang }) {
               </>
             ) : (
               <div className="text-xs" style={{ color: 'var(--color-ink-muted)' }}>
-                {why === 'silence' ? (tr.improvSilence || 'Play a chord…')
-                  : why === 'not enough notes' ? (tr.improvFewNotes || 'Strum the whole chord')
-                  : why === 'unsupported chord' ? (tr.improvUnsupported || 'Heard a chord I can’t map scales for yet')
-                  : (tr.improvUnclear || 'Not a clear chord yet')}
+                {tr.improvSilence || 'Play a chord…'}
               </div>
             )}
           </div>

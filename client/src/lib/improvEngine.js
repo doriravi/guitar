@@ -245,6 +245,101 @@ export function trustDetection(match, opts = {}) {
   return { trust: true, reason: null };
 }
 
+// ── Holding a chord on screen ────────────────────────────────────────────────
+// A guitar chord is loud for a moment and then decays. Detection follows that
+// envelope: it's confident during the strum and drops out as the strings ring
+// down, so a HUD that mirrors detection frame-by-frame flickers on every strum
+// and is unusable to actually improvise against — you'd be reading a strobe.
+//
+// So the display LATCHES: once we trust a chord, it stays lit until a DIFFERENT
+// chord is confidently detected. Absence of signal never clears it, because
+// absence means "you stopped strumming", not "you changed chord".
+//
+// The honesty line, and why this doesn't cross it:
+//   - Holding a chord through its own decay = still correct. The chord is what
+//     you played; nothing is being invented.
+//   - Holding it after you've MOVED to another chord = a lie that looks exactly
+//     like a correct reading. That's the case the latch must not allow, so a new
+//     chord replaces the old one the moment we're confident about it.
+// The gap between those two is real: it's the window between you changing chord
+// and us becoming confident about the new one, when the display still shows the
+// previous chord. That window is bounded by detection latency (a strum or so),
+// and the UI marks a held chord as such rather than presenting it as live.
+
+/**
+ * Create a latch that holds the last confidently-detected chord.
+ *
+ * Pure and self-contained (no React) so the hold/replace rules are unit-testable
+ * without a microphone or a rendering loop.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.confirmFrames=2] consecutive trusted frames of a NEW
+ *        chord before it replaces the current one. Guards against a single bad
+ *        frame mid-transition swapping the display to a chord you never played.
+ * @returns {{update:Function, current:Function, reset:Function}}
+ */
+export function makeChordLatch(opts = {}) {
+  const confirmFrames = opts.confirmFrames ?? 2;
+  let held = null;        // the chord currently on screen
+  let candidate = null;   // a different chord we're becoming confident about
+  let candidateHits = 0;
+  let live = false;       // is the held chord sounding right now?
+
+  return {
+    /**
+     * Feed one frame's verdict.
+     * @param {{trust:boolean, reason:string|null}} verdict from trustDetection
+     * @param {string|null} chordName the detected name (when trusted)
+     * @returns {{chord:string|null, live:boolean, changed:boolean}}
+     */
+    update(verdict, chordName) {
+      const prev = held;
+      if (!verdict?.trust || !chordName) {
+        // No confident reading. Keep showing what we have — the player is between
+        // strums, or letting it ring. Do NOT clear, and do NOT let an untrusted
+        // frame count toward a pending change.
+        live = false;
+        return { chord: held, live, changed: false };
+      }
+      if (chordName === held) {
+        // Same chord, still sounding — refresh liveness and drop any pending
+        // change (a flicker toward another chord that didn't hold up).
+        candidate = null;
+        candidateHits = 0;
+        live = true;
+        return { chord: held, live, changed: false };
+      }
+      // Nothing on screen yet: latch immediately. confirmFrames exists to stop a
+      // stray frame REPLACING a chord you're looking at; with an empty display
+      // there's nothing to protect, and making the first chord wait would just
+      // feel broken.
+      if (held === null) {
+        held = chordName;
+        candidate = null;
+        candidateHits = 0;
+        live = true;
+        return { chord: held, live, changed: true };
+      }
+
+      // A different chord, confidently heard.
+      if (chordName === candidate) candidateHits += 1;
+      else { candidate = chordName; candidateHits = 1; }
+
+      if (candidateHits >= confirmFrames) {
+        held = candidate;
+        candidate = null;
+        candidateHits = 0;
+        live = true;
+        return { chord: held, live, changed: held !== prev };
+      }
+      // Not yet convinced — keep the old chord up rather than blanking.
+      return { chord: held, live: false, changed: false };
+    },
+    current() { return { chord: held, live }; },
+    reset() { held = null; candidate = null; candidateHits = 0; live = false; },
+  };
+}
+
 /**
  * THE MAIN ENTRY POINT — what onChordDetected(chordName) feeds the HUD.
  *

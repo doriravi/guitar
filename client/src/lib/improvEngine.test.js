@@ -14,6 +14,7 @@ import {
   scalePositions,
   improvMap,
   trustDetection,
+  makeChordLatch,
   SCALE_FORMULAS,
   NUM_STRINGS,
 } from './improvEngine';
@@ -289,6 +290,119 @@ describe('trustDetection against the REAL detector + REAL chord library', () => 
 
   it('rejects silence', () => {
     expect(trustDetection(matchChord([110.0], CHORDS), { noteCount: 1, rms: 0.0 }).trust).toBe(false);
+  });
+});
+
+describe('makeChordLatch — hold the chord through its own decay', () => {
+  const ok = { trust: true, reason: null };
+  const no = (reason) => ({ trust: false, reason });
+
+  it('starts empty', () => {
+    expect(makeChordLatch().current().chord).toBeNull();
+  });
+
+  it('latches the first confident chord', () => {
+    const l = makeChordLatch();
+    expect(l.update(ok, 'Am').chord).toBe('Am');
+    expect(l.current()).toMatchObject({ chord: 'Am', live: true });
+  });
+
+  it('HOLDS the chord as it decays into silence — the whole point', () => {
+    // This is the bug being fixed: the display used to die the instant the strum
+    // decayed below the gate, so it flickered on every strum.
+    const l = makeChordLatch();
+    l.update(ok, 'Am');
+    for (let i = 0; i < 200; i++) {
+      expect(l.update(no('silence'), null).chord).toBe('Am');
+    }
+    expect(l.current().chord).toBe('Am');
+  });
+
+  it('holds through noise and unclear frames too', () => {
+    const l = makeChordLatch();
+    l.update(ok, 'Am');
+    expect(l.update(no('unclear'), null).chord).toBe('Am');
+    expect(l.update(no('not enough notes'), null).chord).toBe('Am');
+    expect(l.update(no('unsupported chord'), null).chord).toBe('Am');
+    expect(l.current().chord).toBe('Am');
+  });
+
+  it('marks a held-but-not-sounding chord as not live', () => {
+    // The UI needs this to say "holding" rather than implying it hears the chord
+    // right now — the honest distinction between the two.
+    const l = makeChordLatch();
+    expect(l.update(ok, 'Am').live).toBe(true);
+    expect(l.update(no('silence'), null).live).toBe(false);
+    expect(l.update(ok, 'Am').live).toBe(true);
+  });
+
+  it('replaces the chord when a DIFFERENT one is confidently played', () => {
+    const l = makeChordLatch({ confirmFrames: 2 });
+    l.update(ok, 'Am');
+    expect(l.update(ok, 'C').chord).toBe('Am');       // first sighting: not yet
+    const r = l.update(ok, 'C');                       // confirmed
+    expect(r.chord).toBe('C');
+    expect(r.changed).toBe(true);
+  });
+
+  it('needs consecutive frames — a single stray frame cannot swap the display', () => {
+    // Mid-transition the detector can emit one confident-but-wrong chord. That
+    // must not replace what's on screen.
+    const l = makeChordLatch({ confirmFrames: 3 });
+    l.update(ok, 'Am');
+    l.update(ok, 'F');       // stray
+    l.update(ok, 'G');       // different stray — resets the candidate
+    l.update(ok, 'G');
+    expect(l.current().chord).toBe('Am'); // still Am: G only has 2 of 3
+    expect(l.update(ok, 'G').chord).toBe('G'); // third consecutive: now it swaps
+  });
+
+  it('a return to the held chord cancels a pending change', () => {
+    const l = makeChordLatch({ confirmFrames: 3 });
+    l.update(ok, 'Am');
+    l.update(ok, 'C');        // candidate C, 1 hit
+    l.update(ok, 'Am');       // back to Am — C was a flicker
+    l.update(ok, 'C');        // candidate C restarts at 1
+    expect(l.current().chord).toBe('Am');
+    l.update(ok, 'C');        // 2
+    expect(l.update(ok, 'C').chord).toBe('C'); // 3 — now it changes
+  });
+
+  it('untrusted frames do not count toward a pending change', () => {
+    const l = makeChordLatch({ confirmFrames: 2 });
+    l.update(ok, 'Am');
+    l.update(ok, 'C');            // candidate C, 1 hit
+    l.update(no('silence'), null); // silence must not advance C
+    expect(l.current().chord).toBe('Am');
+    l.update(ok, 'C');            // 2 hits now
+    expect(l.current().chord).toBe('C');
+  });
+
+  it('only reports changed on an actual change', () => {
+    const l = makeChordLatch({ confirmFrames: 1 });
+    expect(l.update(ok, 'Am').changed).toBe(true);   // null -> Am
+    expect(l.update(ok, 'Am').changed).toBe(false);  // same chord
+    expect(l.update(ok, 'C').changed).toBe(true);    // Am -> C
+  });
+
+  it('reset clears everything', () => {
+    const l = makeChordLatch();
+    l.update(ok, 'Am');
+    l.reset();
+    expect(l.current().chord).toBeNull();
+    expect(l.current().live).toBe(false);
+  });
+
+  it('survives a realistic strum→ring→change sequence', () => {
+    // Strum Am, let it ring out, then change to C: exactly the real use.
+    const l = makeChordLatch({ confirmFrames: 2 });
+    l.update(ok, 'Am');                                  // strum
+    for (let i = 0; i < 60; i++) l.update(no('silence'), null); // ~1s ringing out
+    expect(l.current().chord).toBe('Am');                // still showing Am
+    l.update(ok, 'C'); l.update(ok, 'C');                // strum C
+    expect(l.current().chord).toBe('C');
+    for (let i = 0; i < 60; i++) l.update(no('silence'), null);
+    expect(l.current().chord).toBe('C');                 // holds C now
   });
 });
 
