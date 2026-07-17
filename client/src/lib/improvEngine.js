@@ -279,7 +279,9 @@ export function trustDetection(match, opts = {}) {
  * @returns {{update:Function, current:Function, reset:Function}}
  */
 export function makeChordLatch(opts = {}) {
-  const confirmFrames = opts.confirmFrames ?? 2;
+  // At least 1: confirmFrames < 1 would make every stray single frame replace
+  // the held chord instantly, defeating the guard this option exists to provide.
+  const confirmFrames = Math.max(1, opts.confirmFrames ?? 2);
   let held = null;        // the chord currently on screen
   let candidate = null;   // a different chord we're becoming confident about
   let candidateHits = 0;

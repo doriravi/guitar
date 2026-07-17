@@ -385,6 +385,29 @@ describe('makeChordLatch — hold the chord through its own decay', () => {
     expect(l.update(ok, 'C').changed).toBe(true);    // Am -> C
   });
 
+  it('clamps confirmFrames to a floor of 1 (a swap always needs a confirming frame)', () => {
+    // Without the clamp, confirmFrames <= 0 makes candidateHits >= confirmFrames
+    // true BEFORE any confirming frame is counted, so the very act of the loop
+    // reaching the branch swaps — that must not happen. Clamped to 1, exactly one
+    // confident frame of the new chord swaps: intended, and still a real gate
+    // (an untrusted frame never advances it, proven by the tests above).
+    for (const bad of [0, -5]) {
+      const l = makeChordLatch({ confirmFrames: bad });
+      l.update(ok, 'Am');
+      // One confident C frame is enough at the floor of 1 — but it IS a frame of
+      // C, not a zero-confirmation swap.
+      expect(l.update(ok, 'C').chord).toBe('C');
+    }
+    // And a non-C confident frame must NOT swap to C: the floor is 1, not 0.
+    const l = makeChordLatch({ confirmFrames: 0 });
+    l.update(ok, 'Am');
+    expect(l.update(ok, 'F').chord).toBe('F'); // F confirmed
+    // Prove untrusted frames still can't drive a swap even at the floor.
+    const l2 = makeChordLatch({ confirmFrames: 0 });
+    l2.update(ok, 'Am');
+    expect(l2.update({ trust: false, reason: 'silence' }, null).chord).toBe('Am');
+  });
+
   it('reset clears everything', () => {
     const l = makeChordLatch();
     l.update(ok, 'Am');
