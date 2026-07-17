@@ -13,8 +13,10 @@ import {
   findPitchClasses,
   scalePositions,
   improvMap,
+  improvMapManual,
   trustDetection,
   makeChordLatch,
+  makeOnsetDetector,
   livePitchClasses,
   SCALE_FORMULAS,
   NUM_STRINGS,
@@ -310,6 +312,109 @@ describe('livePitchClasses', () => {
   });
 });
 
+describe('makeOnsetDetector — a strum is an attack, not just "loud"', () => {
+  const feed = (det, seq) => seq.map((r) => det.push(r));
+
+  it('fires on a sharp rise from quiet', () => {
+    const det = makeOnsetDetector({ riseRatio: 1.8, floor: 0.01 });
+    // quiet, quiet, STRUM.
+    const out = feed(det, [0.005, 0.005, 0.4]);
+    expect(out[2]).toBe(true);
+  });
+
+  it('does NOT fire on a chord that is ringing/sustained', () => {
+    // A strum, then a long decaying tail: exactly one onset, not one per frame.
+    const det = makeOnsetDetector();
+    const ring = [0.4, 0.38, 0.35, 0.33, 0.3, 0.28, 0.25, 0.22, 0.2, 0.18, 0.16];
+    const out = feed(det, ring);
+    expect(out[0]).toBe(true);                     // the attack
+    expect(out.slice(1).every((v) => v === false)).toBe(true); // no re-fires
+  });
+
+  it('does NOT fire on a slow swell (arpeggio building up, no attack)', () => {
+    const det = makeOnsetDetector({ riseRatio: 1.8 });
+    // Seed the baseline with an established level first (the very first sound
+    // from silence is a legitimate onset — a swell is only "slow" relative to an
+    // already-sounding baseline).
+    feed(det, [0.05, 0.05, 0.05]);
+    // Gentle ramp from there: each step is < riseRatio over the last, no onset.
+    const out = feed(det, [0.055, 0.062, 0.07, 0.078, 0.086]);
+    expect(out.every((v) => v === false)).toBe(true);
+  });
+
+  it('fires again on a SECOND strum after the first decays', () => {
+    const det = makeOnsetDetector({ refractoryFrames: 4 });
+    const out = feed(det, [
+      0.4, 0.3, 0.2, 0.15, 0.1, 0.08, 0.06, // strum 1 + decay
+      0.45,                                  // strum 2
+    ]);
+    expect(out[0]).toBe(true);
+    expect(out[out.length - 1]).toBe(true);
+  });
+
+  it('respects the refractory period — one strum fires once', () => {
+    // Even if level stays high for a few frames after the attack, no re-fire.
+    const det = makeOnsetDetector({ refractoryFrames: 6 });
+    const out = feed(det, [0.5, 0.5, 0.5, 0.5]);
+    expect(out[0]).toBe(true);
+    expect(out.slice(1).every((v) => v === false)).toBe(true);
+  });
+
+  it('ignores rises that stay below the noise floor', () => {
+    const det = makeOnsetDetector({ floor: 0.01 });
+    // A doubling, but from 0.002 to 0.005 — still just noise.
+    const out = feed(det, [0.002, 0.005, 0.004]);
+    expect(out.every((v) => v === false)).toBe(true);
+  });
+
+  it('reset clears its state', () => {
+    const det = makeOnsetDetector();
+    det.push(0.4);
+    det.reset();
+    // After reset, the baseline is 0 again so the next loud frame is a fresh onset.
+    expect(det.push(0.4)).toBe(true);
+  });
+});
+
+describe('improvMapManual — a hand-picked key/scale', () => {
+  const pcOf3 = (n) => NOTE_NAMES.indexOf(n);
+
+  it('returns the picked scale in the same shape improvMap uses', () => {
+    const m = improvMapManual(pcOf3('A'), 'minorPentatonic', { maxFret: 12 });
+    expect(m.scales).toHaveLength(1);
+    expect(m.scales[0].id).toBe('minorPentatonic');
+    // Same fields the grid reads.
+    expect(m.tones[0]).toHaveProperty('string');
+    expect(m.scales[0].positions[0]).toHaveProperty('isChordTone');
+  });
+
+  it('anchors the high-contrast dots on the ROOT (no chord to spell tones from)', () => {
+    const m = improvMapManual(pcOf3('A'), 'minorPentatonic', { maxFret: 12 });
+    expect(m.tones.every((t) => NOTE_NAMES[t.pc] === 'A')).toBe(true);
+    expect(m.tones.every((t) => t.degree === 'R')).toBe(true);
+  });
+
+  it('spells the scale correctly (A minor pentatonic = A C D E G)', () => {
+    const pcs = new Set(improvMapManual(pcOf3('A'), 'minorPentatonic', { maxFret: 12 })
+      .scales[0].positions.map((p) => p.pc));
+    expect([...pcs].map((pc) => NOTE_NAMES[pc]).sort()).toEqual(['A', 'C', 'D', 'E', 'G']);
+  });
+
+  it('names itself by root + scale', () => {
+    expect(improvMapManual(pcOf3('G'), 'mixolydian').chord.name).toBe('G Mixolydian');
+  });
+
+  it('returns null for an unknown scale', () => {
+    expect(improvMapManual(0, 'notAScale')).toBeNull();
+  });
+
+  it('respects the fret window', () => {
+    const m = improvMapManual(pcOf3('A'), 'minorPentatonic', { minFret: 5, maxFret: 8 });
+    const all = [...m.tones, ...m.scales[0].positions];
+    expect(all.every((p) => p.fret >= 5 && p.fret <= 8)).toBe(true);
+  });
+});
+
 describe('makeChordLatch — hold the chord through its own decay', () => {
   const ok = { trust: true, reason: null };
   const no = (reason) => ({ trust: false, reason });
@@ -425,47 +530,64 @@ describe('makeChordLatch — hold the chord through its own decay', () => {
     expect(l2.update({ trust: false, reason: 'silence' }, null).chord).toBe('Am');
   });
 
-  it('only a STRUM replaces the held chord — soloing over it does not', () => {
-    // The player holds Am, then solos: single notes that the detector may name
-    // as other chords must NOT swap the display. Only >= strumNotes counts.
-    const l = makeChordLatch({ confirmFrames: 2, strumNotes: 3 });
-    l.update(ok, 'Am', 5);                       // strum Am
-    // Solo line: confident C/G/F names arriving 1-2 notes at a time.
-    expect(l.update(ok, 'C', 1).chord).toBe('Am');
-    expect(l.update(ok, 'G', 2).chord).toBe('Am');
-    expect(l.update(ok, 'C', 1).chord).toBe('Am');
-    expect(l.update(ok, 'C', 2).chord).toBe('Am'); // even 2 confident C's: no swap
+  // Third update() arg is `strummed` — did an onset (attack) begin this frame.
+  it('a ringing chord that wobbles to a neighbour does not swap once the window shuts', () => {
+    // The reported bug: fret a chord, let it ring. The onset opens a short window
+    // for the strummed chord to settle; after it shuts, a detector wobble to a
+    // neighbouring name during the ring-out must NOT swap the display.
+    const l = makeChordLatch({ confirmFrames: 2, strumWindowFrames: 4 });
+    l.update(ok, 'Am', true);                    // strum Am — onset, window opens
+    l.update(ok, 'Am', false);                   // settling as Am (correct)
+    l.update(ok, 'Am', false);
+    // Window has now shut. Ring-out wobble to a wrong neighbour:
+    for (let i = 0; i < 30; i++) {
+      expect(l.update(ok, 'C', false).chord).toBe('Am');
+    }
     expect(l.current().chord).toBe('Am');
   });
 
-  it('a single-note frame still reads as live playing, not silence', () => {
-    const l = makeChordLatch({ strumNotes: 3 });
-    l.update(ok, 'Am', 5);
-    expect(l.update(ok, 'C', 1).live).toBe(true); // you ARE playing (a solo note)
-  });
-
-  it('a full strum of a different chord still replaces after confirmFrames', () => {
-    const l = makeChordLatch({ confirmFrames: 2, strumNotes: 3 });
-    l.update(ok, 'Am', 5);
-    expect(l.update(ok, 'C', 4).chord).toBe('Am'); // 1st strum frame
-    expect(l.update(ok, 'C', 4).chord).toBe('C');  // 2nd — swaps
-  });
-
-  it('a sub-strum frame cancels a pending strum-driven change', () => {
-    // Halfway to confirming C, the player drops to a single note — the pending C
-    // must reset, so a later stray strum doesn't get a head start.
-    const l = makeChordLatch({ confirmFrames: 3, strumNotes: 3 });
-    l.update(ok, 'Am', 5);
-    l.update(ok, 'C', 4);            // candidate C, 1 hit
-    l.update(ok, 'C', 1);            // single note — resets the pending change
-    l.update(ok, 'C', 4);            // candidate C restarts at 1
+  it('a wobble WITHIN the window still cannot swap without confirmFrames of it', () => {
+    // Even inside the window, a single stray frame of a different chord isn't
+    // enough — it needs confirmFrames. One wobble frame then back to Am: no swap.
+    const l = makeChordLatch({ confirmFrames: 3, strumWindowFrames: 18 });
+    l.update(ok, 'Am', true);
+    l.update(ok, 'C', false);                    // 1 stray C, in-window
+    l.update(ok, 'Am', false);                   // back to Am — cancels pending C
     expect(l.current().chord).toBe('Am');
-    l.update(ok, 'C', 4);            // 2
-    expect(l.update(ok, 'C', 4).chord).toBe('C'); // 3 — now it swaps
   });
 
-  it('defaults noteCount to the strum threshold so old callers still swap', () => {
-    // update() called without a noteCount must behave as before this option.
+  it('a no-onset frame still reads as live playing, not silence', () => {
+    const l = makeChordLatch();
+    l.update(ok, 'Am', true);
+    expect(l.update(ok, 'C', false).live).toBe(true); // you ARE playing (ringing)
+  });
+
+  it('a strum of a different chord replaces within the onset window', () => {
+    const l = makeChordLatch({ confirmFrames: 2, strumWindowFrames: 18 });
+    l.update(ok, 'Am', true);
+    l.update(ok, 'C', true);                     // strum C — onset opens the window
+    expect(l.update(ok, 'C', false).chord).toBe('C'); // 2nd confirm lands in-window
+  });
+
+  it('the onset window expires, so a late detection cannot swap', () => {
+    // A strum's onset opens an ~18-frame window. If the new chord doesn't confirm
+    // within it (detector was slow / noisy), the window closes and the stale
+    // reading can't swap — you'd have to strum again.
+    const l = makeChordLatch({ confirmFrames: 2, strumWindowFrames: 3 });
+    l.update(ok, 'Am', true);
+    l.update(ok, 'C', true);                     // onset: window = 3, candidate C (1)
+    l.update(ok, 'C', false);                    // window 2, candidate C (2) -> swaps
+    expect(l.current().chord).toBe('C');
+    // Fresh case where confirmation arrives AFTER the window:
+    const l2 = makeChordLatch({ confirmFrames: 5, strumWindowFrames: 2 });
+    l2.update(ok, 'Am', true);
+    l2.update(ok, 'C', true);                    // window 2, C hit 1
+    l2.update(ok, 'C', false);                   // window 1, C hit 2
+    l2.update(ok, 'C', false);                   // window 0, C hit 3 — but window shut
+    expect(l2.current().chord).toBe('Am');       // never reached 5 in-window
+  });
+
+  it('defaults strummed to true so callers that omit it still swap', () => {
     const l = makeChordLatch({ confirmFrames: 1 });
     l.update(ok, 'Am');
     expect(l.update(ok, 'C').chord).toBe('C');

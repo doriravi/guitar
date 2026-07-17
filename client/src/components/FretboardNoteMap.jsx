@@ -62,7 +62,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useT } from '../lib/i18n';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from '../lib/chordAnalyzer';
-import { improvMap, trustDetection, makeChordLatch, livePitchClasses } from '../lib/improvEngine';
+import {
+  improvMap, improvMapManual, trustDetection, makeChordLatch, makeOnsetDetector,
+  livePitchClasses, SCALE_LABELS,
+} from '../lib/improvEngine';
 import ChordTip from './ChordTip';
 import {
   useMic,
@@ -90,9 +93,12 @@ export default function FretboardNoteMap({ lang }) {
   // between strums. Holding the last chord until a DIFFERENT one is confidently
   // heard means the HUD stays put while you actually improvise over it, instead
   // of strobing with the strum envelope.
-  // strumNotes: only a strum (>=3 notes at once) changes the held chord; soloing
-  // over it — single notes — must not be read as a chord change.
-  const latchRef = useRef(makeChordLatch({ confirmFrames: 2, strumNotes: 3 }));
+  // Only a STRUM (a sharp attack/onset) changes the held chord — a chord you fret
+  // and let RING produces no onset, so it can't swap the display. The onset
+  // detector reads the RMS envelope; the latch only accepts a change inside the
+  // short window an onset opens.
+  const latchRef = useRef(makeChordLatch({ confirmFrames: 2 }));
+  const onsetRef = useRef(makeOnsetDetector());
   // Last values pushed to React state, so the 60fps loop only calls setState when
   // something actually changed — a held chord otherwise re-dispatches identical
   // state every frame for the whole session.
@@ -109,13 +115,18 @@ export default function FretboardNoteMap({ lang }) {
   // Lets the UI say "the thing you're playing now isn't recognised" instead of
   // silently keeping the old chord's scales up with no explanation.
   const [inputHint, setInputHint] = useState(null);
-  const [scaleId, setScaleId] = useState(null);     // which scale the user picked
+  const [scaleId, setScaleId] = useState(null);     // which AUTO scale the user picked
+  // Manual override: pick a key + scale to solo in, independent of detection.
+  // { root, scaleId } locks the overlay to that scale; null = follow the mic.
+  // Works before AND during play.
+  const [manual, setManual] = useState(null);
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     mic.current.close();
     latchRef.current.reset();
+    onsetRef.current.reset();
     // Reset the change-detector too, so the next session's first real update
     // isn't suppressed by stale last-pushed values.
     lastPushRef.current = { chord: null, live: false, hint: null, liveKey: '' };
@@ -147,11 +158,15 @@ export default function FretboardNoteMap({ lang }) {
         const silent = rms < (cfgRef.current.silenceRms ?? 0.008);
         const pcs = silent ? new Set() : livePitchClasses(hzList);
         const noteCount = pcs.size;
+        // Onset first — a strum's attack. Feed raw rms every frame so the envelope
+        // tracks continuously; it returns true only on an actual attack.
+        const strummed = onsetRef.current.push(rms);
         const verdict = trustDetection(match, { noteCount, rms });
         // The latch owns hold-vs-replace. Silence never clears the display (you
-        // stopped strumming, you didn't change chord); only a STRUM of a different
-        // chord (>=strumNotes) takes over — soloing single notes does not.
-        const state = latchRef.current.update(verdict, match?.chord?.name ?? null, noteCount);
+        // stopped strumming, you didn't change chord); only a chord change that
+        // lands right after a STRUM (an onset) takes over — a ringing/sustained
+        // chord produces no onset, so it can't swap.
+        const state = latchRef.current.update(verdict, match?.chord?.name ?? null, strummed);
 
         // What is the CURRENT input doing, separate from what's latched? If a
         // chord is held but you're now playing something we can't act on (noise,
@@ -186,19 +201,18 @@ export default function FretboardNoteMap({ lang }) {
 
   useEffect(() => () => stop(), [stop]);
 
-  // The improv map for whatever we currently trust. Full neck: 0..12, matching
-  // the grid below. Memoized on the chord NAME: a latched chord persists for the
-  // whole session now, so without this the ~124-position map would rebuild on
-  // every one of the ~60 renders/sec while you improvise.
-  const map = useMemo(
-    () => (detected ? improvMap(detected, { minFret: 0, maxFret: FRETS }) : null),
-    [detected],
-  );
+  // The improv map. A MANUAL pick (key + scale) overrides detection entirely and
+  // stays locked; otherwise we follow the latched chord from the mic. Full neck:
+  // 0..12, matching the grid. Memoized so the ~124-position map isn't rebuilt on
+  // every one of the ~60 renders/sec.
+  const map = useMemo(() => {
+    if (manual) return improvMapManual(manual.root, manual.scaleId, { minFret: 0, maxFret: FRETS });
+    return detected ? improvMap(detected, { minFret: 0, maxFret: FRETS }) : null;
+  }, [manual, detected]);
 
-  // Keep the user's scale pick only while it still applies to the chord being
-  // played. Without this, picking "Blues" over an Am and then playing a C would
-  // silently fall back to major pentatonic while the dropdown still read Blues —
-  // or worse, stay selected across a chord it happens to also exist for.
+  // Which scale is drawn. In manual mode the map has exactly one scale (the pick).
+  // In auto mode: the scale the user chose from the chord's options, else the
+  // first (safe) one. Keep the user's pick only while it still applies (below).
   const activeScale = map?.scales.find((s) => s.id === scaleId) || map?.scales[0] || null;
   // Depend on the chord NAME, not `map` — map is a fresh object every render, so
   // depending on it would re-fire this effect forever.
@@ -246,6 +260,48 @@ export default function FretboardNoteMap({ lang }) {
         </button>
       </div>
 
+      {/* Manual key/scale picker — works before AND during play. When set, it
+          locks the overlay to that scale and ignores detection; "Auto" hands
+          control back to the mic. */}
+      <div className="flex items-center gap-2 flex-wrap px-4 py-2"
+        style={{ borderBottom: '1px solid var(--color-surface-650)' }}>
+        <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+          {tr.improvScalePick || 'Scale'}
+        </span>
+        <select
+          value={manual ? manual.root : ''}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === '') { setManual(null); return; }
+            setManual((m) => ({ root: Number(v), scaleId: m?.scaleId || 'minorPentatonic' }));
+          }}
+          className="text-xs px-2 py-1 rounded-lg"
+          style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
+          <option value="">{tr.improvScaleAuto || 'Auto (follow mic)'}</option>
+          {NOTE_NAMES.map((n, pc) => (
+            <option key={pc} value={pc}>{n}</option>
+          ))}
+        </select>
+        {manual && (
+          <select
+            value={manual.scaleId}
+            onChange={(e) => setManual((m) => ({ ...m, scaleId: e.target.value }))}
+            className="text-xs px-2 py-1 rounded-lg"
+            style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
+            {Object.entries(SCALE_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
+        )}
+        {manual && (
+          <button onClick={() => setManual(null)}
+            className="text-xs px-2 py-1 rounded-lg"
+            style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}>
+            {tr.improvScaleClear || '↺ Auto'}
+          </button>
+        )}
+      </div>
+
       {/* Live improv status. Shows the LATCHED chord (deliberately held through
           its own decay until a different chord is confirmed — see makeChordLatch),
           with a dot marking whether it's sounding right now, and a hint when the
@@ -267,23 +323,33 @@ export default function FretboardNoteMap({ lang }) {
               }} />
             {map ? (
               <>
-                {/* CLAUDE.md: every displayed chord name must show its shape on
-                    hover — never plain text. */}
-                <ChordTip name={map.chord.name}>
+                {manual ? (
+                  // Manual mode: this is a SCALE name, not a chord — no ChordTip
+                  // (there's no chord shape to show for "A Minor pentatonic").
                   <span className="text-lg font-bold" style={{ color: 'var(--color-brand)' }}>
                     {map.chord.name}
                   </span>
-                </ChordTip>
+                ) : (
+                  // CLAUDE.md: every displayed chord name must show its shape on
+                  // hover — never plain text.
+                  <ChordTip name={map.chord.name}>
+                    <span className="text-lg font-bold" style={{ color: 'var(--color-brand)' }}>
+                      {map.chord.name}
+                    </span>
+                  </ChordTip>
+                )}
                 <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-                  {inputHint === 'unsupported'
-                    ? (tr.improvUnsupported || 'Heard a chord I can’t map scales for yet — still showing your last')
-                    : inputHint === 'unclear'
-                      ? (tr.improvUnclear || 'That didn’t read as a clear chord — still showing your last')
-                      : live
-                        ? (tr.improvPlaying || 'Playing')
-                        : (tr.improvHolding || 'Holding — play a new chord to change')}
+                  {manual
+                    ? (tr.improvManualLocked || 'Manual — locked to your scale')
+                    : inputHint === 'unsupported'
+                      ? (tr.improvUnsupported || 'Heard a chord I can’t map scales for yet — still showing your last')
+                      : inputHint === 'unclear'
+                        ? (tr.improvUnclear || 'That didn’t read as a clear chord — still showing your last')
+                        : live
+                          ? (tr.improvPlaying || 'Playing')
+                          : (tr.improvHolding || 'Holding — play a new chord to change')}
                 </div>
-                {map.scales.length > 1 && (
+                {!manual && map.scales.length > 1 && (
                   <select value={activeScale?.id || ''} onChange={(e) => setScaleId(e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg"
                     style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>

@@ -52,6 +52,17 @@ export const SCALE_FORMULAS = {
   blues:           [0, 3, 5, 6, 7, 10],    // minor pentatonic + the b5
 };
 
+// Human labels for each scale id, for the manual picker. (The chord-driven path
+// carries its own labels in SCALES_FOR_QUALITY, tuned to the chord context.)
+export const SCALE_LABELS = {
+  majorPentatonic: 'Major pentatonic',
+  minorPentatonic: 'Minor pentatonic',
+  major: 'Major (Ionian)',
+  naturalMinor: 'Natural minor',
+  mixolydian: 'Mixolydian',
+  blues: 'Blues',
+};
+
 // Which scales fit which chord quality. Keyed by the SAME `suffix` values
 // CHORD_QUALITIES uses, so the two can't fall out of step.
 const SCALES_FOR_QUALITY = {
@@ -266,6 +277,66 @@ export function trustDetection(match, opts = {}) {
   return { trust: true, reason: null };
 }
 
+// ── Detecting a strum (an onset), not just "loud" ────────────────────────────
+// The naive "3+ notes sounding = a strum" test is wrong: a chord you fret and
+// let RING keeps 3+ strings sounding for a second or more, and a slow arpeggio
+// accumulates 3+ ringing notes too. Both would keep re-passing the gate and let
+// the display swap while you're not strumming at all.
+//
+// A strum is a sudden ATTACK — you rake the strings and the level jumps sharply,
+// then decays. Sustained ringing is already-decaying energy with no such jump.
+// So the honest strum signal is an ONSET: a fast rise in RMS from a recent
+// baseline, with a refractory period so one strum fires once (not once per frame
+// while it's still loud).
+
+/**
+ * Create an onset (attack) detector over a stream of RMS values.
+ *
+ * Pure and stateful; no audio API. Feed it one RMS per frame; it returns true on
+ * the frame where a strum's attack begins.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.riseRatio=1.8] RMS must jump to this multiple of the
+ *        recent baseline to count as an attack.
+ * @param {number} [opts.floor=0.01] ignore rises below this absolute RMS (noise).
+ * @param {number} [opts.decay=0.85] how fast the baseline follows the signal down
+ *        (per frame). Lower = baseline drops faster, so a new strum stands out
+ *        sooner after the last one.
+ * @param {number} [opts.refractoryFrames=6] frames to suppress further onsets
+ *        after one fires (~100ms at 60fps), so a single strum triggers once.
+ * @returns {{ push:(rms:number)=>boolean, reset:()=>void }}
+ */
+export function makeOnsetDetector(opts = {}) {
+  const riseRatio = opts.riseRatio ?? 1.8;
+  const floor = opts.floor ?? 0.01;
+  const decay = opts.decay ?? 0.85;
+  const refractoryFrames = opts.refractoryFrames ?? 6;
+
+  let baseline = 0;    // slow-following envelope of recent level
+  let refractory = 0;  // frames left in the post-onset lockout
+
+  return {
+    push(rms) {
+      const r = rms > 0 ? rms : 0;
+      let onset = false;
+      // An attack: clearly above the floor AND a sharp jump over the baseline,
+      // and not still inside the lockout from the previous strum.
+      if (refractory === 0 && r > floor && r > baseline * riseRatio) {
+        onset = true;
+        refractory = refractoryFrames;
+      } else if (refractory > 0) {
+        refractory -= 1;
+      }
+      // Baseline tracks up instantly (so a sustained note becomes the new
+      // reference and doesn't keep re-triggering) but down slowly (so the moment
+      // right after a strum still has a low reference for the NEXT strum).
+      baseline = r > baseline ? r : baseline * decay + r * (1 - decay);
+      return onset;
+    },
+    reset() { baseline = 0; refractory = 0; },
+  };
+}
+
 // ── Holding a chord on screen ────────────────────────────────────────────────
 // A guitar chord is loud for a moment and then decays. Detection follows that
 // envelope: it's confident during the strum and drops out as the strings ring
@@ -297,35 +368,42 @@ export function trustDetection(match, opts = {}) {
  * @param {number} [opts.confirmFrames=2] consecutive trusted frames of a NEW
  *        chord before it replaces the current one. Guards against a single bad
  *        frame mid-transition swapping the display to a chord you never played.
- * @param {number} [opts.strumNotes=3] distinct notes that must be sounding for a
- *        frame to count toward REPLACING the held chord. A strum sounds the whole
- *        chord at once (>=3 notes); soloing over the held chord is one or two
- *        notes at a time and must NOT be mistaken for a chord change. The very
- *        first latch is exempt — there's nothing held to protect yet.
+ * @param {number} [opts.strumWindowFrames=18] after a strum's onset, how many
+ *        frames (~300ms at 60fps) a chord change is allowed to land. A REPLACEMENT
+ *        must fall inside this window — i.e. be attributable to an actual attack,
+ *        not to a chord you fretted and let ring. A held/ringing chord produces no
+ *        onset, so its window stays closed and it can't swap the display. The
+ *        first latch is exempt (nothing held to protect yet).
  * @returns {{update:Function, current:Function, reset:Function}}
  */
 export function makeChordLatch(opts = {}) {
   // At least 1: confirmFrames < 1 would make every stray single frame replace
   // the held chord instantly, defeating the guard this option exists to provide.
   const confirmFrames = Math.max(1, opts.confirmFrames ?? 2);
-  const strumNotes = opts.strumNotes ?? 3;
+  const strumWindowFrames = opts.strumWindowFrames ?? 18;
   let held = null;        // the chord currently on screen
   let candidate = null;   // a different chord we're becoming confident about
   let candidateHits = 0;
   let live = false;       // is the held chord sounding right now?
+  let strumWindow = 0;    // frames left in which a change may land after an onset
 
   return {
     /**
      * Feed one frame's verdict.
      * @param {{trust:boolean, reason:string|null}} verdict from trustDetection
      * @param {string|null} chordName the detected name (when trusted)
-     * @param {number} [noteCount=strumNotes] distinct notes sounding this frame.
-     *        A REPLACEMENT requires >= strumNotes (a real strum); defaults to the
-     *        threshold so callers that don't pass it behave as before.
+     * @param {boolean} [strummed=true] did an attack (onset) begin this frame?
+     *        A REPLACEMENT is only allowed inside the window opened by an onset;
+     *        defaults to true so callers that don't pass it behave as before.
      * @returns {{chord:string|null, live:boolean, changed:boolean}}
      */
-    update(verdict, chordName, noteCount = strumNotes) {
+    update(verdict, chordName, strummed = true) {
       const prev = held;
+      // An onset opens (or refreshes) the window in which a change may land. It
+      // decays every frame otherwise, so a ringing chord's window closes.
+      if (strummed) strumWindow = strumWindowFrames;
+      else if (strumWindow > 0) strumWindow -= 1;
+
       if (!verdict?.trust || !chordName) {
         // No confident reading. Keep showing what we have — the player is between
         // strums, or letting it ring. Do NOT clear, and do NOT let an untrusted
@@ -355,11 +433,11 @@ export function makeChordLatch(opts = {}) {
       }
 
       // A DIFFERENT chord is confidently heard — but only a STRUM replaces the
-      // held one. Soloing over the held chord sounds one or two notes at a time;
-      // those are the notes you're improvising WITH, not a new chord. Treat a
-      // sub-strum frame like a same-chord frame: it's live playing, it just
-      // doesn't move the display or advance a pending change.
-      if (noteCount < strumNotes) {
+      // held one. A strum is an attack (onset); a chord you fret and let ring, or
+      // a slow arpeggio, produces no onset and so no open window. Outside the
+      // window this is live playing over the held chord, not a change: keep the
+      // chord lit, don't swap, don't advance a pending change.
+      if (strumWindow <= 0) {
         candidate = null;
         candidateHits = 0;
         live = true;
@@ -377,11 +455,13 @@ export function makeChordLatch(opts = {}) {
         live = true;
         return { chord: held, live, changed: held !== prev };
       }
-      // Not yet convinced — keep the old chord up rather than blanking.
-      return { chord: held, live: false, changed: false };
+      // Not yet convinced — keep the old chord up. The player IS playing (we have
+      // a trusted reading, just not enough of it yet to swap), so this is live.
+      live = true;
+      return { chord: held, live, changed: false };
     },
     current() { return { chord: held, live }; },
-    reset() { held = null; candidate = null; candidateHits = 0; live = false; },
+    reset() { held = null; candidate = null; candidateHits = 0; live = false; strumWindow = 0; },
   };
 }
 
@@ -433,5 +513,43 @@ export function improvMap(chordName, opts = {}) {
     chord: { name: chordName, root: parsed.root, rootName: parsed.rootName, suffix: parsed.suffix },
     tones: tonePositions,
     scales,
+  };
+}
+
+/**
+ * A manually chosen scale — root + scale id — in the SAME shape improvMap returns,
+ * so the HUD renders it identically. Used when the player picks a key/scale to
+ * solo in rather than deriving it from a detected chord.
+ *
+ * There is no chord here, so the high-contrast `tones` are the scale's ROOT (the
+ * note the key resolves to), which anchors the shape. Every scale position is
+ * flagged isChordTone where it equals the root, so the root pops on the grid.
+ *
+ * @param {number} root     root pitch class 0..11
+ * @param {string} scaleId  a key of SCALE_FORMULAS
+ * @param {object} [opts]   passed through (minFret/maxFret)
+ * @returns {{chord, tones, scales}|null} null if the scale id is unknown
+ */
+export function improvMapManual(root, scaleId, opts = {}) {
+  const positions = scalePositions(root, scaleId, opts);
+  if (!positions) return null;
+  const rootPc = ((root % 12) + 12) % 12;
+
+  // Anchor dots = the root, everywhere it appears.
+  const tones = positions
+    .filter((p) => p.pc === rootPc)
+    .map((p) => ({ ...p, degree: 'R' }));
+
+  const label = SCALE_LABELS[scaleId] || scaleId;
+  return {
+    chord: { name: `${NOTE_NAMES[rootPc]} ${label}`, root: rootPc, rootName: NOTE_NAMES[rootPc], suffix: null },
+    tones,
+    scales: [{
+      id: scaleId,
+      label,
+      role: 'manual',
+      why: `You picked ${NOTE_NAMES[rootPc]} ${label} — soloing in this key regardless of what’s detected.`,
+      positions: positions.map((p) => ({ ...p, isChordTone: p.pc === rootPc })),
+    }],
   };
 }
