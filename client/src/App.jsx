@@ -166,7 +166,7 @@ const TAB_HELP = {
   micpractice:  'Practice mode shows you a chord to play and checks with the microphone that you hit it.',
   mictune:      'Mic Tune adjusts how the chord detector hears you — sensitivity, snapshot rate, and scan range.',
   listen:       'Play-Along is a game: chords scroll in time with a song while the microphone listens, scores each change, and tracks your improvement.',
-  notemap:      'The Note Map labels every note on the fretboard (all strings and frets). Open the camera to see your hand on the neck and light up the notes you press.',
+  notemap:      'The Note Map labels every note on the fretboard (all strings and frets). Hit "Listen & improvise" and play a chord — it lights up the chord tones and the scale you can solo with over it.',
   virtual:      'The Virtual Neck draws its own fretboard instead of detecting your real one — no calibration. It tracks your hand and maps your fingertips onto the virtual grid, marking any finger it cannot actually see as unconfirmed.',
   levelplan:    'The Level Plan is your roadmap from Beginner to Master. It tracks the milestones the app can measure and points you to the exact tab to practice the rest.',
   fbmeasure:    'Fretboard Measures visualizes the physical geometry of the neck and measures the exact horizontal, vertical, and diagonal hand stretch between the fingers you place, in millimetres.',

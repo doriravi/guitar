@@ -13,10 +13,13 @@ import {
   findPitchClasses,
   scalePositions,
   improvMap,
+  trustDetection,
   SCALE_FORMULAS,
   NUM_STRINGS,
 } from './improvEngine';
 import { OPEN_STRING_MIDI, NOTE_NAMES, CHORD_QUALITIES } from './chordAnalyzer';
+import { matchChord, hzToMidi } from './pitchDetect';
+import { CHORDS } from './chords';
 
 const pcOf = (name) => NOTE_NAMES.indexOf(name);
 
@@ -205,6 +208,87 @@ describe('scalePositions — against the shapes guitarists actually know', () =>
 
   it('returns null for an unknown scale', () => {
     expect(scalePositions(0, 'lydianDominantWhatever')).toBeNull();
+  });
+});
+
+describe('trustDetection — the gate against a detector that never says no', () => {
+  const AM = { chord: { name: 'Am' }, score: 1.0 };
+
+  it('accepts a clean, complete chord', () => {
+    expect(trustDetection(AM, { noteCount: 5, rms: 0.1 }).trust).toBe(true);
+  });
+
+  it('rejects silence before anything else', () => {
+    const r = trustDetection(AM, { noteCount: 5, rms: 0.001 });
+    expect(r.trust).toBe(false);
+    expect(r.reason).toBe('silence');
+  });
+
+  it('rejects a single ringing string even at a perfect score', () => {
+    // One open low-E scores 1.000 against "E5" — a perfect match to a chord
+    // that is really just a string. Score alone cannot catch this; note count can.
+    const r = trustDetection({ chord: { name: 'E5' }, score: 1.0 }, { noteCount: 1, rms: 0.1 });
+    expect(r.trust).toBe(false);
+    expect(r.reason).toBe('not enough notes');
+  });
+
+  it('rejects a weak match', () => {
+    const r = trustDetection({ chord: { name: 'Am' }, score: 0.6 }, { noteCount: 4, rms: 0.1 });
+    expect(r.trust).toBe(false);
+    expect(r.reason).toBe('unclear');
+  });
+
+  it('rejects a chord the improv engine cannot analyse', () => {
+    // The chord LIBRARY is far bigger than CHORD_QUALITIES. A confident Dsus4 is
+    // still not something we can map scales for — better to show nothing.
+    const r = trustDetection({ chord: { name: 'Dsus4' }, score: 1.0 }, { noteCount: 4, rms: 0.1 });
+    expect(r.trust).toBe(false);
+    expect(r.reason).toBe('unsupported chord');
+  });
+
+  it('handles a null match', () => {
+    expect(trustDetection(null, { rms: 0.1 }).trust).toBe(false);
+  });
+
+  it('works without rms (callers that do not have it)', () => {
+    expect(trustDetection(AM, { noteCount: 5 }).trust).toBe(true);
+  });
+});
+
+describe('trustDetection against the REAL detector + REAL chord library', () => {
+  // Not mocked: this runs the live matchChord over the actual CHORDS library,
+  // so it pins the behaviour measured from the real pipeline. If someone retunes
+  // the detector and noise starts passing again, this fails.
+  const analyse = (hzList) => {
+    const m = matchChord(hzList, CHORDS);
+    const noteCount = new Set(
+      hzList.map((hz) => ((Math.round(hzToMidi(hz)) % 12) + 12) % 12),
+    ).size;
+    return trustDetection(m, { noteCount, rms: 0.1 });
+  };
+
+  it('trusts a real Am', () => {
+    // x02210 — A C E A C E, the shape everyone learns first.
+    expect(analyse([110.0, 164.81, 220.0, 261.63, 329.63]).trust).toBe(true);
+  });
+
+  it('rejects one open low-E string (which the raw detector calls "E5" at 1.000)', () => {
+    expect(analyse([82.41, 164.8, 247.2]).trust).toBe(false);
+  });
+
+  it('rejects random non-musical noise (raw detector: "Bbm7" at 0.750)', () => {
+    // This is the case that made the gate necessary: three arbitrary
+    // frequencies score 0.750 — three times the shared 0.25 threshold — because
+    // Jaccard rewards chords with few distinct pitch classes.
+    expect(analyse([137.0, 231.5, 419.0]).trust).toBe(false);
+  });
+
+  it('rejects two-note mush from a chord change (raw detector: "Dsus4" at 0.667)', () => {
+    expect(analyse([110.0, 196.0]).trust).toBe(false);
+  });
+
+  it('rejects silence', () => {
+    expect(trustDetection(matchChord([110.0], CHORDS), { noteCount: 1, rms: 0.0 }).trust).toBe(false);
   });
 });
 

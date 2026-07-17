@@ -184,6 +184,67 @@ export function scalePositions(root, scaleId, opts = {}) {
   }));
 }
 
+// ── Trusting the detector ────────────────────────────────────────────────────
+// matchChord() always returns a best match — it never returns null, just
+// something weak. Measured against the live pipeline, at the shared minScore of
+// 0.25 the gate admits essentially everything:
+//
+//   real Am (5 notes)         -> "Am"    score 1.000   correct
+//   one open low-E string     -> "E5"    score 1.000   a string, not a chord
+//   two-note mush mid-change  -> "Dsus4" score 0.667   passes
+//   three random noise freqs  -> "Bbm7"  score 0.750   passes
+//
+// Jaccard rewards small expected-sets: a sparse chord like Bbm7 needs only a
+// couple of coincidental pitch classes to score high. That is survivable for the
+// existing recorder (a wrong name in a list you review later) but not for an
+// improv HUD, which would light a full scale over a chord you never played,
+// continuously, while you mute strings between changes.
+//
+// So this module applies its OWN gate rather than raising the shared minScore —
+// ChordListener and PracticeGame are calibrated around 0.25 and the user has a
+// saved config keyed to it; moving it would silently change their behaviour.
+
+/**
+ * Should the HUD act on this detector result?
+ *
+ * @param {{chord:{name:string}, score:number}|null} match from matchChordConfigured
+ * @param {object} [opts]
+ * @param {number} [opts.minScore=0.85] how close the spelling must be
+ * @param {number} [opts.minNotes=3]    distinct pitch classes heard
+ * @param {number} [opts.rms=null]      mic level, when the caller has it
+ * @param {number} [opts.minRms=0.02]   below this we treat it as silence
+ * @returns {{trust:boolean, reason:string|null}}
+ */
+export function trustDetection(match, opts = {}) {
+  const minScore = opts.minScore ?? 0.85;
+  const minNotes = opts.minNotes ?? 3;
+  const minRms = opts.minRms ?? 0.02;
+
+  if (opts.rms != null && opts.rms < minRms) {
+    return { trust: false, reason: 'silence' };
+  }
+  if (!match || !match.chord) return { trust: false, reason: 'nothing detected' };
+
+  // A triad needs three distinct pitch classes. Fewer means we're hearing a
+  // string or two, and naming a chord from that is a guess — this is what
+  // rejects the single ringing string that scores a perfect 1.000.
+  if (opts.noteCount != null && opts.noteCount < minNotes) {
+    return { trust: false, reason: 'not enough notes' };
+  }
+  // A near-exact spelling match. 0.85 admits a real chord missing one note to a
+  // dead string; it rejects the 0.67-0.75 coincidences noise produces.
+  if ((match.score ?? 0) < minScore) {
+    return { trust: false, reason: 'unclear' };
+  }
+  // The improv engine can only analyse qualities CHORD_QUALITIES defines. The
+  // chord LIBRARY is much larger (E5, Dsus4, Bbm7…), so a name can arrive that
+  // parses to nothing here — reject it rather than showing an empty HUD.
+  if (!parseChordName(match.chord.name)) {
+    return { trust: false, reason: 'unsupported chord' };
+  }
+  return { trust: true, reason: null };
+}
+
 /**
  * THE MAIN ENTRY POINT — what onChordDetected(chordName) feeds the HUD.
  *
