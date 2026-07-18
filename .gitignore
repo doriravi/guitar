@@ -62,3 +62,6 @@ server/identifier.sqlite
 # Built Android installers (share via a link, never commit)
 *.apk
 FretFit-*.apk
+
+# Vercel (removed — deploys handled by Railway)
+.vercel

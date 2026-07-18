@@ -32,18 +32,13 @@ App Store — not features.
 
 ## Step 1 — Get your live web URL
 
-FretFit's frontend is already set up to deploy (Railway and Vercel configs are in
-the repo). Your install link is **the deployed frontend URL** — find it in your
-**Railway** or **Vercel** dashboard (the frontend service's public domain, e.g.
-`https://fretfit.up.railway.app` or `https://fretfit.vercel.app`).
+FretFit's frontend deploys to **Railway** (`client/railway.json`). Your install
+link is **the deployed frontend URL** — find it in your **Railway** dashboard
+(the frontend service's public domain, e.g. `https://fretfit.up.railway.app`).
 
-If it's not deployed yet, the cheapest one-command deploy is Vercel:
-```
-cd client
-npx vercel --prod
-```
-(Free tier, gives you a public `*.vercel.app` URL. The repo's `vercel.json` already
-configures the Vite build + SPA rewrite.)
+If it's not deployed yet, push to the branch Railway watches and it builds and
+serves `client/dist` automatically (Nixpacks: `npm install && npm run build` →
+`npm start`). The public URL Railway assigns is your iPhone install link.
 
 That URL is your iPhone install link **and** works on Android/desktop too.
 
