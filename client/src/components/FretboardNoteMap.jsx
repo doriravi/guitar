@@ -94,16 +94,20 @@ function noteAt(string, fret) {
 // Layout: high-e (string 5) on top → low-E (0) on the bottom (tab convention).
 // Fret 0 is the "open" column drawn just left of the nut; frets 1..FRETS follow.
 const NECK = {
-  padL: 22,     // room for the open-string letter labels
-  padR: 8,
-  padT: 16,     // room for the fret numbers on top
-  padB: 6,
-  fretW: 46,    // horizontal px per fret cell
-  stringGap: 30, // vertical px between strings
-  dotR: 12,     // note dot radius
+  padL: 40,     // gutter for the colored letter + open-note circle
+  padR: 10,
+  padT: 20,     // room for the fret numbers on top
+  padB: 20,     // room for the inlay row + fret numbers below
+  fretW: 66,    // horizontal px per fret cell (wider = more neck-like spacing)
+  stringGap: 34, // vertical px between strings
+  dotR: 13,     // note dot radius
 };
 const STRING_GAUGE = [3.0, 2.6, 2.2, 1.8, 1.5, 1.2]; // low-E thickest → high-e thin
+// Per-string colours (index = string 0..5 = low-E..high-e), matching the
+// Fretboard Measures look: every string and its letter get a distinct hue.
+const STRING_COLORS = ['#a78bfa', '#38bdf8', '#34d399', '#e8e2d4', '#f0a860', '#f47272'];
 const INLAY_FRETS = new Set([3, 5, 7, 9]);           // single dots
+const MARKER_FRETS = new Set([3, 5, 7, 9, 12]);      // gold fret numbers
 const DOUBLE_INLAY = 12;                              // twin dots at the octave
 
 // Colour a note dot exactly as the old cells did (arpeggio > tone > scale > base;
@@ -131,78 +135,129 @@ function dotStyle({ arpNote, tone, scaleNote, open, isSharp, chordLit, nowPlayin
 
 function SvgNeck({ frets, toneAt, scaleAt, arpAt, liveSet, chordLit, map, degreeTitle }) {
   const rows = [5, 4, 3, 2, 1, 0]; // high-e top → low-E bottom
-  const n = frets.length;          // FRETS + 1 columns (0..FRETS)
-  const W = NECK.padL + NECK.padR + n * NECK.fretW;
+  const fretted = frets.filter((f) => f > 0);    // 1..FRETS live ON the board
+  // The open notes live in the gutter circles, so the board only needs the
+  // fretted columns — the nut sits right after the gutter (no empty fret-0 gap).
+  const nutX = NECK.padL;
+  const W = NECK.padL + NECK.padR + fretted.length * NECK.fretW;
   const H = NECK.padT + NECK.padB + rows.length * NECK.stringGap;
-  // x for the CENTRE of a fret column c (0 = open, 1 = 1st fret, …)
-  const colX = (c) => NECK.padL + c * NECK.fretW + NECK.fretW / 2;
-  // x of the fret WIRE to the left of column c (nut sits left of col 1)
-  const wireX = (c) => NECK.padL + c * NECK.fretW;
+  // Fret cell f (1..FRETS) spans [nutX+(f-1)·fretW , nutX+f·fretW].
+  // colX = the cell centre (where the note dot / number sits).
+  const colX = (f) => nutX + (f - 0.5) * NECK.fretW;
+  // wireX(f) = the wire on the RIGHT edge of fret f. The nut is at nutX.
+  const wireRightX = (f) => nutX + f * NECK.fretW;
   const rowY = (i) => NECK.padT + i * NECK.stringGap + NECK.stringGap / 2;
-  const boardX = wireX(1);                       // fingerboard starts at the nut
+  const boardX = nutX;                            // fingerboard starts at the nut
   const boardW = W - NECK.padR - boardX;
+
+  const boardTop = NECK.padT;
+  const boardH = rows.length * NECK.stringGap;
+  const boardBot = boardTop + boardH;
+  const midY = boardTop + boardH / 2;
+  // Vertical wood-plank streaks: a set of x positions across the board, drawn as
+  // faint light/dark lines so the fingerboard reads as grained wood, not a flat
+  // panel (matches the Fretboard Measures look).
+  const planks = [];
+  for (let x = boardX + 5; x < W - NECK.padR; x += 9) planks.push(x);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W, display: 'block' }}
       role="img" aria-label="Guitar fretboard note map">
       <defs>
         <linearGradient id="nm-wood" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#3a2817" />
-          <stop offset="1" stopColor="#241809" />
+          <stop offset="0" stopColor="#4a331d" />
+          <stop offset="0.5" stopColor="#3a2817" />
+          <stop offset="1" stopColor="#2a1c0e" />
         </linearGradient>
+        <clipPath id="nm-board">
+          <rect x={boardX} y={boardTop} width={W - NECK.padR - boardX} height={boardH} rx="5" />
+        </clipPath>
       </defs>
 
       {/* fingerboard */}
-      <rect x={boardX} y={NECK.padT} width={boardW} height={rows.length * NECK.stringGap}
-        rx="4" fill="url(#nm-wood)" stroke="#5a4326" strokeWidth="1" />
+      <rect x={boardX} y={boardTop} width={W - NECK.padR - boardX} height={boardH}
+        rx="5" fill="url(#nm-wood)" stroke="#5a4326" strokeWidth="1.2" />
 
-      {/* fret numbers (top) */}
-      {frets.map((f) => (
-        <text key={`fn${f}`} x={colX(f)} y={NECK.padT - 5} fontSize="10"
-          textAnchor="middle" fill="var(--color-ink-faint)">{f}</text>
-      ))}
+      {/* vertical wood grain (clipped to the board) */}
+      <g clipPath="url(#nm-board)" opacity="0.5">
+        {planks.map((x, i) => (
+          <line key={`pk${i}`} x1={x} y1={boardTop} x2={x + (i % 3) - 1} y2={boardBot}
+            stroke={i % 2 ? 'rgba(90,64,38,0.5)' : 'rgba(20,12,4,0.5)'} strokeWidth={i % 4 === 0 ? 1.4 : 0.7} />
+        ))}
+      </g>
 
-      {/* inlay position dots (behind strings) */}
-      {frets.filter((f) => INLAY_FRETS.has(f) || f === DOUBLE_INLAY).map((f) => {
-        const midY = NECK.padT + (rows.length * NECK.stringGap) / 2;
-        return f === DOUBLE_INLAY ? (
-          <g key={`in${f}`} fill="#c9a96e" opacity="0.5">
-            <circle cx={colX(f)} cy={midY - NECK.stringGap} r="4" />
-            <circle cx={colX(f)} cy={midY + NECK.stringGap} r="4" />
-          </g>
-        ) : (
-          <circle key={`in${f}`} cx={colX(f)} cy={midY} r="4" fill="#c9a96e" opacity="0.45" />
-        );
-      })}
-
-      {/* fret wires (nut is the bright, thick one at col 1's left edge) */}
-      {frets.map((f) => {
-        if (f === 0) return null;                 // no wire left of the open column
-        const isNut = f === 1;
-        const x = wireX(f);
-        return (
-          <line key={`w${f}`} x1={x} y1={NECK.padT} x2={x} y2={NECK.padT + rows.length * NECK.stringGap}
-            stroke={isNut ? '#e8dcc8' : '#9a9a9a'} strokeWidth={isNut ? 3 : 1.2}
-            strokeLinecap="round" />
-        );
-      })}
-
-      {/* strings (thicker for the low strings) */}
-      {rows.map((s, i) => (
-        <line key={`s${s}`} x1={boardX} y1={rowY(i)} x2={W - NECK.padR} y2={rowY(i)}
-          stroke="#d8d2c4" strokeWidth={STRING_GAUGE[s]} strokeLinecap="round" opacity="0.8" />
-      ))}
-
-      {/* open-string letter labels (left gutter) */}
-      {rows.map((s, i) => (
-        <text key={`sl${s}`} x={NECK.padL - 8} y={rowY(i) + 3.5} fontSize="11"
-          fontWeight="700" textAnchor="end" fill="var(--color-ink-muted)">
-          {STRING_LABELS[s]}
+      {/* fret numbers (top) — marker frets in gold. Open (0) sits over the gutter. */}
+      <text x={NECK.padL - 12} y={boardTop - 6} fontSize="11" textAnchor="middle"
+        fill="var(--color-ink-faint)">0</text>
+      {fretted.map((f) => (
+        <text key={`fn${f}`} x={colX(f)} y={boardTop - 6} fontSize="11"
+          fontWeight={MARKER_FRETS.has(f) ? '700' : '400'}
+          textAnchor="middle" fill={MARKER_FRETS.has(f) ? 'var(--color-brand, #e0a93a)' : 'var(--color-ink-faint)'}>
+          {f}
         </text>
       ))}
 
-      {/* note dots */}
-      {rows.map((s, i) => frets.map((f) => {
+      {/* inlay position dots ON the board (behind strings) */}
+      {frets.filter((f) => INLAY_FRETS.has(f) || f === DOUBLE_INLAY).map((f) => (
+        f === DOUBLE_INLAY ? (
+          <g key={`in${f}`} fill="#d8c39a" opacity="0.4">
+            <circle cx={colX(f)} cy={midY - NECK.stringGap} r="4.5" />
+            <circle cx={colX(f)} cy={midY + NECK.stringGap} r="4.5" />
+          </g>
+        ) : (
+          <circle key={`in${f}`} cx={colX(f)} cy={midY} r="4.5" fill="#d8c39a" opacity="0.35" />
+        )
+      ))}
+
+      {/* the NUT — bright, thick, at the board's left edge */}
+      <line x1={nutX} y1={boardTop} x2={nutX} y2={boardBot}
+        stroke="#e8dcc8" strokeWidth="3.5" strokeLinecap="round" />
+
+      {/* fret wires — one on the right edge of each fret cell */}
+      {fretted.map((f) => {
+        const x = wireRightX(f);
+        return (
+          <line key={`w${f}`} x1={x} y1={boardTop} x2={x} y2={boardBot}
+            stroke="#b0b0b0" strokeWidth="1.6" strokeLinecap="round" opacity="0.9" />
+        );
+      })}
+
+      {/* strings — each in its own colour, thicker for the low strings */}
+      {rows.map((s, i) => (
+        <line key={`s${s}`} x1={boardX} y1={rowY(i)} x2={W - NECK.padR} y2={rowY(i)}
+          stroke={STRING_COLORS[s]} strokeWidth={STRING_GAUGE[s]} strokeLinecap="round" opacity="0.92" />
+      ))}
+
+      {/* inlay row BELOW the neck */}
+      {frets.filter((f) => INLAY_FRETS.has(f) || f === DOUBLE_INLAY).map((f) => (
+        f === DOUBLE_INLAY ? (
+          <g key={`bi${f}`} fill="#c9a96e" opacity="0.65">
+            <circle cx={colX(f) - 4} cy={boardBot + 8} r="2.2" />
+            <circle cx={colX(f) + 4} cy={boardBot + 8} r="2.2" />
+          </g>
+        ) : (
+          <circle key={`bi${f}`} cx={colX(f)} cy={boardBot + 8} r="2.4" fill="#c9a96e" opacity="0.55" />
+        )
+      ))}
+
+      {/* left gutter: colored string letter + grey "open note" circle */}
+      {rows.map((s, i) => (
+        <g key={`gl${s}`}>
+          <text x={12} y={rowY(i) + 4} fontSize="13" fontWeight="800"
+            textAnchor="middle" fill={STRING_COLORS[s]}>
+            {STRING_LABELS[s]}
+          </text>
+          <circle cx={NECK.padL - 12} cy={rowY(i)} r={NECK.dotR - 1}
+            fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.22)" strokeWidth="1" />
+          <text x={NECK.padL - 12} y={rowY(i) + 3.5} fontSize="9.5" fontWeight="600"
+            textAnchor="middle" fill="rgba(233,225,205,0.75)">
+            {noteAt(s, 0)}
+          </text>
+        </g>
+      ))}
+
+      {/* note dots (frets 1..N on the board; the open note lives in the gutter) */}
+      {rows.map((s, i) => frets.filter((f) => f > 0).map((f) => {
         const k = `${s}:${f}`;
         const pc = (OPEN_STRING_MIDI[s] + f) % 12;
         const tone = toneAt.get(k);
