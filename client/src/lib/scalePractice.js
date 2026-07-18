@@ -131,18 +131,67 @@ export function saveScaleRun(run) {
     cleanliness: run.cleanliness,
     createdAt: new Date().toISOString(),
   };
+  // ── Scale Quest fields (optional, additive) ─────────────────────────────────
+  // The game records a richer run: which box, tempo, mode, and the THREE separate
+  // goal scores. These are attached only when the caller supplies them, as
+  // STRUCTURED fields — never stuffed into the `scale` label string — so the game
+  // can key bests on (scale, box, mode) while legacy recorder rows (which omit
+  // them) still read and grade exactly as before.
+  if (run.box) record.box = { minFret: run.box.minFret, maxFret: run.box.maxFret };
+  if (run.bpm != null) record.bpm = run.bpm;
+  if (run.mode) record.mode = run.mode;                 // 'run' | 'hunt' | 'boss'
+  if (run.accuracy != null) record.accuracy = run.accuracy;   // 0..100
+  if (run.speed != null) record.speed = run.speed;            // 0..100
+  if (run.memory != null) record.memory = run.memory;         // 0..100
+  if (run.labelsOff != null) record.labelsOff = !!run.labelsOff;
   data.runs.unshift(record);
   data.runs = data.runs.slice(0, MAX_TOTAL);
   writeStore(data);
   return record;
 }
 
-export function bestForScale(scaleLabel) {
-  const runs = readStore().runs.filter(r => r.scale === scaleLabel);
+export function bestForScale(scaleLabel, opts = {}) {
+  let runs = readStore().runs.filter(r => r.scale === scaleLabel);
+  // Optional narrowing to a specific game context. A run saved WITHOUT these
+  // fields (a legacy recorder run) never matches a box/mode filter, so a filtered
+  // query returns only real game rows — and an unfiltered query still sees all.
+  if (opts.mode) runs = runs.filter(r => r.mode === opts.mode);
+  if (opts.box) runs = runs.filter(r => r.box &&
+    r.box.minFret === opts.box.minFret && r.box.maxFret === opts.box.maxFret);
   if (!runs.length) return null;
   const best = runs.reduce((a, b) => (b.score > a.score ? b : a));
   // Backfill stars for legacy rows saved before the 1-5 grade existed.
   return { ...best, stars: best.stars ?? scoreToStars(best.score) };
+}
+
+/**
+ * Per-scale mastery across the game's tracks — what the setup screen's "crown"
+ * reads. The crown is the MINIMUM of the run-mode and hunt-mode star bests (you
+ * haven't mastered a scale until you can both play it AND find it from memory),
+ * so it never overstates. Legacy rows (no `mode`) count toward neither, so they
+ * can't inflate the crown.
+ *
+ * @param {string} scaleLabel e.g. "A Minor pentatonic" (the `scale` label used
+ *        when the run was saved)
+ * @returns {{crown:number, runStars:number, huntStars:number, clearedBpm:number}}
+ */
+export function scaleMastery(scaleLabel) {
+  const runs = readStore().runs.filter(r => r.scale === scaleLabel);
+  const starsFor = (mode) => {
+    const m = runs.filter(r => r.mode === mode);
+    if (!m.length) return 0;
+    return m.reduce((best, r) => Math.max(best, r.stars ?? scoreToStars(r.score)), 0);
+  };
+  const runStars = starsFor('run');
+  const huntStars = starsFor('hunt');
+  // Highest tempo tier ever cleared at >=4 stars in run mode.
+  const clearedBpm = runs
+    .filter(r => r.mode === 'run' && (r.stars ?? scoreToStars(r.score)) >= 4 && r.bpm != null)
+    .reduce((max, r) => Math.max(max, r.bpm), 0);
+  return {
+    crown: (runStars && huntStars) ? Math.min(runStars, huntStars) : 0,
+    runStars, huntStars, clearedBpm,
+  };
 }
 
 // ── useScaleRecorder — capture a scale run and grade it ────────────────────────
