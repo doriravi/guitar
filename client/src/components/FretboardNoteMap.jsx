@@ -260,13 +260,18 @@ export default function FretboardNoteMap({ lang }) {
         </button>
       </div>
 
-      {/* Manual key/scale picker — works before AND during play. When set, it
-          locks the overlay to that scale and ignores detection; "Auto" hands
-          control back to the mic. */}
+      {/* Scale filter — a standalone reference control on the note chart. Pick a
+          key + scale and the grid highlights just those notes (root in gold, the
+          rest of the scale in cyan) and dims everything else. Works with the mic
+          OFF — a "learn this scale on the neck" tool. When the mic IS on, this
+          same pick also locks the improv overlay to your chosen scale instead of
+          following the detected chord; clearing it hands that back to the mic.
+          (State is `manual`: mic-off it's a plain filter, mic-on it's a manual
+          override — one control, both jobs.) */}
       <div className="flex items-center gap-2 flex-wrap px-4 py-2"
         style={{ borderBottom: '1px solid var(--color-surface-650)' }}>
         <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-          {tr.improvScalePick || 'Scale'}
+          🔎 {tr.scaleFilter || 'Scale filter'}
         </span>
         <select
           value={manual ? manual.root : ''}
@@ -277,7 +282,7 @@ export default function FretboardNoteMap({ lang }) {
           }}
           className="text-xs px-2 py-1 rounded-lg"
           style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
-          <option value="">{tr.improvScaleAuto || 'Auto (follow mic)'}</option>
+          <option value="">{tr.scaleFilterOff || 'Off (show all notes)'}</option>
           {NOTE_NAMES.map((n, pc) => (
             <option key={pc} value={pc}>{n}</option>
           ))}
@@ -297,7 +302,7 @@ export default function FretboardNoteMap({ lang }) {
           <button onClick={() => setManual(null)}
             className="text-xs px-2 py-1 rounded-lg"
             style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}>
-            {tr.improvScaleClear || '↺ Auto'}
+            {tr.scaleFilterClear || '✕ Clear'}
           </button>
         )}
       </div>
@@ -381,8 +386,12 @@ export default function FretboardNoteMap({ lang }) {
 
       <div className="p-4 overflow-x-auto">
         <p className="text-sm mb-4" style={{ color: 'var(--color-ink-muted)' }}>
-          {tr.noteMapIntro2 ||
-            'Every note from the nut to the 12th fret. At the 12th the notes repeat — it’s the same as the open string, one octave up.'}
+          {manual
+            ? (tr.noteMapFiltered || 'Showing')
+              + ` ${map?.chord?.name || ''} — `
+              + (tr.noteMapFilteredHint || 'scale notes are highlighted, the rest dimmed.')
+            : (tr.noteMapIntro2 ||
+              'Every note from the nut to the 12th fret. At the 12th the notes repeat — it’s the same as the open string, one octave up.')}
         </p>
 
         <div style={{ minWidth: '34rem' }}>
@@ -474,18 +483,27 @@ export default function FretboardNoteMap({ lang }) {
           <div className="flex items-center gap-4 mt-3 text-[11px] flex-wrap" style={{ color: 'var(--color-ink-faint)' }}>
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 rounded" style={{ background: 'var(--color-brand)' }} />
-              {tr.improvLegendTone || 'Chord tone — lands, sounds resolved'}
+              {/* In pure filter mode the gold dots are the scale's ROOT, not a
+                  chord tone — label accordingly so the legend stays truthful. */}
+              {manual && !listening
+                ? (tr.filterLegendRoot || 'Root — the note the scale is named after')
+                : (tr.improvLegendTone || 'Chord tone — lands, sounds resolved')}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 rounded"
                 style={{ background: 'rgba(56,189,248,0.18)', border: '1px solid rgba(56,189,248,0.45)' }} />
-              {tr.improvLegendScale || 'Scale note — safe to pass through'}
+              {manual && !listening
+                ? (tr.filterLegendScale || 'In the scale')
+                : (tr.improvLegendScale || 'Scale note — safe to pass through')}
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 rounded"
-                style={{ background: 'var(--color-surface-700)', border: '2px solid #fff', boxShadow: '0 0 6px rgba(255,255,255,0.7)' }} />
-              {tr.improvLegendLive || 'Playing now (all positions of that note)'}
-            </span>
+            {/* "Playing now" only means something when the mic is on. */}
+            {listening && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded"
+                  style={{ background: 'var(--color-surface-700)', border: '2px solid #fff', boxShadow: '0 0 6px rgba(255,255,255,0.7)' }} />
+                {tr.improvLegendLive || 'Playing now (all positions of that note)'}
+              </span>
+            )}
           </div>
         ) : (
           <p className="text-[11px] mt-3" style={{ color: 'var(--color-ink-faint)' }}>
