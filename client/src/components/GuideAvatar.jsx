@@ -185,7 +185,14 @@ function explainAt(x, y) {
 }
 
 // ─── Guide avatar ─────────────────────────────────────────────────────────────
+const DISMISS_KEY = 'guideAvatarClosed';
+
 export default function GuideAvatar({ userName }) {
+  // Closed by the user? Persist it so the guide stays gone across reloads —
+  // but leave a tiny "?" tab so it's never lost for good.
+  const [closed, setClosed] = useState(() => {
+    try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; }
+  });
   const [gender, setGender] = useState(() => guessGender(userName));
   const [pos, setPos] = useState({ x: window.innerWidth - 96, y: window.innerHeight - 140 });
   const [dragging, setDragging] = useState(false);
@@ -201,6 +208,22 @@ export default function GuideAvatar({ userName }) {
   useEffect(() => { posRef.current = pos; }, [pos]);
 
   useEffect(() => setGender(guessGender(userName)), [userName]);
+
+  // Close the guide (and remember it); reopen from the little tab.
+  const closeGuide = useCallback(() => {
+    window.speechSynthesis?.cancel();
+    setTalking(false);
+    setBubble(null);
+    setPointMode(false);
+    setClosed(true);
+    try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* ignore */ }
+  }, []);
+  const reopenGuide = useCallback(() => {
+    setClosed(false);
+    setHint(true);
+    setExpression('happy');
+    try { localStorage.removeItem(DISMISS_KEY); } catch { /* ignore */ }
+  }, []);
 
   // Briefly flash an expression, then drift back to a neutral idle.
   const flash = useCallback((exp, ms = 1400) => {
@@ -320,6 +343,16 @@ export default function GuideAvatar({ userName }) {
     top: Math.max(12, bubble.y - 16),
   } : null;
 
+  // Dismissed: show only a small tab to bring the guide back.
+  if (closed) {
+    return (
+      <button className="ga-reopen" onClick={reopenGuide} title="Show the guide">
+        <span aria-hidden>💬</span>
+        <span className="ga-reopen-label">Guide</span>
+      </button>
+    );
+  }
+
   return (
     <>
       {/* speech bubble */}
@@ -352,6 +385,15 @@ export default function GuideAvatar({ userName }) {
           onClick={(e) => { e.stopPropagation(); setGender(g => g === 'female' ? 'male' : g === 'male' ? 'neutral' : 'female'); }}
           title="Switch guide"
         >⟳</button>
+
+        {/* close the guide (reopen from the tab it leaves behind) */}
+        <button
+          className="ga-close"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); closeGuide(); }}
+          title="Close the guide"
+          aria-label="Close the guide"
+        >×</button>
       </div>
     </>
   );

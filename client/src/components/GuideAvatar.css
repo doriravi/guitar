@@ -51,6 +51,27 @@
 }
 .ga-swap:hover { border-color: #c9a96e; }
 
+/* close button — top-right of the avatar */
+.ga-close {
+  position: absolute; right: -6px; top: -2px; width: 22px; height: 22px; border-radius: 50%;
+  background: #1a1a1a; color: #b98a8a; border: 1px solid #333; font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1; padding: 0;
+}
+.ga-close:hover { border-color: #e06a6a; color: #f0a0a0; }
+
+/* the little tab left behind so a closed guide can come back */
+.ga-reopen {
+  position: fixed; right: 0; bottom: 96px; z-index: 60;
+  display: flex; align-items: center; gap: 6px;
+  background: #1a1a1a; color: #c9a96e; border: 1px solid #2e2e2e; border-right: 0;
+  border-radius: 10px 0 0 10px; padding: 7px 10px 7px 11px; cursor: pointer;
+  font-size: 12px; font-weight: 600; line-height: 1;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+  animation: ga-fade .3s ease;
+}
+.ga-reopen:hover { border-color: #c9a96e; color: #e0c48a; }
+.ga-reopen-label { letter-spacing: .02em; }
+
 /* hint nudge */
 .ga-hint {
   position: absolute; bottom: 92px; right: 0; width: 168px;
