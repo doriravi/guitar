@@ -12,6 +12,7 @@ import { useState, useMemo } from 'react';
 import { useT } from '../lib/i18n';
 import { useScaleQuest } from '../lib/useScaleQuest';
 import GameFretboard from './GameFretboard';
+import Celebration from './Celebration';
 import { NOTE_NAMES } from '../lib/chordAnalyzer';
 import {
   SCALE_LABELS, scalePositions,
@@ -232,6 +233,10 @@ export default function ScaleQuest({ lang, onClose }) {
     return (
       <Shell onClose={onClose} tr={tr}>
         <div className="p-5 space-y-4">
+          {/* Celebration — only renders when this take actually advanced the
+              player (new best / crown / cleared tempo / milestone). */}
+          {r.advancement?.advanced && <Celebration advancement={r.advancement} tr={tr} />}
+
           <div className="text-center">
             <div className="text-sm" style={{ color: 'var(--color-ink-muted)' }}>{scaleLabel} · {box?.label}</div>
             <div className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>

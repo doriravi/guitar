@@ -20,6 +20,7 @@ import {
   makeNoteCapture,
   midiMatches,
   SCALE_UNLOCK_ORDER,
+  detectAdvancement,
 } from './scaleGame';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from './chordAnalyzer';
 import { SCALE_LABELS } from './improvEngine';
@@ -405,5 +406,73 @@ describe('midiMatches — exact octave, adjacent fret rejected', () => {
 describe('catalog wiring', () => {
   it('every unlock-order scale is a real SCALE_LABELS entry', () => {
     for (const id of SCALE_UNLOCK_ORDER) expect(SCALE_LABELS[id]).toBeTruthy();
+  });
+});
+
+describe('detectAdvancement — celebrates only real progression', () => {
+  const m = (o) => ({ crown: 0, runStars: 0, huntStars: 0, clearedBpm: 0, ...o });
+
+  it('no change in mastery → not advanced (no celebration)', () => {
+    const before = m({ runStars: 3, clearedBpm: 80 });
+    const after = m({ runStars: 3, clearedBpm: 80 });
+    const r = detectAdvancement(before, after, { mode: 'run', stars: 3, bpm: 80 });
+    expect(r.advanced).toBe(false);
+    expect(r.achievements).toEqual([]);
+    expect(r.top).toBeNull();
+  });
+
+  it('a lower/equal take does NOT celebrate a regression', () => {
+    const before = m({ runStars: 4 });
+    const after = m({ runStars: 4 }); // a 2-star take can't lower the best
+    const r = detectAdvancement(before, after, { mode: 'run', stars: 2, bpm: 80 });
+    expect(r.advanced).toBe(false);
+  });
+
+  it('new personal-best star tier in the played mode → starBest', () => {
+    const before = m({ runStars: 2 });
+    const after = m({ runStars: 4 });
+    const r = detectAdvancement(before, after, { mode: 'run', stars: 4, bpm: 80 });
+    expect(r.advanced).toBe(true);
+    expect(r.top.type).toBe('starBest');
+    expect(r.top.detail).toMatchObject({ mode: 'run', stars: 4, prev: 2 });
+    expect(r.big).toBe(false);
+  });
+
+  it('a first-ever crown outranks a simultaneous star best and is "big"', () => {
+    // Player already had 4-star run; now lands 3-star hunt → crown becomes min(4,3)=3.
+    const before = m({ runStars: 4, huntStars: 0, crown: 0 });
+    const after = m({ runStars: 4, huntStars: 3, crown: 3 });
+    const r = detectAdvancement(before, after, { mode: 'hunt', stars: 3, bpm: 80 });
+    expect(r.advanced).toBe(true);
+    expect(r.top.type).toBe('crownNew'); // crown ranks above the huntStars best
+    expect(r.big).toBe(true);
+    expect(r.achievements.map((x) => x.type)).toContain('starBest');
+  });
+
+  it('a maxed crown (5) reports crownMax', () => {
+    const before = m({ crown: 4, runStars: 5, huntStars: 4 });
+    const after = m({ crown: 5, runStars: 5, huntStars: 5 });
+    const r = detectAdvancement(before, after, { mode: 'hunt', stars: 5, bpm: 100 });
+    expect(r.top.type).toBe('crownMax');
+    expect(r.big).toBe(true);
+  });
+
+  it('a newly cleared tempo tier → bpmCleared', () => {
+    const before = m({ runStars: 4, clearedBpm: 80 });
+    const after = m({ runStars: 4, clearedBpm: 100 });
+    const r = detectAdvancement(before, after, { mode: 'run', stars: 4, bpm: 100 });
+    expect(r.advanced).toBe(true);
+    expect(r.achievements.some((x) => x.type === 'bpmCleared')).toBe(true);
+    expect(r.achievements.find((x) => x.type === 'bpmCleared').detail).toMatchObject({ bpm: 100, prev: 80 });
+  });
+
+  it('a Level-Plan milestone advance is reported and outranks a star best', () => {
+    const before = m({ runStars: 2 });
+    const after = m({ runStars: 3 });
+    const r = detectAdvancement(before, after, { mode: 'run', stars: 3, bpm: 80, milestoneAdvanced: 'int-scale-run' });
+    expect(r.advanced).toBe(true);
+    expect(r.achievements.map((x) => x.type)).toEqual(expect.arrayContaining(['milestone', 'starBest']));
+    // milestone ranks above starBest
+    expect(r.top.type).toBe('milestone');
   });
 });

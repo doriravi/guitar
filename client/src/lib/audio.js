@@ -621,6 +621,58 @@ export function playMetronome(totalBeats, spb, { startInSec = 0.05, accentPhase 
   return () => { stopped = true; try { bus.disconnect(); } catch { /* ignore */ } };
 }
 
+/**
+ * A short, happy "you advanced!" fanfare — an ascending major arpeggio capped by
+ * an octave sparkle, plucked-bell timbre. Played once when a practice/recording
+ * take produces real progression (level-up, new star tier, unlock). Reuses the
+ * shared AudioContext + master bus like every other cue, so it survives the iOS
+ * gesture unlock. `big` adds a higher, brighter final flourish for a bigger win
+ * (e.g. a new mastery crown vs. just a new personal best).
+ *
+ * @param {{ big?: boolean }} opts
+ * @returns {number} approximate duration in seconds
+ */
+export function playFanfare({ big = false } = {}) {
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+  const base = ctx.currentTime + 0.04;
+
+  // C major triad up two octaves, then a top sparkle. Bright, unambiguous "win".
+  const notes = big
+    ? [523.25, 659.25, 783.99, 1046.5, 1318.5, 1567.98]  // C5 E5 G5 C6 E6 G6
+    : [523.25, 659.25, 783.99, 1046.5];                  // C5 E5 G5 C6
+  const step = 0.09;
+
+  notes.forEach((hz, i) => {
+    const t = base + i * step;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'triangle';                 // soft, bell-ish — not a harsh saw
+    osc.frequency.value = hz;
+    const peak = 0.22 - i * 0.015;         // gently taper so it doesn't pile up
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.06, peak), t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    osc.connect(g); g.connect(ctx._out);
+    osc.start(t); osc.stop(t + 0.5);
+  });
+
+  // A shimmering top note held under the arpeggio for a triumphant tail.
+  const shimmerHz = big ? 2093.0 : 1567.98;               // C7 / G6
+  const st = base + notes.length * step;
+  const so = ctx.createOscillator();
+  const sg = ctx.createGain();
+  so.type = 'sine';
+  so.frequency.value = shimmerHz;
+  sg.gain.setValueAtTime(0.0001, st);
+  sg.gain.exponentialRampToValueAtTime(0.12, st + 0.02);
+  sg.gain.exponentialRampToValueAtTime(0.0001, st + 0.6);
+  so.connect(sg); sg.connect(ctx._out);
+  so.start(st); so.stop(st + 0.65);
+
+  return notes.length * step + 0.65;
+}
+
 export function stopAudio() {
   _timeouts.forEach(clearTimeout);
   _timeouts = [];

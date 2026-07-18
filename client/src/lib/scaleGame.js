@@ -515,4 +515,64 @@ export function scoreScaleTrack(track01, caps = {}) {
   return { score, stars: scoreToStars(score), grade: gradeFor(score), capped };
 }
 
+// ── Progression detection (the celebration trigger) ───────────────────────────
+// A finished take celebrates only on REAL advancement — never on every run, or
+// the reward becomes noise (see the feedback_progression_celebration rule). This
+// pure function decides "did they move forward?" by diffing a BEFORE snapshot
+// against an AFTER snapshot of the same scale's mastery (both are the object
+// scaleMastery() returns: { crown, runStars, huntStars, clearedBpm }), plus the
+// just-graded run's own facts. It ranks the achievements so the UI leads with the
+// biggest one, and marks `big` when the top achievement is a mastery-level gain
+// (a new/raised crown) vs. a smaller personal best — the sound + effect scale to it.
+//
+// Kept out of React and localStorage so it's fully testable: the caller snapshots
+// mastery before saving the run and after, and hands both here.
+//
+// @param {object} before  scaleMastery(scale) BEFORE this run was saved
+// @param {object} after   scaleMastery(scale) AFTER this run was saved
+// @param {object} run     { mode:'run'|'hunt', stars, bpm, milestoneAdvanced?:string|null }
+// @returns {{advanced:boolean, big:boolean, achievements:Array<{type,detail}>, top:object|null}}
+export function detectAdvancement(before = {}, after = {}, run = {}) {
+  const b = { crown: 0, runStars: 0, huntStars: 0, clearedBpm: 0, ...before };
+  const a = { crown: 0, runStars: 0, huntStars: 0, clearedBpm: 0, ...after };
+  const achievements = [];
+
+  // 1. New or higher mastery crown — the biggest win (you can now BOTH play and
+  //    find the scale, at a higher star tier than before).
+  if (a.crown > b.crown) {
+    achievements.push({
+      type: a.crown >= 5 ? 'crownMax' : (b.crown === 0 ? 'crownNew' : 'crownUp'),
+      detail: { crown: a.crown, prev: b.crown },
+    });
+  }
+
+  // 2. New personal-best star tier in the mode just played.
+  const modeStarsBefore = run.mode === 'hunt' ? b.huntStars : b.runStars;
+  const modeStarsAfter = run.mode === 'hunt' ? a.huntStars : a.runStars;
+  if (modeStarsAfter > modeStarsBefore) {
+    achievements.push({
+      type: 'starBest',
+      detail: { mode: run.mode, stars: modeStarsAfter, prev: modeStarsBefore },
+    });
+  }
+
+  // 3. New fastest tempo cleared (>=4 stars in run mode) — a speed milestone.
+  if (a.clearedBpm > b.clearedBpm) {
+    achievements.push({ type: 'bpmCleared', detail: { bpm: a.clearedBpm, prev: b.clearedBpm } });
+  }
+
+  // 4. A Level-Plan milestone advanced (route the game into the roadmap).
+  if (run.milestoneAdvanced) {
+    achievements.push({ type: 'milestone', detail: { milestoneId: run.milestoneAdvanced } });
+  }
+
+  // Rank: crown > milestone > speed > star-best, so the UI leads with the biggest.
+  const RANK = { crownMax: 0, crownNew: 1, crownUp: 2, milestone: 3, bpmCleared: 4, starBest: 5 };
+  achievements.sort((x, y) => (RANK[x.type] ?? 99) - (RANK[y.type] ?? 99));
+
+  const top = achievements[0] || null;
+  const big = !!top && (top.type === 'crownMax' || top.type === 'crownNew' || top.type === 'crownUp');
+  return { advanced: achievements.length > 0, big, achievements, top };
+}
+
 function clamp01(n) { return Math.max(0, Math.min(1, n || 0)); }

@@ -19,8 +19,10 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useMic, loadConfig } from './micDetect';
 import { detectPitchYIN, hzToMidi } from './pitchDetect';
-import { makeOnsetDetector } from './improvEngine';
-import { COUNTDOWN_MS, PER_NOTE_MS } from './scalePractice';
+import { makeOnsetDetector, SCALE_LABELS } from './improvEngine';
+import { COUNTDOWN_MS, PER_NOTE_MS, saveScaleRun, scaleMastery } from './scalePractice';
+import { advanceForRecording } from './levelPlan';
+import { NOTE_NAMES } from './chordAnalyzer';
 import {
   makeNoteCapture,
   buildTargetSequence,
@@ -29,6 +31,7 @@ import {
   scoreSpeed,
   scoreFretboardMemory,
   scoreScaleTrack,
+  detectAdvancement,
   midiMatches,
   fretMidiExact,
 } from './scaleGame';
@@ -252,11 +255,54 @@ export function useScaleQuest() {
     const spdTrack = scoreScaleTrack(spd.speed);
     const memTrack = scoreScaleTrack(mem.memory, { orderMatch: acc.orderMatch });
 
+    // ── Persist the run + detect progression (the celebration trigger) ─────────
+    // Scale Quest didn't previously save its runs (unlike scalePractice/chord
+    // recordings), so mastery/Level-Plan never advanced from playing the game.
+    // Save it as a structured run, keyed the same way scalePractice keys bests
+    // (scale label + box + mode), then diff mastery before/after to know what the
+    // player just unlocked. `mode` maps hunt→'hunt', else 'run' so the store's
+    // run/hunt star tracks stay meaningful. The overall run stars = the accuracy
+    // track's stars (the primary graded goal), which is also what the Level-Plan
+    // pass-gate reads.
+    const scaleLabel = `${NOTE_NAMES[rootPc]} ${SCALE_LABELS[config.scaleId] || config.scaleId}`;
+    const storeMode = config.mode === 'hunt' ? 'hunt' : 'run';
+    const runStars = accTrack.stars;
+
+    const before = scaleMastery(scaleLabel);
+    let milestoneAdvanced = null;
+    try {
+      saveScaleRun({
+        scale: scaleLabel,
+        score: accTrack.score,
+        stars: runStars,
+        level: null,
+        grade: accTrack.grade,
+        coverage: Math.round((acc.coverage || 0) * 100),
+        cleanliness: Math.round((acc.purity || 0) * 100),
+        box: config.box,
+        bpm: config.bpm,
+        mode: storeMode,
+        accuracy: accTrack.score,
+        speed: spdTrack.score,
+        memory: memTrack.score,
+        labelsOff: !!config.labelsOff,
+      });
+      milestoneAdvanced = advanceForRecording({ kind: 'scale', name: scaleLabel, stars: runStars });
+    } catch { /* localStorage may be unavailable; never block scoring on it */ }
+    const after = scaleMastery(scaleLabel);
+    const advancement = detectAdvancement(before, after, {
+      mode: storeMode, stars: runStars, bpm: config.bpm, milestoneAdvanced,
+    });
+
     const out = {
       config,
       accuracy: accTrack, speed: spdTrack, memory: memTrack,
       detail: { ...acc, ...spd, octaveMatch, region: mem.region },
       targets, committed,
+      scaleLabel, runStars,
+      // What the player just unlocked, if anything — drives the celebration.
+      advancement,
+      mastery: after,
       // Which targets were hit exactly, for the misses-on-neck review.
       targetResults: targets.map((t) => ({
         ...t,
