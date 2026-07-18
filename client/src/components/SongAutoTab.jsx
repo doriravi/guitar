@@ -175,13 +175,16 @@ function TabStaff({ title, columns, hardest, profile, accent, note }) {
 }
 
 /**
- * The song's auto-generated tab, with a "Simplify the whole song" toggle that
- * reveals the simplified version beside the original.
- * @param {{ song:object, bpm?:number }} props
+ * The song's auto-generated tab — a SINGLE staff that shows either the original
+ * chords or, when `simplified` is on, the eased chords. The "Simplify all"
+ * toggle lives in the parent (LyricsSection) so it swaps BOTH this tab and the
+ * lyrics chords in place — there is no second/side-by-side staff.
+ *
+ * @param {{ song:object, simplified:boolean, profile:object }} props
  */
-export default function SongAutoTab({ song }) {
-  const profile = useHandProfile();
-  const [simplified, setSimplified] = useState(false);
+export default function SongAutoTab({ song, simplified, profile: profileProp }) {
+  const ctxProfile = useHandProfile();
+  const profile = profileProp || ctxProfile;
 
   const original = useMemo(() => buildAutoTab(song), [song]);
   const simple = useMemo(
@@ -190,46 +193,27 @@ export default function SongAutoTab({ song }) {
   );
 
   if (!original.columns.length) return null;
+  const shown = simplified && simple ? simple : original;
 
   return (
     <div className="mt-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-faint)' }}>
-          ♪ Auto tab — the whole song
-        </span>
-        <button
-          onClick={() => setSimplified(v => !v)}
-          className="text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-all"
-          style={simplified
-            ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
-            : { background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
-          title="Rewrite every chord as the easiest shape for your hand and show it beside the original"
-        >
-          {simplified ? '✓ Simplified — hide' : '✨ Simplify all'}
-        </button>
+      <div className="text-[10px] uppercase tracking-widest font-semibold mb-2" style={{ color: 'var(--color-ink-faint)' }}>
+        ♪ Auto tab — the whole song{simplified ? ' · simplified' : ''}
       </div>
-
-      <div className={`flex gap-3 ${simplified ? 'flex-col lg:flex-row' : ''}`}>
-        <TabStaff
-          title="Original"
-          columns={original.columns}
-          hardest={original.hardest}
-          profile={profile}
-          accent="var(--color-info)"
-        />
-        {simplified && simple && (
-          <TabStaff
-            title={simple.changedCount ? `Simplified — ${simple.changedCount} chord${simple.changedCount > 1 ? 's' : ''} eased` : 'Simplified — already easy'}
-            columns={simple.columns}
-            hardest={simple.hardest}
-            profile={profile}
-            accent="var(--color-success)"
-            note={simple.changedCount
+      <TabStaff
+        title={simplified
+          ? (simple?.changedCount ? `Simplified — ${simple.changedCount} chord${simple.changedCount > 1 ? 's' : ''} eased` : 'Simplified — already easy')
+          : 'Tab'}
+        columns={shown.columns}
+        hardest={shown.hardest}
+        profile={profile}
+        accent={simplified ? 'var(--color-success)' : 'var(--color-info)'}
+        note={simplified && simple
+          ? (simple.changedCount
               ? simple.changes.slice(0, 8).map(c => `${c.from}→${c.to}`).join('  ')
-              : 'Every chord was already a low-reach shape for your hand.'}
-          />
-        )}
-      </div>
+              : 'Every chord was already a low-reach shape for your hand.')
+          : null}
+      />
     </div>
   );
 }

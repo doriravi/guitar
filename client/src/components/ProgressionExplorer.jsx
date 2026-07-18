@@ -24,6 +24,7 @@ import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
 import SongAutoTab from './SongAutoTab';
+import { buildSimplifiedAutoTab } from '../lib/autoTab';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
 
@@ -286,6 +287,19 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
   const [lyrics, setLyrics]  = useState('');
   const [tooltip, setTooltip] = useState(null);
   const [active, setActive] = useState(null); // { lineIdx, segIdx } currently sounding
+  const [simplified, setSimplified] = useState(false); // "Simplify all" — eases chords in tab + lyrics
+
+  // The eased-chord map (original name → simplified name) for the WHOLE song,
+  // computed the same way the auto-tab simplifies. Applied to the lyrics chords
+  // in place when "Simplify all" is on, so the words show the easy shape you
+  // actually fret. Only recomputed when simplified is toggled on.
+  const simplifyMap = useMemo(() => {
+    if (!simplified || !song) return null;
+    const { changes } = buildSimplifiedAutoTab(song, soloProfile);
+    const map = new Map();
+    for (const c of changes) map.set(c.from, c.to);
+    return map;
+  }, [simplified, song, soloProfile]);
 
   useEffect(() => {
     if (isCustom) { setStatus('done'); return; }   // pasted song → no fetch
@@ -406,12 +420,27 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
     <div className="px-3 sm:px-4 py-3 font-mono text-xs"
       style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
 
-      {/* Synth song player — plays the chords through the whole lyrics in order */}
-      <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
+      {/* Song controls row — play + one "Simplify all" toggle that eases every
+          chord across BOTH the auto-tab AND the lyrics view below, in place. */}
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+        <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
+        {song && (
+          <button
+            onClick={() => setSimplified(v => !v)}
+            className="text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-all shrink-0"
+            style={simplified
+              ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
+              : { background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
+            title="Rewrite every chord as the easiest shape for your hand — updates the tab and the lyrics chords"
+          >
+            {simplified ? '✓ Simplified' : '✨ Simplify all'}
+          </button>
+        )}
+      </div>
 
-      {/* Auto tab — the WHOLE song as a tab staff, generated from its chords,
-          with a one-click "Simplify all" that shows the eased version beside it. */}
-      {song && <SongAutoTab song={song} />}
+      {/* Auto tab — the WHOLE song as ONE tab staff generated from its chords;
+          "Simplify all" swaps it (and the lyrics) to the eased chords in place. */}
+      {song && <SongAutoTab song={song} simplified={simplified} profile={soloProfile} />}
 
       {status === 'loading' && (
         <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>Loading lyrics…</div>
@@ -458,12 +487,16 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
             title={line.problem ? 'This line looks like leftover sheet text (not lyrics). Edit this song in the Import tab to remove it.' : undefined}>
             {line.segments.map((seg, j) => {
               const chord = progChordsWithVoicings[seg.chordIndex];
-              const v = chord?.voicings?.[0];
-              const inProg = chord?.inProgression !== false;
               const isActive = active && active.lineIdx === i && active.segIdx === j;
               // Show BOTH: the real (sounding) chord, and — when a capo makes it
               // easier — the easy shape you actually fret, e.g. "Bb→A".
-              const real = chord?.chordName;
+              const realName = chord?.chordName;
+              // "Simplify all" swaps the shown chord to its eased version in
+              // place (and its hover shape follows). Capo relabeling is separate.
+              const eased = simplifyMap?.get(realName) || null;
+              const real = eased || realName;
+              const v = eased ? (lookupVoicings(eased).slice().sort((a, b) => a.score - b.score)[0] || chord?.voicings?.[0]) : chord?.voicings?.[0];
+              const inProg = chord?.inProgression !== false;
               const easy = capo ? (capo.map[real] || real) : null;
               const hasEasy = easy && easy !== real;
               return (
@@ -472,8 +505,8 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
                   style={isActive ? { background: 'rgba(201,169,110,0.18)', padding: '0 3px' } : undefined}>
                   <span
                     className="font-bold cursor-default select-none"
-                    style={{ color: isActive ? 'var(--color-brand)' : (inProg ? 'var(--color-accent)' : 'var(--color-danger)') }}
-                    title={hasEasy ? `${real} (sounding) — fret the ${easy} shape with capo ${capo.fret}` : real}
+                    style={{ color: isActive ? 'var(--color-brand)' : (eased ? 'var(--color-success)' : (inProg ? 'var(--color-accent)' : 'var(--color-danger)')) }}
+                    title={eased ? `${realName} simplified to ${eased}` : (hasEasy ? `${real} (sounding) — fret the ${easy} shape with capo ${capo.fret}` : real)}
                     onMouseEnter={v ? e => {
                       const r = e.currentTarget.getBoundingClientRect();
                       const tipW = 148;
