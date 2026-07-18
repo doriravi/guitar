@@ -73,6 +73,7 @@ import {
   detectPeaksConfigured,
   matchChordConfigured,
 } from '../lib/micDetect';
+import ScaleQuest from './ScaleQuest';
 
 const FRETS = 12;                                     // nut → 12th = one octave
 const STRING_LABELS = ['E', 'A', 'D', 'G', 'B', 'e']; // 0 = low E … 5 = high e
@@ -104,6 +105,10 @@ export default function FretboardNoteMap({ lang }) {
   // state every frame for the whole session.
   const lastPushRef = useRef({ chord: null, live: false, hint: null, liveKey: '' });
 
+  // When true, the tab hands its whole surface to the Scale Quest game (a scoring
+  // game with a count-in, lives, and results is a different attention mode than
+  // the free improv HUD, so it takes over rather than crowding a panel).
+  const [playing, setPlaying] = useState(false);
   const [listening, setListening] = useState(false);
   const [permDenied, setPermDenied] = useState(false);
   const [detected, setDetected] = useState(null);   // the LATCHED chord name
@@ -265,6 +270,12 @@ export default function FretboardNoteMap({ lang }) {
   // Pitch classes sounding right now, as a Set for O(1) per-cell lookup.
   const liveSet = useMemo(() => new Set(livePcs), [livePcs]);
 
+  // The game takes over the whole surface. (The improv mic is stopped before we
+  // get here — see the "Play Scale Quest" button — so only one mic is ever open.)
+  if (playing) {
+    return <ScaleQuest lang={lang} onClose={() => setPlaying(false)} />;
+  }
+
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
       <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--color-surface-650)' }}>
@@ -274,6 +285,13 @@ export default function FretboardNoteMap({ lang }) {
             {tr.noteMapTitle || 'Fretboard Note Map'}
           </span>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { if (listening) stop(); setPlaying(true); }}
+            className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+            style={{ border: '1px solid var(--color-brand)', color: 'var(--color-brand)' }}>
+            {tr.sqPlay || '🎯 Play Scale Quest'}
+          </button>
         <button onClick={listening ? stop : start}
           className="text-xs px-3 py-1.5 rounded-lg font-semibold"
           style={listening
@@ -281,6 +299,7 @@ export default function FretboardNoteMap({ lang }) {
             : { background: 'var(--color-brand)', color: '#0b0b0b' }}>
           {listening ? (tr.improvStop || '⏹ Stop') : (tr.improvListen || '🎤 Listen & improvise')}
         </button>
+        </div>
       </div>
 
       {/* Scale filter — a standalone reference control on the note chart. Pick a
