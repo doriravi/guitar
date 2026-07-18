@@ -68,6 +68,7 @@ export const t = {
     filterLegendScale: 'In the scale',
     arpChord: 'Arpeggio',
     arpNone: 'None',
+    arpNoneInScale: 'no chords in a pentatonic — try a 7-note scale',
     arpLegend: '{chord} arpeggio (root/3rd/5th)',
     micDenied: 'Microphone permission was blocked. Allow mic access for this site, then try again.',
     noteMapShowAll: '🎵 Show all notes',

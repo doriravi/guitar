@@ -301,7 +301,10 @@ export default function FretboardNoteMap({ lang }) {
           onChange={(e) => {
             const v = e.target.value;
             if (v === '') { setManual(null); return; }
-            setManual((m) => ({ root: Number(v), scaleId: m?.scaleId || 'minorPentatonic' }));
+            // Default to natural minor, not a pentatonic: pentatonics have no
+            // diatonic triads, so defaulting there would hide the arpeggio picker
+            // the moment you choose a key.
+            setManual((m) => ({ root: Number(v), scaleId: m?.scaleId || 'naturalMinor' }));
           }}
           className="text-xs px-2 py-1 rounded-lg"
           style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
@@ -322,22 +325,30 @@ export default function FretboardNoteMap({ lang }) {
           </select>
         )}
         {/* Arpeggio-by-chord: pick a chord built from the filtered scale and its
-            arpeggio (root/3rd/5th) lights in magenta over the scale. */}
-        {manual && scaleChords.length > 0 && (
+            arpeggio (root/3rd/5th) lights in magenta over the scale. Always shown
+            while a scale is active — when the scale has no diatonic triads
+            (pentatonics), we say so rather than silently hiding the control. */}
+        {manual && (
           <>
             <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
               🎵 {tr.arpChord || 'Arpeggio'}
             </span>
-            <select
-              value={arpDegree ?? ''}
-              onChange={(e) => setArpDegree(e.target.value === '' ? null : Number(e.target.value))}
-              className="text-xs px-2 py-1 rounded-lg"
-              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
-              <option value="">{tr.arpNone || 'None'}</option>
-              {scaleChords.map((c) => (
-                <option key={c.degree} value={c.degree}>{c.name}</option>
-              ))}
-            </select>
+            {scaleChords.length > 0 ? (
+              <select
+                value={arpDegree ?? ''}
+                onChange={(e) => setArpDegree(e.target.value === '' ? null : Number(e.target.value))}
+                className="text-xs px-2 py-1 rounded-lg"
+                style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
+                <option value="">{tr.arpNone || 'None'}</option>
+                {scaleChords.map((c) => (
+                  <option key={c.degree} value={c.degree}>{c.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs italic" style={{ color: 'var(--color-ink-faint)' }}>
+                {tr.arpNoneInScale || 'no chords in a pentatonic — try a 7-note scale'}
+              </span>
+            )}
           </>
         )}
         {manual && (
