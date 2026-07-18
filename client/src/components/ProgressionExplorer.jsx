@@ -285,7 +285,6 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
   const soloProfile = useHandProfile();
   const [status, setStatus] = useState(isCustom ? 'done' : 'loading');
   const [lyrics, setLyrics]  = useState('');
-  const [tooltip, setTooltip] = useState(null);
   const [active, setActive] = useState(null); // { lineIdx, segIdx } currently sounding
   const [simplified, setSimplified] = useState(false); // "Simplify all" — eases chords in tab + lyrics
 
@@ -495,31 +494,25 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
               // place (and its hover shape follows). Capo relabeling is separate.
               const eased = simplifyMap?.get(realName) || null;
               const real = eased || realName;
-              const v = eased ? (lookupVoicings(eased).slice().sort((a, b) => a.score - b.score)[0] || chord?.voicings?.[0]) : chord?.voicings?.[0];
               const inProg = chord?.inProgression !== false;
               const easy = capo ? (capo.map[real] || real) : null;
               const hasEasy = easy && easy !== real;
+              // The chord shape shown on hover follows what's actually fretted:
+              // the capo shape if a capo is suggested, else the (possibly eased)
+              // chord. ChordTip resolves the voicing itself via lookupVoicings,
+              // so the hover works even when this song carried no voicing list.
+              const hoverName = hasEasy ? easy : real;
               return (
                 <span key={j}
                   className="inline-flex flex-col rounded transition-colors"
                   style={isActive ? { background: 'rgba(201,169,110,0.18)', padding: '0 3px' } : undefined}>
-                  <span
-                    className="font-bold cursor-default select-none"
-                    style={{ color: isActive ? 'var(--color-brand)' : (eased ? 'var(--color-success)' : (inProg ? 'var(--color-accent)' : 'var(--color-danger)')) }}
-                    title={eased ? `${realName} simplified to ${eased}` : (hasEasy ? `${real} (sounding) — fret the ${easy} shape with capo ${capo.fret}` : real)}
-                    onMouseEnter={v ? e => {
-                      const r = e.currentTarget.getBoundingClientRect();
-                      const tipW = 148;
-                      setTooltip({
-                        voicing: v,
-                        x: r.right + 8 + tipW > window.innerWidth ? r.left - tipW - 6 : r.right + 8,
-                        y: r.top - 10,
-                      });
-                    } : undefined}
-                    onMouseLeave={v ? () => setTooltip(null) : undefined}
-                  >
-                    {real}{hasEasy && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>→{easy}</span>}
-                  </span>
+                  <ChordTip name={hoverName}
+                    className="font-bold cursor-help select-none"
+                    style={{ color: isActive ? 'var(--color-brand)' : (eased ? 'var(--color-success)' : (inProg ? 'var(--color-accent)' : 'var(--color-danger)')) }}>
+                    <span title={eased ? `${realName} simplified to ${eased}` : (hasEasy ? `${real} (sounding) — fret the ${easy} shape with capo ${capo.fret}` : real)}>
+                      {real}{hasEasy && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>→{easy}</span>}
+                    </span>
+                  </ChordTip>
                   <span style={{ color: isActive ? '#b8a88a' : (line.problem ? '#facc15' : 'var(--color-ink-subtle)') }}>{seg.text}</span>
                 </span>
               );
@@ -539,15 +532,6 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
           hover shapes and their own Play button. */}
       <SoloTabView song={{ tabBlocks }} bpm={bpm} profile={soloProfile} />
 
-      {tooltip && (
-        <div
-          className="fixed z-50 rounded-xl p-3 pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
-        >
-          <div className="text-xs mb-1 text-center" style={{ color: 'var(--color-ink-faint)' }}>{tooltip.voicing.type}</div>
-          <FretboardDiagram chord={tooltip.voicing} />
-        </div>
-      )}
     </div>
   );
 }
