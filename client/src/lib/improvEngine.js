@@ -44,12 +44,22 @@ export const NUM_STRINGS = 6;
 // not previously have anywhere — scales.js holds diatonic CHORD harmony, a
 // different thing), so unlike chord spelling there is nothing here to reuse.
 export const SCALE_FORMULAS = {
+  // Pentatonics + blues — the everyday soloing shapes.
   majorPentatonic: [0, 2, 4, 7, 9],
   minorPentatonic: [0, 3, 5, 7, 10],
-  major:           [0, 2, 4, 5, 7, 9, 11], // Ionian
-  naturalMinor:    [0, 2, 3, 5, 7, 8, 10], // Aeolian
-  mixolydian:      [0, 2, 4, 5, 7, 9, 10], // major with a b7
   blues:           [0, 3, 5, 6, 7, 10],    // minor pentatonic + the b5
+  majorBlues:      [0, 2, 3, 4, 7, 9],      // major pentatonic + the b3
+  // The seven diatonic modes (rotations of the major scale).
+  major:           [0, 2, 4, 5, 7, 9, 11], // Ionian
+  dorian:          [0, 2, 3, 5, 7, 9, 10], // minor with a natural 6
+  phrygian:        [0, 1, 3, 5, 7, 8, 10], // minor with a b2
+  lydian:          [0, 2, 4, 6, 7, 9, 11], // major with a #4
+  mixolydian:      [0, 2, 4, 5, 7, 9, 10], // major with a b7
+  naturalMinor:    [0, 2, 3, 5, 7, 8, 10], // Aeolian
+  locrian:         [0, 1, 3, 5, 6, 8, 10], // b2 and b5
+  // The two other minor scales.
+  harmonicMinor:   [0, 2, 3, 5, 7, 8, 11], // natural minor with a raised 7
+  melodicMinor:    [0, 2, 3, 5, 7, 9, 11], // natural minor with raised 6 and 7 (ascending)
 };
 
 // Human labels for each scale id, for the manual picker. (The chord-driven path
@@ -57,10 +67,17 @@ export const SCALE_FORMULAS = {
 export const SCALE_LABELS = {
   majorPentatonic: 'Major pentatonic',
   minorPentatonic: 'Minor pentatonic',
+  blues: 'Blues (minor)',
+  majorBlues: 'Blues (major)',
   major: 'Major (Ionian)',
-  naturalMinor: 'Natural minor',
+  dorian: 'Dorian',
+  phrygian: 'Phrygian',
+  lydian: 'Lydian',
   mixolydian: 'Mixolydian',
-  blues: 'Blues',
+  naturalMinor: 'Natural minor (Aeolian)',
+  locrian: 'Locrian',
+  harmonicMinor: 'Harmonic minor',
+  melodicMinor: 'Melodic minor',
 };
 
 // Which scales fit which chord quality. Keyed by the SAME `suffix` values

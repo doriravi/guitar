@@ -19,6 +19,7 @@ import {
   makeOnsetDetector,
   livePitchClasses,
   SCALE_FORMULAS,
+  SCALE_LABELS,
   NUM_STRINGS,
 } from './improvEngine';
 import { OPEN_STRING_MIDI, NOTE_NAMES, CHORD_QUALITIES } from './chordAnalyzer';
@@ -140,6 +141,42 @@ describe('findPitchClasses — the fret math, checked against real guitar facts'
       expect((OPEN_STRING_MIDI[h.string] + h.fret) % 12).toBe(h.pc);
     }
     expect(hits.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the scale catalog stays consistent', () => {
+  it('every formula has a label and every label a formula (dropdown can’t desync)', () => {
+    expect(Object.keys(SCALE_FORMULAS).sort()).toEqual(Object.keys(SCALE_LABELS).sort());
+  });
+
+  it('every scale is well-formed: sorted, distinct, in-octave, rooted', () => {
+    for (const [id, formula] of Object.entries(SCALE_FORMULAS)) {
+      expect(formula[0], `${id} must start on the root`).toBe(0);
+      expect(new Set(formula).size, `${id} has a duplicate degree`).toBe(formula.length);
+      const sorted = [...formula].sort((a, b) => a - b);
+      expect(formula, `${id} must be ascending`).toEqual(sorted);
+      expect(Math.max(...formula), `${id} degree out of octave`).toBeLessThan(12);
+      expect(Math.min(...formula)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('spells the modes correctly (rotations of the major scale)', () => {
+    // Each diatonic mode is the C-major note set starting on a different degree,
+    // so the pitch-class SET of each mode's own root must equal C major's set.
+    const cMajor = new Set(SCALE_FORMULAS.major); // {0,2,4,5,7,9,11}
+    const modeRoot = { dorian: 2, phrygian: 4, lydian: 5, mixolydian: 7, naturalMinor: 9, locrian: 11 };
+    for (const [id, root] of Object.entries(modeRoot)) {
+      const set = new Set(SCALE_FORMULAS[id].map((iv) => (root + iv) % 12));
+      expect([...set].sort((a, b) => a - b), `${id} is not a rotation of C major`)
+        .toEqual([...cMajor].sort((a, b) => a - b));
+    }
+  });
+
+  it('harmonic/melodic minor differ from natural minor by the expected degrees', () => {
+    // Harmonic minor = natural minor with a raised 7 (10 -> 11).
+    expect(SCALE_FORMULAS.harmonicMinor).toEqual([0, 2, 3, 5, 7, 8, 11]);
+    // Melodic minor (ascending) = raised 6 AND 7 (8->9, 10->11).
+    expect(SCALE_FORMULAS.melodicMinor).toEqual([0, 2, 3, 5, 7, 9, 11]);
   });
 });
 
