@@ -377,6 +377,116 @@ export function scoreFretboardMemory(p) {
   return { memory, region: octaveMatch >= 0.75 ? 'in-box' : 'drifting' };
 }
 
+// ── Per-target capture — the ring-over defense (THE #1 engineering risk) ─────
+// When you play an ascending run, the PREVIOUS string keeps ringing under the
+// new note. YIN on that two-note blend returns an unstable, often wrong pitch —
+// so a naive "commit every stable pitch" loop mis-reads half a real scale run.
+//
+// The fix is to commit a note only on evidence of a NEW attack:
+//   - an ONSET (a sharp RMS rise — makeOnsetDetector already gives this), OR
+//   - a STABLE genuinely-different pitch held for STABLE_FRAMES frames (covers
+//     legato / hammer-ons / pull-offs, which have no clean re-attack).
+// After committing, a short refractory blocks a second commit until either the
+// pitch changes again or another onset fires — so one plucked note commits once,
+// even while it rings and YIN keeps returning it.
+//
+// This is a pure state machine over a frame stream: feed it {midi, rms, onset,
+// tMs} per frame, it returns a committed note (or null). No mic, no React — so
+// the ring-over logic is unit-testable against synthetic frame sequences.
+
+export const CAPTURE_STABLE_FRAMES = 3;   // frames a new pitch must hold to commit (legato path)
+export const CAPTURE_STABLE_CENTS = 45;   // within this, two reads are "the same pitch"
+export const CAPTURE_SILENCE_RMS = 0.01;  // below this, treat as silence (a gap)
+
+/**
+ * Make a per-target note-capture state machine.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.stableFrames=CAPTURE_STABLE_FRAMES]
+ * @param {number} [opts.stableCents=CAPTURE_STABLE_CENTS]
+ * @param {number} [opts.silenceRms=CAPTURE_SILENCE_RMS]
+ * @returns {{ push:(f:{midi:number|null, rms:number, onset:boolean, tMs:number}) => ({midi:number, tMs:number}|null), reset:()=>void }}
+ */
+export function makeNoteCapture(opts = {}) {
+  const stableFrames = opts.stableFrames ?? CAPTURE_STABLE_FRAMES;
+  const stableCents = opts.stableCents ?? CAPTURE_STABLE_CENTS;
+  const silenceRms = opts.silenceRms ?? CAPTURE_SILENCE_RMS;
+
+  let candMidi = null;     // pitch currently stabilizing
+  let candFrames = 0;
+  let committedMidi = null; // the last note we committed (still ringing)
+  let armed = true;         // may we commit right now? (refractory gate)
+
+  const sameNote = (a, b) => a != null && b != null && Math.abs(a - b) * 100 <= stableCents;
+
+  return {
+    push(f) {
+      const { midi, rms, onset, tMs } = f;
+      // Silence: a real gap. Reset everything and re-arm so a repeat of the same
+      // note (played again after release) counts as a new note.
+      if (midi == null || rms < silenceRms) {
+        candMidi = null; candFrames = 0; committedMidi = null; armed = true;
+        return null;
+      }
+
+      // Track the stabilizing candidate.
+      if (sameNote(midi, candMidi)) {
+        candFrames += 1;
+        candMidi = (candMidi + midi) / 2; // light smoothing
+      } else {
+        candMidi = midi; candFrames = 1;
+      }
+
+      // A fresh attack re-arms us even mid-ring (you re-plucked the same string).
+      if (onset) armed = true;
+
+      const isNewPitch = !sameNote(candMidi, committedMidi);
+      let commit = null;
+
+      // Two independent commit paths:
+      //  1. ONSET path — a fresh attack, even on the SAME pitch (re-picking a
+      //     string). Gated by `armed` so one pluck's long ring commits once.
+      //  2. LEGATO path — a stable, genuinely NEW pitch with no onset (hammer-on /
+      //     pull-off). This does NOT need `armed`: a different held pitch is
+      //     itself the evidence of a new note, and it can't retrigger the same
+      //     note because isNewPitch is required.
+      if (armed && onset && candFrames >= 1) {
+        commit = candMidi;
+      } else if (isNewPitch && candFrames >= stableFrames) {
+        commit = candMidi;
+      }
+
+      if (commit != null) {
+        committedMidi = commit;
+        // Refractory only matters for the onset path (same-pitch re-picks); the
+        // legato path is already guarded by isNewPitch. Disarm either way; a new
+        // onset or a new pitch re-opens committing.
+        armed = false;
+        return { midi: Math.round(commit), tMs };
+      }
+      return null;
+    },
+    reset() { candMidi = null; candFrames = 0; committedMidi = null; armed = true; },
+  };
+}
+
+/**
+ * Does a committed note match a target's EXACT MIDI (right note, right octave)?
+ *
+ * Capture rounds to integer MIDI, so with the default ±40-cent tolerance this is
+ * an exact-MIDI match: a semitone off is 100 cents, well outside 40, so an
+ * ADJACENT FRET can never pass — which is the whole point (an adjacent fret is
+ * the near-miss that would let a fumbled position score as correct).
+ *
+ * @param {number} playedMidi committed (integer) MIDI from makeNoteCapture
+ * @param {number} targetMidi target's exact MIDI (fretMidiExact)
+ * @param {number} [tolCents=MATCH_CENTS]
+ * @returns {boolean}
+ */
+export function midiMatches(playedMidi, targetMidi, tolCents = MATCH_CENTS) {
+  return Math.abs(playedMidi - targetMidi) * 100 <= tolCents;
+}
+
 // ── Turning a 0..1 track into a star/letter grade (reuse, no new thresholds) ──
 
 /**

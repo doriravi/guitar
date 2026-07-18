@@ -17,6 +17,8 @@ import {
   scoreSpeed,
   scoreFretboardMemory,
   scoreScaleTrack,
+  makeNoteCapture,
+  midiMatches,
   SCALE_UNLOCK_ORDER,
 } from './scaleGame';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from './chordAnalyzer';
@@ -274,6 +276,129 @@ describe('scoreScaleTrack — reuses star thresholds + applies pass caps', () =>
   });
   it('no caps → the score passes through', () => {
     expect(scoreScaleTrack(0.9, { purity: 1, orderMatch: 1 }).capped).toBeNull();
+  });
+});
+
+describe('makeNoteCapture — the ring-over defense', () => {
+  // Helper: feed a list of frames, collect the committed notes.
+  const run = (cap, frames) => frames.map((f) => cap.push(f)).filter(Boolean);
+  // A frame: pitch held, moderate level. onset marks a fresh attack.
+  const F = (midi, { onset = false, rms = 0.2, tMs = 0 } = {}) => ({ midi, rms, onset, tMs });
+
+  it('commits one note per plucked attack, not once per ringing frame', () => {
+    const cap = makeNoteCapture();
+    // One pluck of MIDI 45 that rings for many frames.
+    const frames = [
+      F(45, { onset: true, tMs: 0 }),
+      ...Array.from({ length: 20 }, (_, i) => F(45, { tMs: 20 + i * 10 })),
+    ];
+    const out = run(cap, frames);
+    expect(out).toHaveLength(1);
+    expect(out[0].midi).toBe(45);
+  });
+
+  it('commits a new note on the NEXT attack even while the old one rings under it', () => {
+    // The core ring-over case: play 45, then attack 47 while 45 still rings.
+    // A naive "stable pitch" loop would keep committing 45. The onset commits 47.
+    const cap = makeNoteCapture();
+    const frames = [
+      F(45, { onset: true, tMs: 0 }),
+      F(45, { tMs: 10 }), F(45, { tMs: 20 }), F(45, { tMs: 30 }),
+      F(47, { onset: true, tMs: 40 }),          // new attack, blended pitch settling
+      F(47, { tMs: 50 }), F(47, { tMs: 60 }),
+    ];
+    const out = run(cap, frames);
+    expect(out.map((n) => n.midi)).toEqual([45, 47]);
+  });
+
+  it('commits a legato note (no onset) once it holds stable — hammer-on path', () => {
+    // A hammer-on has no clean re-attack, so the onset never fires; a stable NEW
+    // pitch held for stableFrames must still commit.
+    const cap = makeNoteCapture({ stableFrames: 3 });
+    const frames = [
+      F(45, { onset: true, tMs: 0 }), F(45, { tMs: 10 }),
+      F(47, { tMs: 20 }), F(47, { tMs: 30 }), F(47, { tMs: 40 }), // 3 stable frames, no onset
+      F(47, { tMs: 50 }),
+    ];
+    expect(run(cap, frames).map((n) => n.midi)).toEqual([45, 47]);
+  });
+
+  it('does NOT commit a brief unstable blend (the two-note smear) as a note', () => {
+    // Between two real notes YIN can return one garbage frame from the blend.
+    // Without an onset and without holding stable, it must be ignored.
+    const cap = makeNoteCapture({ stableFrames: 3 });
+    const frames = [
+      F(45, { onset: true, tMs: 0 }), F(45, { tMs: 10 }),
+      F(52, { tMs: 20 }),                        // one-frame smear, no onset, not held
+      F(47, { onset: true, tMs: 30 }), F(47, { tMs: 40 }),
+    ];
+    expect(run(cap, frames).map((n) => n.midi)).toEqual([45, 47]); // 52 dropped
+  });
+
+  it('a re-plucked SAME note (after a gap) commits again', () => {
+    const cap = makeNoteCapture();
+    const frames = [
+      F(45, { onset: true, tMs: 0 }), F(45, { tMs: 10 }),
+      F(null, { rms: 0, tMs: 20 }),              // release / silence
+      F(45, { onset: true, tMs: 30 }), F(45, { tMs: 40 }), // played again
+    ];
+    expect(run(cap, frames).map((n) => n.midi)).toEqual([45, 45]);
+  });
+
+  it('a re-plucked same note WITHOUT a gap still commits on the fresh onset', () => {
+    // Rapid repeated picking of one string: each attack is a note, even with no
+    // silence between (the string never fully releases).
+    const cap = makeNoteCapture();
+    const frames = [
+      F(45, { onset: true, tMs: 0 }), F(45, { tMs: 10 }),
+      F(45, { onset: true, tMs: 20 }), F(45, { tMs: 30 }),
+      F(45, { onset: true, tMs: 40 }),
+    ];
+    expect(run(cap, frames).map((n) => n.midi)).toEqual([45, 45, 45]);
+  });
+
+  it('carries the onset timestamp through (for speed scoring)', () => {
+    const cap = makeNoteCapture();
+    const out = run(cap, [F(45, { onset: true, tMs: 137 }), F(45, { tMs: 150 })]);
+    expect(out[0].tMs).toBe(137);
+  });
+
+  it('reset clears the ring state', () => {
+    const cap = makeNoteCapture();
+    run(cap, [F(45, { onset: true }), F(45)]);
+    cap.reset();
+    // After reset, the same note commits fresh on its next onset.
+    expect(run(cap, [F(45, { onset: true }), F(45)]).map((n) => n.midi)).toEqual([45]);
+  });
+
+  it('simulates a full ascending pentatonic run cleanly', () => {
+    // A minor pent box: 45(A) 48(C) 50(D) 52(E) 55(G) 57(A), each a fresh pluck
+    // that rings under the next. The capture must recover exactly this sequence.
+    const cap = makeNoteCapture();
+    const seq = [45, 48, 50, 52, 55, 57];
+    const frames = [];
+    let t = 0;
+    for (const m of seq) {
+      frames.push(F(m, { onset: true, tMs: t }));          // attack
+      // it rings for a few frames, blending with the previous (which we model as
+      // occasional stale reads — the onset already committed, so they're ignored)
+      frames.push(F(m, { tMs: t + 10 }), F(m, { tMs: t + 20 }));
+      t += 200;
+    }
+    expect(run(cap, frames).map((n) => n.midi)).toEqual(seq);
+  });
+});
+
+describe('midiMatches — exact octave, adjacent fret rejected', () => {
+  it('accepts the exact MIDI', () => {
+    expect(midiMatches(64, 64)).toBe(true);
+  });
+  it('rejects an adjacent fret (a semitone = 100 cents, outside ±40)', () => {
+    expect(midiMatches(65, 64)).toBe(false);
+    expect(midiMatches(63, 64)).toBe(false);
+  });
+  it('rejects the same pitch class an octave off (wrong position)', () => {
+    expect(midiMatches(76, 64)).toBe(false); // E5 vs E4
   });
 });
 
