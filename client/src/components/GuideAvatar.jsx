@@ -16,63 +16,158 @@ function guessGender(name) {
   return 'neutral';
 }
 
-// ─── The little SVG character ─────────────────────────────────────────────────
-// gender drives hair + accent; `talking` animates the mouth.
+// ─── The full-body SVG character ──────────────────────────────────────────────
+// A standing person, ~7 heads tall, drawn with soft shading so it reads as human
+// rather than a cartoon blob. gender drives hair + clothing accent + build;
+// `talking` animates the mouth. The animation hook classes (.ga-eyes, .ga-mouth,
+// .ga-think, ga-exp-*) are preserved so the CSS reactions still work.
+//
+// viewBox is 100×220 (tall). Head is centered on x≈50, crown near y≈14,
+// chin near y≈58 — everything below hangs off that.
 function Character({ gender, talking, expression = 'idle' }) {
-  const skin = '#e8c9a8';
+  const skin = '#eac9a6';
+  const skinShade = '#d8b189';   // shadow side of skin
   const accent = gender === 'female' ? '#e06aa0' : gender === 'male' ? '#5b8def' : '#c9a96e';
+  const accentDk = gender === 'female' ? '#c04d84' : gender === 'male' ? '#4570cf' : '#a9884f'; // clothing shadow
   const hair = gender === 'female' ? '#6b4a2f' : '#3a2a1d';
+  const hairHi = gender === 'female' ? '#8a6440' : '#50392a';
+  const pants = '#39424f';       // trousers / skirt shade
+  const pantsDk = '#2b333d';
+  const shoe = '#26201b';
   const exp = talking ? 'talking' : expression;
 
-  // Eye shapes per expression
-  const Eye = ({ cx }) => {
-    if (exp === 'wink' && cx > 40) return <path d={`M${cx - 3} 40 q3 -2 6 0`} stroke="#2a2a2a" strokeWidth="2" fill="none" strokeLinecap="round" />;
-    if (exp === 'happy') return <path d={`M${cx - 3} 41 q3 -3 6 0`} stroke="#2a2a2a" strokeWidth="2" fill="none" strokeLinecap="round" />;
-    if (exp === 'surprised') return <circle cx={cx} cy={40} r="3.4" fill="#2a2a2a" />;
-    return <circle cx={cx} cy={40} r="2.6" fill="#2a2a2a" />;
+  // Head geometry
+  const cx = 50, eyeY = 34;
+
+  // Eye shapes per expression (almond eyes with iris + highlight → more human)
+  const Eye = ({ ex, wink }) => {
+    if (wink && exp === 'wink') return <path d={`M${ex - 4} ${eyeY} q4 -3 8 0`} stroke="#3a2a20" strokeWidth="1.8" fill="none" strokeLinecap="round" />;
+    if (exp === 'happy') return <path d={`M${ex - 4} ${eyeY + 1} q4 -4 8 0`} stroke="#3a2a20" strokeWidth="1.8" fill="none" strokeLinecap="round" />;
+    const r = exp === 'surprised' ? 3.1 : 2.5;
+    return (
+      <g>
+        {/* eye-white almond */}
+        <ellipse cx={ex} cy={eyeY} rx="4.2" ry={exp === 'surprised' ? 3.6 : 3} fill="#fbf7f2" />
+        {/* iris + pupil */}
+        <circle cx={ex} cy={eyeY} r={r} fill="#5a4632" />
+        <circle cx={ex} cy={eyeY} r={r - 1.3} fill="#241a12" />
+        {/* catch-light */}
+        <circle cx={ex + 1} cy={eyeY - 1} r="0.8" fill="#fff" opacity="0.9" />
+      </g>
+    );
   };
+
   // Brow offset for personality
-  const browY = exp === 'surprised' ? 30 : exp === 'thinking' ? 31 : 33;
-  const browTilt = exp === 'thinking' ? -3 : 0;
+  const browY = exp === 'surprised' ? 26 : exp === 'thinking' ? 27 : 28.5;
+  const browTilt = exp === 'thinking' ? -4 : 0;
+
   // Mouth per expression
+  const mouthY = 47;
   const mouth = () => {
-    if (exp === 'talking') return <ellipse className="ga-mouth is-talking" cx="40" cy="50" rx="5" ry="4" fill="#7a3b3b" />;
-    if (exp === 'happy') return <path d="M32 49 q8 8 16 0" stroke="#7a3b3b" strokeWidth="2.6" fill="none" strokeLinecap="round" />;
-    if (exp === 'surprised') return <ellipse cx="40" cy="51" rx="3.5" ry="4.5" fill="#7a3b3b" />;
-    if (exp === 'wink') return <path d="M33 50 q7 5 14 0" stroke="#7a3b3b" strokeWidth="2.4" fill="none" strokeLinecap="round" />;
-    if (exp === 'thinking') return <path d="M34 51 q6 -2 12 0" stroke="#7a3b3b" strokeWidth="2.2" fill="none" strokeLinecap="round" />;
-    return <ellipse className="ga-mouth" cx="40" cy="50" rx="4.5" ry="1.6" fill="#7a3b3b" />;
+    if (exp === 'talking') return <ellipse className="ga-mouth is-talking" cx={cx} cy={mouthY} rx="4" ry="3.4" fill="#8a4a48" />;
+    if (exp === 'happy') return <path d={`M${cx - 8} ${mouthY - 1} q8 8 16 0`} stroke="#8a4a48" strokeWidth="2.4" fill="none" strokeLinecap="round" />;
+    if (exp === 'surprised') return <ellipse cx={cx} cy={mouthY + 1} rx="3" ry="4" fill="#8a4a48" />;
+    if (exp === 'wink') return <path d={`M${cx - 7} ${mouthY} q7 5 14 0`} stroke="#8a4a48" strokeWidth="2.2" fill="none" strokeLinecap="round" />;
+    if (exp === 'thinking') return <path d={`M${cx - 6} ${mouthY + 1} q6 -2 12 0`} stroke="#8a4a48" strokeWidth="2" fill="none" strokeLinecap="round" />;
+    return <path className="ga-mouth" d={`M${cx - 5} ${mouthY} q5 3 10 0`} stroke="#8a4a48" strokeWidth="2" fill="none" strokeLinecap="round" />;
   };
 
   return (
-    <svg viewBox="0 0 80 96" className={`ga-char ga-exp-${exp}`} aria-hidden>
-      {/* body / shirt */}
-      <path d="M16 96 C16 74 26 66 40 66 C54 66 64 74 64 96 Z" fill={accent} />
-      <path d="M40 66 L33 96 L47 96 Z" fill="rgba(255,255,255,0.18)" />
-      {/* neck */}
-      <rect x="34" y="56" width="12" height="12" rx="5" fill={skin} />
-      {/* head */}
-      <circle cx="40" cy="40" r="22" fill={skin} />
-      {/* hair */}
+    <svg viewBox="0 0 100 220" className={`ga-char ga-exp-${exp}`} aria-hidden>
+      <defs>
+        <linearGradient id="ga-shirt" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor={accent} />
+          <stop offset="1" stopColor={accentDk} />
+        </linearGradient>
+        <linearGradient id="ga-legs" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor={pants} />
+          <stop offset="1" stopColor={pantsDk} />
+        </linearGradient>
+      </defs>
+
+      {/* ground shadow */}
+      <ellipse cx={cx} cy="212" rx="26" ry="5" fill="rgba(0,0,0,0.28)" />
+
+      {/* ── LEGS ── */}
       {gender === 'female' ? (
-        <path d="M18 40 C16 18 64 18 62 40 C62 30 58 22 40 22 C22 22 18 30 18 40 Z M18 40 C14 50 16 60 18 62 L24 60 C20 52 20 46 20 42 Z M62 40 C66 50 64 60 62 62 L56 60 C60 52 60 46 60 42 Z" fill={hair} />
+        // skirt + legs
+        <>
+          <path d="M34 118 L28 150 L72 150 L66 118 Z" fill="url(#ga-legs)" />
+          <rect x="42" y="150" width="7" height="46" rx="3.5" fill={skin} />
+          <rect x="51" y="150" width="7" height="46" rx="3.5" fill={skinShade} />
+        </>
       ) : (
-        <path d="M18 40 C16 20 64 20 62 40 C60 28 54 22 40 22 C26 22 20 28 18 40 Z" fill={hair} />
+        <>
+          <rect x="40" y="120" width="9" height="80" rx="4.5" fill="url(#ga-legs)" />
+          <rect x="51" y="120" width="9" height="80" rx="4.5" fill={pantsDk} />
+        </>
       )}
+      {/* shoes */}
+      <path d="M38 198 q-2 6 3 6 h9 v-8 h-12 Z" fill={shoe} />
+      <path d="M50 198 h9 q5 0 3 6 h-12 Z" fill="#332a22" />
+
+      {/* ── ARMS (behind torso) ── */}
+      <rect x="20" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(8 24 86)" />
+      <rect x="71" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(-8 76 86)" />
+      {/* hands */}
+      <circle cx="20" cy="132" r="5.5" fill={skin} />
+      <circle cx="80" cy="132" r="5.5" fill={skin} />
+
+      {/* ── TORSO / shirt ── */}
+      <path d="M32 88 C32 74 40 66 50 66 C60 66 68 74 68 88 L70 122 C70 126 66 128 62 128 L38 128 C34 128 30 126 30 122 Z"
+            fill="url(#ga-shirt)" />
+      {/* shirt fold highlight */}
+      <path d="M50 68 L45 126 L55 126 Z" fill="rgba(255,255,255,0.14)" />
+      {/* collar */}
+      <path d="M42 68 L50 78 L58 68 Z" fill={accentDk} />
+
+      {/* ── NECK ── */}
+      <path d="M44 58 h12 v9 q-6 4 -12 0 Z" fill={skinShade} />
+      <rect x="44" y="56" width="12" height="7" rx="3" fill={skin} />
+
+      {/* ── HEAD ── */}
+      {/* back hair / shadow behind head */}
+      {gender === 'female' && (
+        <path d="M28 34 C24 14 76 14 72 34 C74 54 70 66 66 70 L62 60 C68 52 68 44 68 40 L32 40 C32 44 32 52 38 60 L34 70 C30 66 26 54 28 34 Z" fill={hair} />
+      )}
+      {/* face — oval, not a perfect circle */}
+      <ellipse cx={cx} cy="38" rx="19" ry="21" fill={skin} />
+      {/* jaw / cheek shading on one side */}
+      <path d="M50 15 A19 21 0 0 1 50 59 Q60 50 60 38 Q60 24 50 15 Z" fill={skinShade} opacity="0.35" />
+      {/* ears */}
+      <ellipse cx="31" cy="39" rx="3.5" ry="5" fill={skin} />
+      <ellipse cx="69" cy="39" rx="3.5" ry="5" fill={skinShade} />
+
+      {/* hair (front) — a proper high hairline that frames the forehead but
+          never dips over the eyes (that made it look like a mask). */}
+      {gender === 'female' ? (
+        <path d="M30 40 C28 15 72 15 70 40 C70 28 63 22 50 22 C37 22 30 28 30 40 Z" fill={hair} />
+      ) : (
+        // short crop: cap of hair sitting on top of the head, hairline ~y26
+        <path d="M31 33 C31 17 69 17 69 33 C69 27 62 23 50 23 C38 23 31 27 31 33 Z" fill={hair} />
+      )}
+      {/* hair highlight */}
+      <path d="M40 21 Q50 18 60 21" stroke={hairHi} strokeWidth="2" fill="none" strokeLinecap="round" opacity="0.7" />
+
+      {/* nose */}
+      <path d={`M${cx} 36 q-2 5 -1 6 q1 1.5 2 0`} stroke={skinShade} strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+
       {/* eyes (blink wrapper) */}
-      <g className="ga-eyes"><Eye cx={32} /><Eye cx={48} /></g>
+      <g className="ga-eyes"><Eye ex={42} /><Eye ex={58} wink /></g>
       {/* eyebrows */}
-      <rect x="28" y={browY} width="8" height="2" rx="1" fill={hair} transform={`rotate(${browTilt} 32 ${browY})`} />
-      <rect x="44" y={browY} width="8" height="2" rx="1" fill={hair} transform={`rotate(${-browTilt} 48 ${browY})`} />
+      <path d={`M38 ${browY} q4 -2 8 0`} stroke={hair} strokeWidth="1.8" fill="none" strokeLinecap="round" transform={`rotate(${browTilt} 42 ${browY})`} />
+      <path d={`M54 ${browY} q4 -2 8 0`} stroke={hair} strokeWidth="1.8" fill="none" strokeLinecap="round" transform={`rotate(${-browTilt} 58 ${browY})`} />
+
       {/* mouth */}
       {mouth()}
       {/* cheeks (flush brighter when happy) */}
-      <circle cx="28" cy="47" r="3" fill={accent} opacity={exp === 'happy' ? 0.5 : 0.25} />
-      <circle cx="52" cy="47" r="3" fill={accent} opacity={exp === 'happy' ? 0.5 : 0.25} />
+      <ellipse cx="38" cy="43" rx="3.2" ry="2.4" fill="#e8907f" opacity={exp === 'happy' ? 0.55 : 0.28} />
+      <ellipse cx="62" cy="43" rx="3.2" ry="2.4" fill="#e8907f" opacity={exp === 'happy' ? 0.55 : 0.28} />
+
       {/* thinking bubble dots */}
       {exp === 'thinking' && (
         <g className="ga-think" fill="#cfc8bd">
-          <circle cx="62" cy="26" r="1.6" /><circle cx="67" cy="22" r="2.2" /><circle cx="73" cy="17" r="2.8" />
+          <circle cx="74" cy="24" r="1.6" /><circle cx="80" cy="19" r="2.2" /><circle cx="87" cy="13" r="2.8" />
         </g>
       )}
     </svg>
@@ -194,7 +289,7 @@ export default function GuideAvatar({ userName }) {
     try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; }
   });
   const [gender, setGender] = useState(() => guessGender(userName));
-  const [pos, setPos] = useState({ x: window.innerWidth - 96, y: window.innerHeight - 140 });
+  const [pos, setPos] = useState({ x: window.innerWidth - 90, y: window.innerHeight - 200 });
   const [dragging, setDragging] = useState(false);
   const [pointMode, setPointMode] = useState(false); // click-to-explain armed
   const [talking, setTalking] = useState(false);
