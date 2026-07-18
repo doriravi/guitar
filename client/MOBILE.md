@@ -104,7 +104,7 @@ npx cap open ios
 
 In Xcode:
 1. Select the **App** target → **Signing & Capabilities** → pick your Team
-   (Apple Developer account). The bundle ID is `com.fretfit.app`.
+   (Apple Developer account). The bundle ID is `com.music.fretfit`.
 2. **Product → Archive** → **Distribute App** → choose App Store Connect /
    TestFlight or Ad-Hoc → export the **`.ipa`**.
 
@@ -118,7 +118,7 @@ The `ios/` project in this repo is ready to open and archive on a Mac.
 | | Value |
 |---|---|
 | App name | **FretFit** |
-| App ID / bundle ID | **`com.fretfit.app`** |
+| App ID / bundle ID | **`com.music.fretfit`** (Android `applicationId` + iOS bundle ID — the permanent store identity) |
 | Web bundle | `dist/` (Vite build) |
 | Icons / splash | generated from `assets/icon.png` via `npm run cap:assets` |
 
