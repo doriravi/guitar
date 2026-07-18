@@ -55,3 +55,6 @@ projects_summary.csv
 # IntelliJ per-developer DB connections / stray sqlite
 server/.idea/dataSources.xml
 server/identifier.sqlite
+
+# Obsidian editor workspace (machine-local)
+.obsidian/
