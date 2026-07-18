@@ -38,8 +38,10 @@ const noteName = (s, f) => NOTE_NAMES[(OPEN_STRING_MIDI[s] + f) % 12];
 const cellKey = (s, f) => `${s}:${f}`;
 
 export default function GameFretboard({
-  box,                 // { minFret, maxFret }
-  scaleCells = [],     // [{string,fret,pc,degree}] — the box's scale notes (cyan)
+  box,                 // { minFret, maxFret } — the scored practice position
+  viewMin,             // first drawn fret (defaults to the box) — widen to show the whole neck
+  viewMax,             // last drawn fret (defaults to the box)
+  scaleCells = [],     // [{string,fret,pc,degree,inBox?}] — scale notes (cyan; faint when inBox===false)
   targetCell = null,   // {string,fret} — the one the game is asking for NOW (play)
   twinCells = [],      // [{string,fret}] — same-pitch twins of the target (dashed)
   liveSet = null,      // Set<pc> currently sounding (soft rings), or null
@@ -48,8 +50,9 @@ export default function GameFretboard({
   showLabels = true,   // Note-Hunt fades labels; play/scale mode shows them
   lang,                // reserved for future i18n of the empty-state
 }) {
-  const minF = box?.minFret ?? 0;
-  const maxF = box?.maxFret ?? 12;
+  // Drawn range: the whole neck when viewMin/Max are given, else just the box.
+  const minF = viewMin ?? box?.minFret ?? 0;
+  const maxF = viewMax ?? box?.maxFret ?? 12;
   const frets = [];
   for (let f = minF; f <= maxF; f++) frets.push(f);
 
@@ -81,6 +84,18 @@ export default function GameFretboard({
   const planks = [];
   for (let x = nutX + 5; x < W - NECK.padR; x += 9) planks.push(x);
 
+  // The practice-box outline (only worth drawing when the view is wider than the
+  // box — i.e. we're showing the whole neck around it).
+  const boxOutline = (() => {
+    if (!box) return null;
+    const wider = minF < box.minFret || maxF > box.maxFret;
+    if (!wider) return null;
+    // left edge = the wire just before the box's first fret (nut if box starts at 1)
+    const leftX = box.minFret <= 1 ? nutX : wireRightX(box.minFret - 1);
+    const rightX = wireRightX(Math.min(box.maxFret, maxF));
+    return { x: leftX, w: rightX - leftX };
+  })();
+
   // Map a cell to its dot style + badge for the current mode/state.
   function cellStyle(s, f) {
     const k = cellKey(s, f);
@@ -92,7 +107,7 @@ export default function GameFretboard({
     const review = reviewAt.get(k);
 
     let fill = 'transparent', stroke = 'transparent', textFill = 'var(--color-ink-faint)';
-    let strokeW = 1, dash = null, glow = null, pulse = false, badge = null, show = false, label = null;
+    let strokeW = 1, dash = null, glow = null, pulse = false, badge = null, show = false, label = null, faint = false;
 
     if (mode === 'review' && review) {
       const ok = review.hit;
@@ -110,10 +125,15 @@ export default function GameFretboard({
       fill = 'rgba(91,91,214,0.18)'; stroke = '#5b5bd6'; strokeW = 2.5; dash = '3 3';
       textFill = '#9a9af0'; show = true;
     } else if (scaleNote) {
-      fill = 'rgba(56,189,248,0.2)'; stroke = 'rgba(56,189,248,0.5)'; textFill = '#7dd3fc';
-      show = true; label = scaleNote.degree;
+      // In-box scale notes are bright cyan; out-of-box ones are faint context
+      // pips so the whole neck reads without competing with the practice box.
+      const outOfBox = scaleNote.inBox === false;
+      fill = outOfBox ? 'rgba(56,189,248,0.06)' : 'rgba(56,189,248,0.2)';
+      stroke = outOfBox ? 'rgba(56,189,248,0.22)' : 'rgba(56,189,248,0.5)';
+      textFill = outOfBox ? 'rgba(125,211,252,0.45)' : '#7dd3fc';
+      show = true; label = scaleNote.degree; faint = outOfBox;
     }
-    return { fill, stroke, textFill, strokeW, dash, glow, pulse, badge, show, label,
+    return { fill, stroke, textFill, strokeW, dash, glow, pulse, badge, show, label, faint,
       name: noteName(s, f) };
   }
 
@@ -188,6 +208,13 @@ export default function GameFretboard({
             stroke={STRING_COLORS[s]} strokeWidth={STRING_GAUGE[s]} strokeLinecap="round" opacity="0.92" />
         ))}
 
+        {/* practice-box outline — highlights the scored position on the full neck */}
+        {boxOutline && (
+          <rect x={boxOutline.x} y={boardTop + 2} width={boxOutline.w} height={boardH - 4}
+            rx="5" fill="rgba(224,169,58,0.06)" stroke="rgba(224,169,58,0.5)"
+            strokeWidth="1.4" strokeDasharray="5 3" style={{ pointerEvents: 'none' }} />
+        )}
+
         {/* inlay row BELOW the neck */}
         {fretted.filter((f) => INLAY_FRETS.has(f) || DOUBLE_INLAY.has(f)).map((f) => (
           DOUBLE_INLAY.has(f) ? (
@@ -221,21 +248,22 @@ export default function GameFretboard({
           const st = cellStyle(s, f);
           if (!st.show) return null;
           const cx = colX(f), cy = rowY(i);
+          const r = st.faint ? NECK.dotR - 4 : NECK.dotR;   // context pips are smaller
           return (
             <g key={cellKey(s, f)} className={st.pulse ? 'gfb-pulse' : undefined}
               style={st.pulse ? { transformOrigin: `${cx}px ${cy}px` } : undefined}>
               {st.glow && <circle cx={cx} cy={cy} r={NECK.dotR + 2} fill={st.glow} opacity="0.5" />}
-              <circle cx={cx} cy={cy} r={NECK.dotR} fill={st.fill}
+              <circle cx={cx} cy={cy} r={r} fill={st.fill}
                 stroke={st.stroke} strokeWidth={st.strokeW} strokeDasharray={st.dash || undefined}>
                 <title>{`${st.name}${st.label ? ` · ${st.label}` : ''}`}</title>
               </circle>
-              {(showLabels || st.badge || targetK === cellKey(s, f)) && (
+              {!st.faint && (showLabels || st.badge || targetK === cellKey(s, f)) && (
                 <text x={cx} y={cy + 3.5} fontSize="10" fontWeight="600"
                   textAnchor="middle" fill={st.textFill} style={{ pointerEvents: 'none' }}>
                   {st.badge || st.name}
                 </text>
               )}
-              {st.label && showLabels && !st.badge && (
+              {st.label && showLabels && !st.badge && !st.faint && (
                 <text x={cx + NECK.dotR - 2} y={cy - NECK.dotR + 5} fontSize="7"
                   fontWeight="700" textAnchor="middle" fill={st.textFill} opacity="0.8"
                   style={{ pointerEvents: 'none' }}>{st.label}</text>

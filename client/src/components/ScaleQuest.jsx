@@ -57,11 +57,19 @@ export default function ScaleQuest({ lang, onClose }) {
   const scaleLabel = `${NOTE_NAMES[root]} ${SCALE_LABELS[scaleId] || scaleId}`;
   const mastery = useMemo(() => scaleMastery(scaleLabel), [scaleLabel, game.result]);
 
-  // The box's scale cells, for the board underlay.
-  const scaleCells = useMemo(
-    () => (box ? scalePositions(root, scaleId, { minFret: box.minFret, maxFret: box.maxFret }) || [] : []),
-    [root, scaleId, box],
-  );
+  // Scale cells for the board underlay. We draw the WHOLE neck (0..NECK_MAX) so
+  // the player sees the full fretboard, but flag which notes fall inside the
+  // practice box: in-box notes render bright, the rest as faint context pips.
+  // (The game still scores the box — this only widens what's DRAWN.)
+  const NECK_MAX = 15;
+  const scaleCells = useMemo(() => {
+    if (!box) return [];
+    const all = scalePositions(root, scaleId, { minFret: 0, maxFret: NECK_MAX }) || [];
+    return all.map((c) => ({
+      ...c,
+      inBox: c.fret >= box.minFret && c.fret <= box.maxFret,
+    }));
+  }, [root, scaleId, box]);
 
   const begin = () => {
     if (!box) return;
@@ -188,6 +196,8 @@ export default function ScaleQuest({ lang, onClose }) {
           ) : (
             <GameFretboard
               box={box}
+              viewMin={0}
+              viewMax={NECK_MAX}
               scaleCells={scaleCells}
               targetCell={t ? { string: t.string, fret: t.fret } : null}
               twinCells={twins}
