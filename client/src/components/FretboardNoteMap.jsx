@@ -84,6 +84,166 @@ function noteAt(string, fret) {
   return NOTE_NAMES[(OPEN_STRING_MIDI[string] + fret) % 12];
 }
 
+// ─── Realistic SVG neck ───────────────────────────────────────────────────────
+// Draws the note map as an actual guitar fingerboard (wood + fret wires + nut +
+// strings + inlay dots), matching the Fretboard Measures visual language, instead
+// of a grid of cells. It is a PURE RENDERER: it consumes the same lookup maps the
+// old grid did (toneAt / scaleAt / arpAt keyed "s:f", liveSet of pitch classes)
+// so all the improv/scale/arpeggio logic is untouched — only the pixels changed.
+//
+// Layout: high-e (string 5) on top → low-E (0) on the bottom (tab convention).
+// Fret 0 is the "open" column drawn just left of the nut; frets 1..FRETS follow.
+const NECK = {
+  padL: 22,     // room for the open-string letter labels
+  padR: 8,
+  padT: 16,     // room for the fret numbers on top
+  padB: 6,
+  fretW: 46,    // horizontal px per fret cell
+  stringGap: 30, // vertical px between strings
+  dotR: 12,     // note dot radius
+};
+const STRING_GAUGE = [3.0, 2.6, 2.2, 1.8, 1.5, 1.2]; // low-E thickest → high-e thin
+const INLAY_FRETS = new Set([3, 5, 7, 9]);           // single dots
+const DOUBLE_INLAY = 12;                              // twin dots at the octave
+
+// Colour a note dot exactly as the old cells did (arpeggio > tone > scale > base;
+// playing-now = white ring; dimmed when a chord is lit). Returns SVG props.
+function dotStyle({ arpNote, tone, scaleNote, open, isSharp, chordLit, nowPlaying }) {
+  let fill, stroke, textFill, glow = null, strokeW = 1, opacity = 1;
+  if (arpNote) {
+    fill = 'rgba(217,70,239,0.9)'; stroke = arpNote.isRoot ? '#fff' : '#f0abfc';
+    textFill = '#fff'; glow = 'rgba(217,70,239,0.7)';
+  } else if (tone) {
+    fill = 'var(--color-brand, #e9c46a)'; stroke = '#f0cf7a';
+    textFill = '#3a2708'; glow = 'rgba(233,196,106,0.6)';
+  } else if (scaleNote) {
+    fill = 'rgba(56,189,248,0.22)'; stroke = 'rgba(56,189,248,0.6)'; textFill = '#7dd3fc';
+  } else {
+    // Base note pip: naturals brighter than sharps; sits on the wood.
+    fill = open ? 'rgba(201,169,110,0.20)' : 'rgba(20,14,6,0.55)';
+    stroke = 'rgba(201,169,110,0.35)';
+    textFill = isSharp ? 'rgba(233,225,205,0.5)' : 'rgba(233,225,205,0.9)';
+    opacity = chordLit ? 0.3 : 1;
+  }
+  if (nowPlaying) { stroke = '#fff'; strokeW = 2.5; glow = 'rgba(255,255,255,0.85)'; opacity = 1; }
+  return { fill, stroke, textFill, glow, strokeW, opacity };
+}
+
+function SvgNeck({ frets, toneAt, scaleAt, arpAt, liveSet, chordLit, map, degreeTitle }) {
+  const rows = [5, 4, 3, 2, 1, 0]; // high-e top → low-E bottom
+  const n = frets.length;          // FRETS + 1 columns (0..FRETS)
+  const W = NECK.padL + NECK.padR + n * NECK.fretW;
+  const H = NECK.padT + NECK.padB + rows.length * NECK.stringGap;
+  // x for the CENTRE of a fret column c (0 = open, 1 = 1st fret, …)
+  const colX = (c) => NECK.padL + c * NECK.fretW + NECK.fretW / 2;
+  // x of the fret WIRE to the left of column c (nut sits left of col 1)
+  const wireX = (c) => NECK.padL + c * NECK.fretW;
+  const rowY = (i) => NECK.padT + i * NECK.stringGap + NECK.stringGap / 2;
+  const boardX = wireX(1);                       // fingerboard starts at the nut
+  const boardW = W - NECK.padR - boardX;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W, display: 'block' }}
+      role="img" aria-label="Guitar fretboard note map">
+      <defs>
+        <linearGradient id="nm-wood" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#3a2817" />
+          <stop offset="1" stopColor="#241809" />
+        </linearGradient>
+      </defs>
+
+      {/* fingerboard */}
+      <rect x={boardX} y={NECK.padT} width={boardW} height={rows.length * NECK.stringGap}
+        rx="4" fill="url(#nm-wood)" stroke="#5a4326" strokeWidth="1" />
+
+      {/* fret numbers (top) */}
+      {frets.map((f) => (
+        <text key={`fn${f}`} x={colX(f)} y={NECK.padT - 5} fontSize="10"
+          textAnchor="middle" fill="var(--color-ink-faint)">{f}</text>
+      ))}
+
+      {/* inlay position dots (behind strings) */}
+      {frets.filter((f) => INLAY_FRETS.has(f) || f === DOUBLE_INLAY).map((f) => {
+        const midY = NECK.padT + (rows.length * NECK.stringGap) / 2;
+        return f === DOUBLE_INLAY ? (
+          <g key={`in${f}`} fill="#c9a96e" opacity="0.5">
+            <circle cx={colX(f)} cy={midY - NECK.stringGap} r="4" />
+            <circle cx={colX(f)} cy={midY + NECK.stringGap} r="4" />
+          </g>
+        ) : (
+          <circle key={`in${f}`} cx={colX(f)} cy={midY} r="4" fill="#c9a96e" opacity="0.45" />
+        );
+      })}
+
+      {/* fret wires (nut is the bright, thick one at col 1's left edge) */}
+      {frets.map((f) => {
+        if (f === 0) return null;                 // no wire left of the open column
+        const isNut = f === 1;
+        const x = wireX(f);
+        return (
+          <line key={`w${f}`} x1={x} y1={NECK.padT} x2={x} y2={NECK.padT + rows.length * NECK.stringGap}
+            stroke={isNut ? '#e8dcc8' : '#9a9a9a'} strokeWidth={isNut ? 3 : 1.2}
+            strokeLinecap="round" />
+        );
+      })}
+
+      {/* strings (thicker for the low strings) */}
+      {rows.map((s, i) => (
+        <line key={`s${s}`} x1={boardX} y1={rowY(i)} x2={W - NECK.padR} y2={rowY(i)}
+          stroke="#d8d2c4" strokeWidth={STRING_GAUGE[s]} strokeLinecap="round" opacity="0.8" />
+      ))}
+
+      {/* open-string letter labels (left gutter) */}
+      {rows.map((s, i) => (
+        <text key={`sl${s}`} x={NECK.padL - 8} y={rowY(i) + 3.5} fontSize="11"
+          fontWeight="700" textAnchor="end" fill="var(--color-ink-muted)">
+          {STRING_LABELS[s]}
+        </text>
+      ))}
+
+      {/* note dots */}
+      {rows.map((s, i) => frets.map((f) => {
+        const k = `${s}:${f}`;
+        const pc = (OPEN_STRING_MIDI[s] + f) % 12;
+        const tone = toneAt.get(k);
+        const scaleNote = scaleAt.get(k);
+        const arpNote = arpAt.get(k);
+        const nowPlaying = liveSet.has(pc);
+        const lit = arpNote || tone || scaleNote;
+        // Hide plain base pips entirely while a chord is lit? No — dim them, same
+        // as the old grid, so the neck still reads as a neck.
+        const st = dotStyle({
+          arpNote, tone, scaleNote,
+          open: f === 0, isSharp: IS_SHARP(pc), chordLit: !!map, nowPlaying,
+        });
+        const cx = colX(f), cy = rowY(i);
+        return (
+          <g key={k} opacity={st.opacity}>
+            {st.glow && (
+              <circle cx={cx} cy={cy} r={NECK.dotR + 2} fill={st.glow} opacity="0.5" />
+            )}
+            <circle cx={cx} cy={cy} r={NECK.dotR} fill={st.fill}
+              stroke={st.stroke} strokeWidth={st.strokeW}>
+              <title>{degreeTitle(s, f, lit, arpNote, tone)}</title>
+            </circle>
+            <text x={cx} y={cy + 3.5} fontSize="10" fontWeight="600"
+              textAnchor="middle" fill={st.textFill} style={{ pointerEvents: 'none' }}>
+              {noteAt(s, f)}
+            </text>
+            {(arpNote || tone) && (
+              <text x={cx + NECK.dotR - 2} y={cy - NECK.dotR + 5} fontSize="7"
+                fontWeight="700" textAnchor="middle" fill={st.textFill}
+                opacity="0.8" style={{ pointerEvents: 'none' }}>
+                {(arpNote || tone).degree}
+              </text>
+            )}
+          </g>
+        );
+      }))}
+    </svg>
+  );
+}
+
 export default function FretboardNoteMap({ lang }) {
   const tr = useT(lang);
   const mic = useMic();
@@ -466,103 +626,20 @@ export default function FretboardNoteMap({ lang }) {
               'Every note from the nut to the 12th fret. At the 12th the notes repeat — it’s the same as the open string, one octave up.')}
         </p>
 
-        <div style={{ minWidth: '34rem' }}>
-          {/* Fret-number header */}
-          <div className="flex items-center mb-1">
-            <div style={{ width: '2rem' }} />
-            {Array.from({ length: FRETS + 1 }, (_, f) => (
-              <div key={f} className="flex-1 text-center text-[10px]" style={{ color: 'var(--color-ink-faint)' }}>
-                {f}
-              </div>
-            ))}
-          </div>
-
-          {/* high-e (5) at top → low-E (0) at the bottom, like a tab view */}
-          {[5, 4, 3, 2, 1, 0].map((s) => (
-            <div key={s} className="flex items-center mb-1">
-              <div className="text-xs font-bold text-center" style={{ width: '2rem', color: 'var(--color-ink-muted)' }}>
-                {STRING_LABELS[s]}
-              </div>
-              {Array.from({ length: FRETS + 1 }, (_, f) => {
-                const pc = (OPEN_STRING_MIDI[s] + f) % 12;
-                const open = f === 0;
-                const tone = toneAt.get(key(s, f));      // a chord tone: landing note
-                const scaleNote = scaleAt.get(key(s, f)); // in the improv scale
-                const arpNote = arpAt.get(key(s, f));    // in the chosen chord's arpeggio
-                // Is this note SOUNDING right now? (every position of the class —
-                // audio can't say which one you actually fretted).
-                const nowPlaying = liveSet.has(pc);
-                // Arpeggio wins, then chord tones, then scale — most-focused first.
-                const lit = arpNote || tone || scaleNote;
-                let style;
-                if (arpNote) {
-                  // Magenta — the chord arpeggio, distinct from the cyan scale.
-                  style = {
-                    background: 'rgba(217,70,239,0.85)',
-                    color: '#fff',
-                    border: `1px solid ${arpNote.isRoot ? '#fff' : '#f0abfc'}`,
-                    boxShadow: '0 0 10px rgba(217,70,239,0.6)',
-                  };
-                } else if (tone) {
-                  style = {
-                    background: 'var(--color-brand, #e9c46a)',
-                    color: '#3a2708',
-                    border: '1px solid #f0cf7a',
-                    boxShadow: '0 0 10px rgba(233,196,106,0.5)',
-                  };
-                } else if (scaleNote) {
-                  style = {
-                    background: 'rgba(56,189,248,0.18)',
-                    color: '#7dd3fc',
-                    border: '1px solid rgba(56,189,248,0.45)',
-                  };
-                } else {
-                  style = {
-                    background: open
-                      ? 'var(--color-surface-650)'
-                      : IS_SHARP(pc) ? 'var(--color-surface-800)' : 'var(--color-surface-700)',
-                    // Dim the non-scale notes while a chord is lit, so the shape
-                    // you can actually play reads at a glance.
-                    color: map
-                      ? 'var(--color-ink-faint)'
-                      : IS_SHARP(pc) ? 'var(--color-ink-faint)' : 'var(--color-ink)',
-                    border: '1px solid var(--color-surface-650)',
-                    opacity: map ? 0.35 : 1,
-                  };
-                }
-                // Live overlay: a bright white ring + full opacity ON TOP of the
-                // base colour, so a sounding note reads as "playing now" without
-                // losing whether it's a chord tone or a scale note underneath.
-                if (nowPlaying) {
-                  style = {
-                    ...style,
-                    opacity: 1,
-                    border: '2px solid #fff',
-                    boxShadow: '0 0 12px 2px rgba(255,255,255,0.7)',
-                  };
-                }
-                return (
-                  <div key={f} className="flex-1 px-0.5">
-                    <div className="text-center rounded text-[11px] font-semibold py-1"
-                      style={style}
-                      title={lit
-                        ? `${noteAt(s, f)} — ${lit.degree}${arpNote ? ` (${map.arpeggio.name} arpeggio)` : tone ? ' (chord tone)' : ''}`
-                        : noteAt(s, f)}>
-                      {noteAt(s, f)}
-                      {/* Degree badge: the arpeggio's degree if lit as an
-                          arpeggio note, else the chord-tone degree. */}
-                      {(arpNote || tone) && (
-                        <span className="ml-0.5 text-[8px] font-bold" style={{ opacity: 0.75 }}>
-                          {(arpNote || tone).degree}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        {/* Realistic SVG neck — same data (chord tones / scale / arpeggio /
+            playing-now), drawn as an actual fretboard instead of a cell grid. */}
+        <SvgNeck
+          frets={Array.from({ length: FRETS + 1 }, (_, f) => f)}
+          toneAt={toneAt}
+          scaleAt={scaleAt}
+          arpAt={arpAt}
+          liveSet={liveSet}
+          map={map}
+          degreeTitle={(s, f, lit, arpNote, tone) =>
+            lit
+              ? `${noteAt(s, f)} — ${lit.degree}${arpNote ? ` (${map.arpeggio.name} arpeggio)` : tone ? ' (chord tone)' : ''}`
+              : noteAt(s, f)}
+        />
 
         {map ? (
           <div className="flex items-center gap-4 mt-3 text-[11px] flex-wrap" style={{ color: 'var(--color-ink-faint)' }}>
