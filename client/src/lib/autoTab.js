@@ -9,7 +9,9 @@
 // the lowest-reach shape/substitute your hand can play — so the two can sit side
 // by side.
 //
-// Pure JS: no React, no audio, no network. Consumed by SongAutoTab.jsx.
+// Pure JS: no React, no audio, no network. `buildSimplifiedAutoTab` powers the
+// "Simplify all" toggle in the Progressions lyrics view (swaps each chord to its
+// easiest shape in place); `buildAutoTab` is retained as the plain generator.
 
 import { resolveChordCells } from './songTimeline';
 import { easiestVoicing } from './voicingLookup';

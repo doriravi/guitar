@@ -23,7 +23,6 @@ import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
-import SongAutoTab from './SongAutoTab';
 import { buildSimplifiedAutoTab } from '../lib/autoTab';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
@@ -420,7 +419,7 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
       style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
 
       {/* Song controls row — play + one "Simplify all" toggle that eases every
-          chord across BOTH the auto-tab AND the lyrics view below, in place. */}
+          chord across the lyrics view below, in place. */}
       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
         <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
         {song && (
@@ -430,16 +429,12 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
             style={simplified
               ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
               : { background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
-            title="Rewrite every chord as the easiest shape for your hand — updates the tab and the lyrics chords"
+            title="Rewrite every chord over the lyrics as the easiest shape for your hand"
           >
             {simplified ? '✓ Simplified' : '✨ Simplify all'}
           </button>
         )}
       </div>
-
-      {/* Auto tab — the WHOLE song as ONE tab staff generated from its chords;
-          "Simplify all" swaps it (and the lyrics) to the eased chords in place. */}
-      {song && <SongAutoTab song={song} simplified={simplified} profile={soloProfile} />}
 
       {status === 'loading' && (
         <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>Loading lyrics…</div>
