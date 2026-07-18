@@ -68,3 +68,4 @@ FretFit-*.apk
 
 # Editor scratch canvases (Obsidian/JSONCanvas) — never commit
 *.canvas
+*.base
