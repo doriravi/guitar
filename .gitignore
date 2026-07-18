@@ -58,3 +58,7 @@ server/identifier.sqlite
 
 # Obsidian editor workspace (machine-local)
 .obsidian/
+
+# Built Android installers (share via a link, never commit)
+*.apk
+FretFit-*.apk
