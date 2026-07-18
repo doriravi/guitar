@@ -92,16 +92,3 @@ export function buildAttemptAdvice(verdict, targetName) {
     mastered: verdict?.status === 'both',
   };
 }
-
-/**
- * A compact context object describing the attempt, suitable for POSTing to the
- * AI advisor (advise.ask) to enrich the local summary. Kept small and PII-free.
- */
-export function adviceContextForAI(verdict, targetName) {
-  return {
-    feature: 'verified-practice',
-    targetChord: targetName,
-    result: verdict?.status,
-    perString: (verdict?.perString || []).map((p) => ({ string: p.label, shape: p.cam, sound: p.mic })),
-  };
-}

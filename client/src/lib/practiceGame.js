@@ -282,14 +282,6 @@ export function windowScorer(target, cfg, prevPcs = null) {
   };
 }
 
-/** Batch equivalent of the live scorer (the manager-contract entry point). */
-export function scoreChordWindow(detections, targetWindow, cfg, prevPcs = null) {
-  const s = windowScorer(targetWindow, cfg, prevPcs);
-  for (const d of detections || []) s.add(d.peaks, d.rms, d.relSec ?? 0);
-  const r = s.final();
-  return { quality: r.quality, points: GRADE_POINTS[r.quality], detail: r };
-}
-
 // ── Session scoring ───────────────────────────────────────────────────────────
 
 export const GRADE_POINTS = { perfect: 100, good: 70, partial: 40, miss: 0, silent: 0 };

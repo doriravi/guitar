@@ -76,32 +76,6 @@ export function detectPitchYIN(buffer, sampleRate) {
 }
 
 /**
- * FFT-based multi-peak detector.
- * Returns an array of { hz, amplitude } for the N strongest peaks,
- * filtered to the guitar range (60–1400 Hz).
- * Uses AnalyserNode's float frequency data.
- */
-export function detectPeaksFFT(freqData, sampleRate, fftSize, maxPeaks = 6) {
-  const binHz = sampleRate / fftSize;
-  const minBin = Math.floor(60 / binHz);
-  const maxBin = Math.ceil(1400 / binHz);
-
-  const peaks = [];
-  for (let i = minBin + 1; i < maxBin - 1; i++) {
-    const v = freqData[i];
-    if (v > freqData[i - 1] && v > freqData[i + 1] && v > -60) {
-      // parabolic interpolation for sub-bin accuracy
-      const shift = (freqData[i + 1] - freqData[i - 1]) /
-        (2 * (2 * freqData[i] - freqData[i - 1] - freqData[i + 1])) || 0;
-      peaks.push({ hz: (i + shift) * binHz, amplitude: v });
-    }
-  }
-
-  peaks.sort((a, b) => b.amplitude - a.amplitude);
-  return peaks.slice(0, maxPeaks);
-}
-
-/**
  * Given a set of detected frequencies, find the best matching chord from CHORDS.
  * Returns { chord, matchScore, stringMatches } where stringMatches is an array
  * of { string, fret, expectedHz, detectedHz, status: 'correct'|'wrong'|'missing' }.
