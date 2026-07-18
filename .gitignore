@@ -65,3 +65,6 @@ FretFit-*.apk
 
 # Vercel (removed — deploys handled by Railway)
 .vercel
+
+# Editor scratch canvases (Obsidian/JSONCanvas) — never commit
+*.canvas
