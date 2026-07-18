@@ -23,6 +23,7 @@ import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
+import SongAutoTab from './SongAutoTab';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
 
@@ -276,7 +277,7 @@ function SongPlayer({ sequence, bpm, onActive }) {
 
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
-function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings }) {
+function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings }) {
   // Imported songs carry their own pasted lyrics+chords → render those directly,
   // no fetch. Otherwise fetch the real lyrics from a public lyrics database.
   const isCustom = Array.isArray(customLyricLines) && customLyricLines.length > 0;
@@ -407,6 +408,10 @@ function LyricsSection({ title, artist, bpm, lineChords, customLyricLines, tabBl
 
       {/* Synth song player — plays the chords through the whole lyrics in order */}
       <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
+
+      {/* Auto tab — the WHOLE song as a tab staff, generated from its chords,
+          with a one-click "Simplify all" that shows the eased version beside it. */}
+      {song && <SongAutoTab song={song} />}
 
       {status === 'loading' && (
         <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>Loading lyrics…</div>
@@ -721,13 +726,41 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
 
   return (
     <div style={{ borderBottom: '1px solid var(--color-surface-750)' }}>
-      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-2 pb-1">
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-2 pb-1"
+        style={lyricsOpen ? {
+          background: 'linear-gradient(180deg, rgba(201,169,110,0.10), transparent)',
+          borderBottom: '1px solid rgba(201,169,110,0.18)',
+          paddingTop: 14, paddingBottom: 12,
+        } : undefined}>
         <div className="min-w-0 flex-1">
-          <span
-            className="font-semibold text-sm"
-            style={{ color: 'var(--color-ink)' }}
-          >{song.title}</span>
-          <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
+          {lyricsOpen ? (
+            // Grand header for the opened song — large display title with a gold
+            // gradient wash, the artist as an eyebrow beneath.
+            <div className="flex flex-col gap-0.5">
+              <span
+                className="font-black leading-none tracking-tight"
+                style={{
+                  fontSize: 'clamp(1.6rem, 4.5vw, 2.6rem)',
+                  background: 'linear-gradient(92deg, var(--color-brand), #f3e2b8 55%, var(--color-brand))',
+                  WebkitBackgroundClip: 'text', backgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent', color: 'transparent',
+                  textWrap: 'balance', filter: 'drop-shadow(0 1px 8px rgba(201,169,110,0.25))',
+                }}
+              >{song.title}</span>
+              <span className="text-xs uppercase tracking-[0.25em] font-semibold"
+                style={{ color: 'var(--color-brand)', opacity: 0.85 }}>
+                {song.artist}
+              </span>
+            </div>
+          ) : (
+            <>
+              <span
+                className="font-semibold text-sm"
+                style={{ color: 'var(--color-ink)' }}
+              >{song.title}</span>
+              <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-xs px-1.5 py-0.5 rounded font-medium hidden sm:inline"
@@ -884,7 +917,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           )}
         </div>
       )}
-      {lyricsOpen && <LyricsSection title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} />}
+      {lyricsOpen && <LyricsSection song={song} title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} />}
     </div>
   );
 }
