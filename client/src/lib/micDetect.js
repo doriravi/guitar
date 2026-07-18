@@ -8,6 +8,7 @@
 import { useRef } from 'react';
 import { matchChord } from './pitchDetect';
 import { CHORDS } from './chords';
+import { recording } from './guideBus';
 
 export const CFG_KEY = 'guitar_detect_config';
 
@@ -94,12 +95,14 @@ export function useMic() {
       analyserRef.current = analyser;
       freqDataRef.current = new Float32Array(analyser.frequencyBinCount);
       timeDataRef.current = new Float32Array(analyser.fftSize);
+      recording(true);   // the mic is live → make the guide dance
     },
     close() {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
       if (audioCtxRef.current) audioCtxRef.current.close();
       streamRef.current = null; audioCtxRef.current = null; analyserRef.current = null;
       freqDataRef.current = null; timeDataRef.current = null;
+      recording(false);
     },
     getRMS() {
       const td = timeDataRef.current;

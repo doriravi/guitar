@@ -1,3 +1,5 @@
+import { musicHeard } from './guideBus';
+
 // Standard tuning frequencies for open strings (E2 A2 D3 G3 B3 E4)
 const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 
@@ -186,6 +188,9 @@ function renderKarplusStrong(ctx, hz, decay) {
 // voice instead of keeping a separate additive-synth pluck.
 export function pluckNylon(ctx, hz, startTime, decay) {
   pluck(ctx, hz, startTime, decay);
+  // Single-string plucks (the interactive strings/fretboard) also count as
+  // "music heard" — a short pulse; repeated plucks keep the guide dancing.
+  musicHeard(Math.min(1500, (Math.max(0.3, decay || 0.6) + 0.4) * 1000));
 }
 function pluck(ctx, hz, startTime, decay) {
   if (!ctx._ks) ctx._ks = new Map();
@@ -280,8 +285,9 @@ export function playProgression(voicings, bpm = 72, onChord, onDone) {
     });
   }
 
+  const totalMs = (lead + voicings.length * chordDur + 0.4) * 1000;
+  musicHeard(totalMs);   // make the guide dance for the length of the progression
   if (onDone) {
-    const totalMs = (lead + voicings.length * chordDur + 0.4) * 1000;
     _timeouts.push(setTimeout(onDone, totalMs));
   }
 }
@@ -356,6 +362,7 @@ export function playEvents(events, onDone) {
   };
   pump();
 
+  musicHeard((lead + endRel) * 1000);   // dance while the clip plays
   if (onDone) {
     _timeouts.push(setTimeout(onDone, (lead + endRel + 0.2) * 1000));
   }
@@ -670,7 +677,9 @@ export function playFanfare({ big = false } = {}) {
   so.connect(sg); sg.connect(ctx._out);
   so.start(st); so.stop(st + 0.65);
 
-  return notes.length * step + 0.65;
+  const dur = notes.length * step + 0.65;
+  musicHeard(dur * 1000);   // dance along with the celebration fanfare
+  return dur;
 }
 
 export function stopAudio() {

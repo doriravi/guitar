@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { explain as explainApi } from '../lib/api';
+import { onGuide } from '../lib/guideBus';
 import './GuideAvatar.css';
 
 // ─── Guess gender from a first name (so the avatar matches the user) ──────────
@@ -88,30 +89,36 @@ function Character({ gender, talking, expression = 'idle' }) {
       {/* ground shadow */}
       <ellipse cx={cx} cy="212" rx="26" ry="5" fill="rgba(0,0,0,0.28)" />
 
-      {/* ── LEGS ── */}
-      {gender === 'female' ? (
-        // skirt + legs
-        <>
-          <path d="M34 118 L28 150 L72 150 L66 118 Z" fill="url(#ga-legs)" />
-          <rect x="42" y="150" width="7" height="46" rx="3.5" fill={skin} />
-          <rect x="51" y="150" width="7" height="46" rx="3.5" fill={skinShade} />
-        </>
-      ) : (
-        <>
-          <rect x="40" y="120" width="9" height="80" rx="4.5" fill="url(#ga-legs)" />
-          <rect x="51" y="120" width="9" height="80" rx="4.5" fill={pantsDk} />
-        </>
-      )}
-      {/* shoes */}
-      <path d="M38 198 q-2 6 3 6 h9 v-8 h-12 Z" fill={shoe} />
-      <path d="M50 198 h9 q5 0 3 6 h-12 Z" fill="#332a22" />
+      {/* ── LEGS + shoes ── grouped so they can do a dance step (.ga-legs-grp). */}
+      <g className="ga-legs-grp" style={{ transformOrigin: '50px 118px' }}>
+        {gender === 'female' ? (
+          // skirt + legs
+          <>
+            <path d="M34 118 L28 150 L72 150 L66 118 Z" fill="url(#ga-legs)" />
+            <rect x="42" y="150" width="7" height="46" rx="3.5" fill={skin} />
+            <rect x="51" y="150" width="7" height="46" rx="3.5" fill={skinShade} />
+          </>
+        ) : (
+          <>
+            <rect x="40" y="120" width="9" height="80" rx="4.5" fill="url(#ga-legs)" />
+            <rect x="51" y="120" width="9" height="80" rx="4.5" fill={pantsDk} />
+          </>
+        )}
+        {/* shoes */}
+        <path d="M38 198 q-2 6 3 6 h9 v-8 h-12 Z" fill={shoe} />
+        <path d="M50 198 h9 q5 0 3 6 h-12 Z" fill="#332a22" />
+      </g>
 
-      {/* ── ARMS (behind torso) ── */}
-      <rect x="20" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(8 24 86)" />
-      <rect x="71" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(-8 76 86)" />
-      {/* hands */}
-      <circle cx="20" cy="132" r="5.5" fill={skin} />
-      <circle cx="80" cy="132" r="5.5" fill={skin} />
+      {/* ── ARMS (behind torso) ── grouped so each can swing from the shoulder
+          while dancing (see .ga-arm-l / .ga-arm-r in the CSS). */}
+      <g className="ga-arm ga-arm-l" style={{ transformOrigin: '24px 88px' }}>
+        <rect x="20" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(8 24 86)" />
+        <circle cx="20" cy="132" r="5.5" fill={skin} />
+      </g>
+      <g className="ga-arm ga-arm-r" style={{ transformOrigin: '76px 88px' }}>
+        <rect x="71" y="86" width="9" height="46" rx="4.5" fill={accentDk} transform="rotate(-8 76 86)" />
+        <circle cx="80" cy="132" r="5.5" fill={skin} />
+      </g>
 
       {/* ── TORSO / shirt ── */}
       <path d="M32 88 C32 74 40 66 50 66 C60 66 68 74 68 88 L70 122 C70 126 66 128 62 128 L38 128 C34 128 30 126 30 122 Z"
@@ -296,6 +303,8 @@ export default function GuideAvatar({ userName }) {
   const [bubble, setBubble] = useState(null);       // { text, x, y }
   const [hint, setHint] = useState(true);           // first-run nudge
   const [expression, setExpression] = useState('happy'); // current funny face
+  const [dancing, setDancing] = useState(false);    // grooving to music / a live recorder
+  const danceRef = useRef({ recOn: false, musicUntil: 0, timer: null });
   const dragInfo = useRef({ moved: false, offX: 0, offY: 0 });
   const aiCache = useRef(new Map());   // ctx-key → AI explanation
   const reqId = useRef(0);             // guards against stale async responses
@@ -320,6 +329,40 @@ export default function GuideAvatar({ userName }) {
     try { localStorage.removeItem(DISMISS_KEY); } catch { /* ignore */ }
   }, []);
 
+  // ── Dance to music / while a recorder is live ──
+  // The guideBus fires 'music' (with how long the sound lasts) and 'rec'
+  // (mic on/off) from anywhere in the app. We dance while EITHER is active,
+  // re-evaluating whenever the music window is due to lapse.
+  useEffect(() => {
+    const d = danceRef.current;
+    const evaluate = () => {
+      const now = (window.performance && performance.now) ? performance.now() : 0;
+      const on = d.recOn || now < d.musicUntil;
+      setDancing(on);
+      clearTimeout(d.timer);
+      if (now < d.musicUntil) {
+        // wake up right when the music window ends to re-check (rec may still hold it)
+        d.timer = setTimeout(evaluate, d.musicUntil - now + 30);
+      }
+    };
+    const offMusic = onGuide('music', (e) => {
+      const now = (window.performance && performance.now) ? performance.now() : 0;
+      const ms = (e.detail && e.detail.ms) || 1200;
+      d.musicUntil = Math.max(d.musicUntil, now + ms);
+      evaluate();
+    });
+    const offRec = onGuide('rec', (e) => {
+      d.recOn = !!(e.detail && e.detail.on);
+      evaluate();
+    });
+    return () => { offMusic(); offRec(); clearTimeout(d.timer); };
+  }, []);
+
+  // While dancing, keep a happy face on (overrides the idle-face cycler).
+  useEffect(() => {
+    if (dancing) setExpression('happy');
+  }, [dancing]);
+
   // Briefly flash an expression, then drift back to a neutral idle.
   const flash = useCallback((exp, ms = 1400) => {
     setExpression(exp);
@@ -331,11 +374,11 @@ export default function GuideAvatar({ userName }) {
   useEffect(() => {
     const faces = ['happy', 'wink', 'thinking', 'surprised', 'idle', 'idle'];
     const id = setInterval(() => {
-      if (talking || dragging || pointMode) return;
+      if (talking || dragging || pointMode || dancing) return;
       setExpression(faces[Math.floor(Math.random() * faces.length)]);
     }, 4200);
     return () => clearInterval(id);
-  }, [talking, dragging, pointMode]);
+  }, [talking, dragging, pointMode, dancing]);
 
   // Prime voices list (some browsers load it async).
   useEffect(() => {
@@ -460,7 +503,7 @@ export default function GuideAvatar({ userName }) {
       )}
 
       <div
-        className={`ga-root ${dragging ? 'is-dragging' : ''} ${pointMode ? 'is-pointing' : ''}`}
+        className={`ga-root ${dragging ? 'is-dragging' : ''} ${pointMode ? 'is-pointing' : ''} ${dancing && !dragging ? 'is-dancing' : ''}`}
         style={{ left: pos.x, top: pos.y }}
       >
         {hint && !bubble && (
