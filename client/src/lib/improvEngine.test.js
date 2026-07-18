@@ -14,6 +14,7 @@ import {
   scalePositions,
   improvMap,
   improvMapManual,
+  diatonicChords,
   trustDetection,
   makeChordLatch,
   makeOnsetDetector,
@@ -410,6 +411,85 @@ describe('makeOnsetDetector — a strum is an attack, not just "loud"', () => {
     det.reset();
     // After reset, the baseline is 0 again so the next loud frame is a fresh onset.
     expect(det.push(0.4)).toBe(true);
+  });
+});
+
+describe('diatonicChords — the chords built FROM a scale', () => {
+  const pcOf4 = (n) => NOTE_NAMES.indexOf(n);
+
+  it('gives the textbook triads of C major (I ii iii IV V vi vii°)', () => {
+    const names = diatonicChords(pcOf4('C'), 'major').map((c) => c.name);
+    expect(names).toEqual(['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim']);
+  });
+
+  it('gives the textbook triads of A natural minor (i ii° III iv v VI VII)', () => {
+    const names = diatonicChords(pcOf4('A'), 'naturalMinor').map((c) => c.name);
+    expect(names).toEqual(['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G']);
+  });
+
+  it('each chord’s pitch classes are all in the scale', () => {
+    const scalePcs = new Set(SCALE_FORMULAS.major.map((iv) => (pcOf4('C') + iv) % 12));
+    for (const c of diatonicChords(pcOf4('C'), 'major')) {
+      for (const pc of c.pcs) expect(scalePcs.has(pc)).toBe(true);
+    }
+  });
+
+  it('harmonic minor has a major V and a diminished vii (its defining chords)', () => {
+    // A harmonic minor: the raised 7th (G#) makes V = E major and vii° = G#dim,
+    // which is exactly why the scale exists (a real leading-tone cadence).
+    const names = diatonicChords(pcOf4('A'), 'harmonicMinor').map((c) => c.name);
+    expect(names).toContain('E');     // V major (not Em)
+    expect(names).toContain('G#dim'); // vii°
+  });
+
+  it('skips degrees with no clean triad rather than faking one (pentatonics)', () => {
+    // A minor pentatonic (A C D E G) can't stack a diatonic 3rd+5th on every
+    // degree — the builder returns only the degrees that yield a real triad,
+    // never an invented chord.
+    const chords = diatonicChords(pcOf4('A'), 'minorPentatonic');
+    expect(chords.length).toBeLessThan(5);
+    for (const c of chords) expect(['', 'm', 'dim', 'aug']).toContain(c.quality);
+  });
+
+  it('returns [] for an unknown scale', () => {
+    expect(diatonicChords(0, 'notAScale')).toEqual([]);
+  });
+});
+
+describe('improvMapManual arpeggio overlay', () => {
+  const pcOf5 = (n) => NOTE_NAMES.indexOf(n);
+
+  it('overlays a chosen diatonic chord as a separate arpeggio layer', () => {
+    const chords = diatonicChords(pcOf5('A'), 'naturalMinor');
+    const cMajor = chords.find((c) => c.name === 'C'); // the III chord: C E G
+    const m = improvMapManual(pcOf5('A'), 'naturalMinor', { maxFret: 12, arpeggio: cMajor });
+    expect(m.arpeggio).toBeTruthy();
+    expect(m.arpeggio.name).toBe('C');
+    const pcs = new Set(m.arpeggio.positions.map((p) => p.pc));
+    expect([...pcs].map((pc) => NOTE_NAMES[pc]).sort()).toEqual(['C', 'E', 'G']);
+    // The scale still renders underneath — the overlay doesn't replace it.
+    expect(m.scales[0].positions.length).toBeGreaterThan(0);
+  });
+
+  it('labels arpeggio tones by their degree in the CHORD (R/3/5), not the scale', () => {
+    const cMajor = diatonicChords(pcOf5('A'), 'naturalMinor').find((c) => c.name === 'C');
+    const m = improvMapManual(pcOf5('A'), 'naturalMinor', { maxFret: 12, arpeggio: cMajor });
+    const byNote = (n) => m.arpeggio.positions.find((p) => NOTE_NAMES[p.pc] === n);
+    expect(byNote('C').degree).toBe('R'); // C is the chord's root
+    expect(byNote('E').degree).toBe('3'); // major third
+    expect(byNote('G').degree).toBe('5'); // perfect fifth
+    expect(byNote('C').isRoot).toBe(true);
+    expect(byNote('E').isRoot).toBe(false);
+  });
+
+  it('has no arpeggio layer when none is requested', () => {
+    expect(improvMapManual(pcOf5('A'), 'naturalMinor', { maxFret: 12 }).arpeggio).toBeNull();
+  });
+
+  it('every arpeggio note is inside the fret window', () => {
+    const am = diatonicChords(pcOf5('A'), 'naturalMinor').find((c) => c.name === 'Am');
+    const m = improvMapManual(pcOf5('A'), 'naturalMinor', { minFret: 5, maxFret: 8, arpeggio: am });
+    expect(m.arpeggio.positions.every((p) => p.fret >= 5 && p.fret <= 8)).toBe(true);
   });
 });
 

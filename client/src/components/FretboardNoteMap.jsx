@@ -63,8 +63,8 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useT } from '../lib/i18n';
 import { OPEN_STRING_MIDI, NOTE_NAMES } from '../lib/chordAnalyzer';
 import {
-  improvMap, improvMapManual, trustDetection, makeChordLatch, makeOnsetDetector,
-  livePitchClasses, SCALE_LABELS,
+  improvMap, improvMapManual, diatonicChords, trustDetection, makeChordLatch,
+  makeOnsetDetector, livePitchClasses, SCALE_LABELS,
 } from '../lib/improvEngine';
 import ChordTip from './ChordTip';
 import {
@@ -120,6 +120,10 @@ export default function FretboardNoteMap({ lang }) {
   // { root, scaleId } locks the overlay to that scale; null = follow the mic.
   // Works before AND during play.
   const [manual, setManual] = useState(null);
+  // Which diatonic chord's arpeggio to overlay on the filtered scale (by degree
+  // index into diatonicChords), or null for scale-only. Reset when the scale
+  // changes so we never overlay a chord that isn't in the new scale.
+  const [arpDegree, setArpDegree] = useState(null);
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -201,14 +205,24 @@ export default function FretboardNoteMap({ lang }) {
 
   useEffect(() => () => stop(), [stop]);
 
+  // The diatonic chords of the filtered scale — the arpeggios the user can
+  // overlay. Empty unless a scale filter is active.
+  const scaleChords = useMemo(
+    () => (manual ? diatonicChords(manual.root, manual.scaleId) : []),
+    [manual],
+  );
+
   // The improv map. A MANUAL pick (key + scale) overrides detection entirely and
-  // stays locked; otherwise we follow the latched chord from the mic. Full neck:
-  // 0..12, matching the grid. Memoized so the ~124-position map isn't rebuilt on
-  // every one of the ~60 renders/sec.
+  // stays locked; otherwise we follow the latched chord from the mic. When a
+  // diatonic chord is chosen, its arpeggio rides along as a separate overlay.
+  // Full neck 0..12, memoized so the ~124-position map isn't rebuilt every render.
+  const arpChord = manual && arpDegree != null
+    ? scaleChords.find((c) => c.degree === arpDegree) || null
+    : null;
   const map = useMemo(() => {
-    if (manual) return improvMapManual(manual.root, manual.scaleId, { minFret: 0, maxFret: FRETS });
+    if (manual) return improvMapManual(manual.root, manual.scaleId, { minFret: 0, maxFret: FRETS, arpeggio: arpChord });
     return detected ? improvMap(detected, { minFret: 0, maxFret: FRETS }) : null;
-  }, [manual, detected]);
+  }, [manual, detected, arpChord]);
 
   // Which scale is drawn. In manual mode the map has exactly one scale (the pick).
   // In auto mode: the scale the user chose from the chord's options, else the
@@ -227,17 +241,26 @@ export default function FretboardNoteMap({ lang }) {
   // Memoized alongside map so they're rebuilt only when the chord or the chosen
   // scale changes, not on every frame a chord is held.
   const key = (s, f) => `${s}:${f}`;
-  const { toneAt, scaleAt } = useMemo(() => {
+  const { toneAt, scaleAt, arpAt } = useMemo(() => {
     const tone = new Map();
     const scale = new Map();
+    const arp = new Map();
     if (map) {
       for (const t of map.tones) tone.set(key(t.string, t.fret), t);
       if (activeScale) {
         for (const p of activeScale.positions) scale.set(key(p.string, p.fret), p);
       }
+      if (map.arpeggio) {
+        for (const p of map.arpeggio.positions) arp.set(key(p.string, p.fret), p);
+      }
     }
-    return { toneAt: tone, scaleAt: scale };
+    return { toneAt: tone, scaleAt: scale, arpAt: arp };
   }, [map, activeScale]);
+
+  // Drop the arpeggio pick whenever the scale (or key) changes — a chord from
+  // the old scale may not exist in the new one.
+  const scaleKey = manual ? `${manual.root}:${manual.scaleId}` : '';
+  useEffect(() => { setArpDegree(null); }, [scaleKey]);
 
   // Pitch classes sounding right now, as a Set for O(1) per-cell lookup.
   const liveSet = useMemo(() => new Set(livePcs), [livePcs]);
@@ -297,6 +320,25 @@ export default function FretboardNoteMap({ lang }) {
               <option key={id} value={id}>{label}</option>
             ))}
           </select>
+        )}
+        {/* Arpeggio-by-chord: pick a chord built from the filtered scale and its
+            arpeggio (root/3rd/5th) lights in magenta over the scale. */}
+        {manual && scaleChords.length > 0 && (
+          <>
+            <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+              🎵 {tr.arpChord || 'Arpeggio'}
+            </span>
+            <select
+              value={arpDegree ?? ''}
+              onChange={(e) => setArpDegree(e.target.value === '' ? null : Number(e.target.value))}
+              className="text-xs px-2 py-1 rounded-lg"
+              style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
+              <option value="">{tr.arpNone || 'None'}</option>
+              {scaleChords.map((c) => (
+                <option key={c.degree} value={c.degree}>{c.name}</option>
+              ))}
+            </select>
+          </>
         )}
         {manual && (
           <button onClick={() => setManual(null)}
@@ -416,13 +458,22 @@ export default function FretboardNoteMap({ lang }) {
                 const open = f === 0;
                 const tone = toneAt.get(key(s, f));      // a chord tone: landing note
                 const scaleNote = scaleAt.get(key(s, f)); // in the improv scale
+                const arpNote = arpAt.get(key(s, f));    // in the chosen chord's arpeggio
                 // Is this note SOUNDING right now? (every position of the class —
                 // audio can't say which one you actually fretted).
                 const nowPlaying = liveSet.has(pc);
-                // Chord tones win: they're the notes that resolve.
-                const lit = tone || scaleNote;
+                // Arpeggio wins, then chord tones, then scale — most-focused first.
+                const lit = arpNote || tone || scaleNote;
                 let style;
-                if (tone) {
+                if (arpNote) {
+                  // Magenta — the chord arpeggio, distinct from the cyan scale.
+                  style = {
+                    background: 'rgba(217,70,239,0.85)',
+                    color: '#fff',
+                    border: `1px solid ${arpNote.isRoot ? '#fff' : '#f0abfc'}`,
+                    boxShadow: '0 0 10px rgba(217,70,239,0.6)',
+                  };
+                } else if (tone) {
                   style = {
                     background: 'var(--color-brand, #e9c46a)',
                     color: '#3a2708',
@@ -464,11 +515,15 @@ export default function FretboardNoteMap({ lang }) {
                   <div key={f} className="flex-1 px-0.5">
                     <div className="text-center rounded text-[11px] font-semibold py-1"
                       style={style}
-                      title={lit ? `${noteAt(s, f)} — ${lit.degree}${tone ? ' (chord tone)' : ''}` : noteAt(s, f)}>
+                      title={lit
+                        ? `${noteAt(s, f)} — ${lit.degree}${arpNote ? ` (${map.arpeggio.name} arpeggio)` : tone ? ' (chord tone)' : ''}`
+                        : noteAt(s, f)}>
                       {noteAt(s, f)}
-                      {tone && (
-                        <span className="ml-0.5 text-[8px] font-bold" style={{ opacity: 0.7 }}>
-                          {tone.degree}
+                      {/* Degree badge: the arpeggio's degree if lit as an
+                          arpeggio note, else the chord-tone degree. */}
+                      {(arpNote || tone) && (
+                        <span className="ml-0.5 text-[8px] font-bold" style={{ opacity: 0.75 }}>
+                          {(arpNote || tone).degree}
                         </span>
                       )}
                     </div>
@@ -496,6 +551,14 @@ export default function FretboardNoteMap({ lang }) {
                 ? (tr.filterLegendScale || 'In the scale')
                 : (tr.improvLegendScale || 'Scale note — safe to pass through')}
             </span>
+            {/* The chord arpeggio overlay, when one is chosen. */}
+            {map.arpeggio && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded"
+                  style={{ background: 'rgba(217,70,239,0.85)', border: '1px solid #f0abfc' }} />
+                {(tr.arpLegend || 'arpeggio').replace('{chord}', map.arpeggio.name)}
+              </span>
+            )}
             {/* "Playing now" only means something when the mic is on. */}
             {listening && (
               <span className="flex items-center gap-1.5">

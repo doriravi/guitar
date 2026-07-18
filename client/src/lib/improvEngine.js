@@ -533,6 +533,54 @@ export function improvMap(chordName, opts = {}) {
   };
 }
 
+// Triad quality by the two stacked-third gaps (3rd above root, 5th above root),
+// in semitones. Covers the four triads a diatonic scale can produce.
+function triadQuality(third, fifth) {
+  if (third === 4 && fifth === 7) return '';     // major
+  if (third === 3 && fifth === 7) return 'm';    // minor
+  if (third === 3 && fifth === 6) return 'dim';  // diminished
+  if (third === 4 && fifth === 8) return 'aug';  // augmented
+  return null; // not a tertian triad (e.g. a pentatonic "degree" has no 3rd/5th in-scale)
+}
+
+/**
+ * The diatonic chords built FROM a scale — one triad per scale degree, stacked in
+ * thirds using only notes IN the scale. This is how "chords by scale" is derived:
+ * an A-natural-minor scale yields Am Bdim C Dm Em F G, etc. Works for any scale in
+ * SCALE_FORMULAS; a degree whose stacked thirds aren't both in the scale (common
+ * in pentatonics) is skipped rather than faked.
+ *
+ * @param {number} root    root pitch class 0..11
+ * @param {string} scaleId a key of SCALE_FORMULAS
+ * @returns {{name:string, root:number, third:number, fifth:number, degree:number,
+ *            quality:string, pcs:number[]}[]} one per playable degree
+ */
+export function diatonicChords(root, scaleId) {
+  const formula = SCALE_FORMULAS[scaleId];
+  if (!formula) return [];
+  const rootPc = ((root % 12) + 12) % 12;
+  const n = formula.length;
+  const degreePc = (i) => (rootPc + formula[((i % n) + n) % n]) % 12;
+
+  const chords = [];
+  for (let i = 0; i < n; i++) {
+    const r = degreePc(i);
+    const third = degreePc(i + 2);   // stack a third (two scale steps up)
+    const fifth = degreePc(i + 4);   // and another (the fifth)
+    // Interval of the 3rd and 5th ABOVE this degree's root, in semitones.
+    const t = ((third - r) % 12 + 12) % 12;
+    const f = ((fifth - r) % 12 + 12) % 12;
+    const quality = triadQuality(t, f);
+    if (quality === null) continue;  // no clean triad on this degree (pentatonics)
+    chords.push({
+      name: NOTE_NAMES[r] + quality,
+      root: r, third, fifth, degree: i, quality,
+      pcs: [r, third, fifth],
+    });
+  }
+  return chords;
+}
+
 /**
  * A manually chosen scale — root + scale id — in the SAME shape improvMap returns,
  * so the HUD renders it identically. Used when the player picks a key/scale to
@@ -542,10 +590,16 @@ export function improvMap(chordName, opts = {}) {
  * note the key resolves to), which anchors the shape. Every scale position is
  * flagged isChordTone where it equals the root, so the root pops on the grid.
  *
+ * Optionally overlays a diatonic chord's ARPEGGIO: pass `opts.arpeggio` as a
+ * chord from diatonicChords() and its tones (root/3rd/5th) are returned as a
+ * separate `arpeggio` layer the HUD paints in its own colour ON TOP of the scale,
+ * with each tone's degree (R/3/5) labelled. The scale still renders underneath.
+ *
  * @param {number} root     root pitch class 0..11
  * @param {string} scaleId  a key of SCALE_FORMULAS
  * @param {object} [opts]   passed through (minFret/maxFret)
- * @returns {{chord, tones, scales}|null} null if the scale id is unknown
+ * @param {object} [opts.arpeggio] a diatonicChords() entry to overlay, or null
+ * @returns {{chord, tones, scales, arpeggio}|null} null if the scale id is unknown
  */
 export function improvMapManual(root, scaleId, opts = {}) {
   const positions = scalePositions(root, scaleId, opts);
@@ -556,6 +610,25 @@ export function improvMapManual(root, scaleId, opts = {}) {
   const tones = positions
     .filter((p) => p.pc === rootPc)
     .map((p) => ({ ...p, degree: 'R' }));
+
+  // Optional chord-arpeggio overlay. Each tone gets its degree relative to the
+  // CHORD's root (R / 3 / 5), and we find every position of those pitch classes.
+  let arpeggio = null;
+  const arp = opts.arpeggio;
+  if (arp && Array.isArray(arp.pcs) && arp.pcs.length) {
+    const degreeOf = (pc) => {
+      const iv = ((pc - arp.root) % 12 + 12) % 12;
+      return INTERVAL_NAMES[iv] || String(iv);
+    };
+    const byPc = new Map(arp.pcs.map((pc) => [pc, degreeOf(pc)]));
+    arpeggio = {
+      name: arp.name,
+      root: arp.root,
+      positions: findPitchClasses([...byPc.keys()], opts).map((p) => ({
+        ...p, degree: byPc.get(p.pc), isRoot: p.pc === arp.root,
+      })),
+    };
+  }
 
   const label = SCALE_LABELS[scaleId] || scaleId;
   return {
@@ -568,5 +641,6 @@ export function improvMapManual(root, scaleId, opts = {}) {
       why: `You picked ${NOTE_NAMES[rootPc]} ${label} — soloing in this key regardless of what’s detected.`,
       positions: positions.map((p) => ({ ...p, isChordTone: p.pc === rootPc })),
     }],
+    arpeggio,
   };
 }
