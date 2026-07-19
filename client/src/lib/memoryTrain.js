@@ -55,6 +55,20 @@ const TRIAD_INTERVALS = {
 export const pcName = (pc) => PC_NAMES[((pc % 12) + 12) % 12];
 const normPc = (pc) => ((Math.round(pc) % 12) + 12) % 12;
 
+// A human-readable label for an element's correct answer — shared by the hook
+// (feedback state) and the component (feedback display) so there's one source.
+export function answerLabelFor(element) {
+  if (!element) return '';
+  switch (element.type) {
+    case 'note':        return pcName(element.meta.pc);
+    case 'interval':    return `${element.label}`;
+    case 'chord':       return element.meta.name;
+    case 'degree':      return `${element.meta.degName} of ${pcName(element.meta.keyPc)} = ${pcName(element.meta.targetPc)}`;
+    case 'progression': return element.meta.nextName;
+    default:            return element.label || '';
+  }
+}
+
 // The pitch classes of a diatonic/progression chord NAME, honouring dim. Returns
 // { rootPc, pcs:Set }. Falls back to chordTones() for names it knows (''/m/7).
 function chordNamePcs(name) {

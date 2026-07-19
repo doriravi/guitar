@@ -1,0 +1,232 @@
+/* Music Memory — cinematic, immersive, calming stage.
+   Rendered as a fixed full-screen overlay portalled to document.body (it must
+   escape the tab panel's transformed, overflow-hidden ancestor). All motion is
+   compositor-only (transform/opacity/filter). prefers-reduced-motion freezes it. */
+
+.mm-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 24px 20px;
+  color: var(--color-ink, #f0ede8);
+  background: var(--mm-void, #0a0a0f);
+  /* subject atmosphere */
+  --mm-void: #0a0a0f;
+  --mm-indigo: #4c3f82;
+  --mm-teal: #1e5c5a;
+  --mm-gold: var(--color-brand, #e9c46a);
+  --mm-lean: 0;
+}
+
+/* ---- Aurora background: three drifting blurred radial blobs + a vignette ---- */
+.mm-aurora { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.mm-aurora span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.5;
+  will-change: transform;
+}
+.mm-aurora-a {
+  width: 60vw; height: 60vw; top: -12vw; left: -8vw;
+  background: radial-gradient(circle, var(--mm-indigo), transparent 68%);
+  animation: mm-drift-a 26s ease-in-out infinite;
+}
+.mm-aurora-b {
+  width: 55vw; height: 55vw; bottom: -14vw; right: -10vw;
+  background: radial-gradient(circle, var(--mm-teal), transparent 66%);
+  animation: mm-drift-b 32s ease-in-out infinite;
+}
+.mm-aurora-c {
+  width: 46vw; height: 46vw; top: 26%; left: 30%;
+  background: radial-gradient(circle, rgba(233,196,106,0.22), transparent 70%);
+  animation: mm-drift-c 22s ease-in-out infinite;
+  transform: translateX(calc(var(--mm-lean) * 10%));
+  transition: transform 3.6s ease-in-out;
+}
+@keyframes mm-drift-a { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(6%,4%) scale(1.12)} }
+@keyframes mm-drift-b { 0%,100%{transform:translate(0,0) scale(1.05)} 50%{transform:translate(-5%,-6%) scale(1)} }
+@keyframes mm-drift-c { 0%,100%{opacity:0.35} 50%{opacity:0.6} }
+
+.mm-vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%);
+}
+
+/* ---- Close affordance ---- */
+.mm-exit {
+  position: absolute; top: 16px; right: 18px; z-index: 3;
+  width: 38px; height: 38px; border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; line-height: 1;
+  color: var(--color-ink-faint, #7a7a7a);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  backdrop-filter: blur(6px);
+  cursor: pointer; transition: color .2s, background .2s, transform .12s;
+}
+.mm-exit:hover { color: var(--color-ink, #f0ede8); background: rgba(255,255,255,0.1); }
+.mm-exit:active { transform: scale(0.94); }
+
+/* ---- Content column ---- */
+.mm-content {
+  position: relative; z-index: 2;
+  width: 100%; max-width: 640px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  animation: mm-content-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mm-content-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(6px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+
+/* ---- Typography ---- */
+.mm-eyebrow {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.34em; text-transform: uppercase;
+  color: var(--color-info, #38bdf8);
+}
+.mm-eyebrow.is-listening { color: var(--color-success, #4ade80); }
+.mm-eyebrow.is-muted { color: var(--color-ink-faint, #7a7a7a); }
+.mm-title {
+  font-size: clamp(1.9rem, 5.2vw, 3.1rem);
+  font-weight: 900; line-height: 1.04; letter-spacing: -0.02em;
+  text-wrap: balance;
+  background: linear-gradient(96deg, #fff, #f3e2b8 55%, var(--mm-gold));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  filter: drop-shadow(0 2px 20px rgba(233,196,106,0.22));
+  margin: 6px 0;
+}
+.mm-sub {
+  font-size: 0.95rem; line-height: 1.6; max-width: 30rem;
+  color: var(--color-ink-subtle, #b9b9b9);
+}
+
+/* ---- The prompt (what to recall) ---- */
+.mm-prompt-word {
+  font-size: clamp(2.6rem, 8vw, 4.4rem); font-weight: 900; letter-spacing: -0.02em;
+  color: var(--mm-gold);
+  filter: drop-shadow(0 2px 18px rgba(233,196,106,0.3));
+}
+.mm-prompt-word.is-dim { opacity: 0.5; }
+.mm-prompt-ask { font-size: 0.95rem; color: var(--color-ink-subtle, #b9b9b9); margin-top: 4px; }
+
+/* ---- Live "you said" hero ---- */
+.mm-live {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 96px; justify-content: center;
+}
+.mm-live-note {
+  font-size: clamp(3rem, 11vw, 5rem); font-weight: 900; line-height: 1;
+  color: var(--color-ink-ghost, #3a3a3a);
+  transition: color .18s, text-shadow .18s;
+}
+.mm-live[data-active="true"] .mm-live-note {
+  color: var(--color-success, #4ade80);
+  text-shadow: 0 0 30px rgba(74,222,128,0.45);
+}
+.mm-live[data-intune="true"] .mm-live-note { color: #7fffb0; }
+.mm-live-cents { font-size: 0.75rem; color: var(--color-ink-faint, #7a7a7a); letter-spacing: 0.08em; }
+
+/* ---- Committed pitch-class chips ---- */
+.mm-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 26px; }
+.mm-chip {
+  padding: 2px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;
+  color: var(--color-success, #4ade80);
+  background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.28);
+}
+.mm-chips-empty { color: var(--color-ink-ghost, #3a3a3a); font-size: 0.85rem; }
+
+/* ---- Countdown ---- */
+.mm-countdown {
+  font-size: clamp(3.4rem, 12vw, 5.4rem); font-weight: 900; line-height: 1;
+  color: var(--mm-gold); filter: drop-shadow(0 0 24px rgba(233,196,106,0.35));
+}
+
+/* ---- Feedback verdict ---- */
+.mm-verdict { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mm-verdict-mark { font-size: 3rem; line-height: 1; }
+.mm-verdict-head { font-size: 1.15rem; font-weight: 800; }
+.mm-verdict[data-correct="true"] .mm-verdict-head { color: var(--color-success, #4ade80); }
+.mm-verdict[data-correct="false"] .mm-verdict-head { color: var(--mm-gold); }
+.mm-compare { font-size: 0.9rem; color: var(--color-ink-subtle, #b9b9b9); display: flex; flex-direction: column; gap: 2px; }
+.mm-key { font-weight: 800; color: var(--mm-gold); }
+
+/* ---- Session HUD ---- */
+.mm-hud {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  font-size: 0.75rem; color: var(--color-ink-faint, #7a7a7a); margin-bottom: 14px;
+}
+.mm-dots { display: flex; gap: 5px; }
+.mm-dot { width: 7px; height: 7px; border-radius: 9999px; background: rgba(255,255,255,0.14); }
+.mm-dot.is-done { background: var(--color-success, #4ade80); }
+.mm-dot.is-now { background: var(--mm-gold); box-shadow: 0 0 8px 2px rgba(233,196,106,0.5); }
+
+/* ---- Glass mood slider ---- */
+.mm-mood {
+  width: 100%; max-width: 24rem; margin: 0 auto;
+  padding: 16px 18px; border-radius: 18px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(8px);
+}
+.mm-mood input[type="range"] { width: 100%; accent-color: var(--mm-gold); }
+.mm-mood-row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; font-size: 0.72rem; color: var(--color-ink-faint, #7a7a7a); }
+.mm-mood-word { font-size: 1rem; font-weight: 800; color: var(--mm-gold); }
+
+/* ---- CTA buttons ---- */
+.mm-cta {
+  margin-top: 8px; padding: 14px 34px; border-radius: 9999px;
+  font-size: 1rem; font-weight: 800; letter-spacing: 0.02em;
+  color: #1a1508;
+  background: linear-gradient(180deg, #f7e6b8, var(--mm-gold));
+  border: none; cursor: pointer;
+  box-shadow: 0 8px 30px rgba(233,196,106,0.35);
+  transition: transform .12s, box-shadow .2s;
+}
+.mm-cta:hover { box-shadow: 0 10px 38px rgba(233,196,106,0.5); }
+.mm-cta:active { transform: translateY(1px) scale(0.99); }
+.mm-ghost {
+  padding: 12px 24px; border-radius: 9999px; font-weight: 700; font-size: 0.9rem;
+  color: var(--color-ink-subtle, #b9b9b9);
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+  cursor: pointer; transition: color .2s, background .2s;
+}
+.mm-ghost:hover { color: var(--color-ink, #f0ede8); background: rgba(255,255,255,0.1); }
+.mm-replay {
+  margin-top: 12px; padding: 8px 18px; border-radius: 9999px; font-size: 0.82rem; font-weight: 700;
+  color: var(--color-info, #38bdf8); background: rgba(56,189,248,0.1);
+  border: 1px solid rgba(56,189,248,0.28); cursor: pointer;
+}
+
+/* ---- "Why the light?" disclosure ---- */
+.mm-why { max-width: 30rem; margin: 4px auto 0; text-align: left; }
+.mm-why summary {
+  cursor: pointer; list-style: none; font-size: 0.82rem; font-weight: 700;
+  color: var(--color-info, #38bdf8); padding: 6px 0; text-align: center;
+}
+.mm-why summary::-webkit-details-marker { display: none; }
+.mm-why p { font-size: 0.85rem; line-height: 1.6; color: var(--color-ink-subtle, #b9b9b9); margin-top: 4px; }
+
+.mm-listen-rings {
+  width: 120px; height: 120px; border-radius: 9999px; margin: 8px auto;
+  border: 2px solid rgba(233,196,106,0.4);
+  animation: mm-ring 2.4s ease-out infinite;
+}
+@keyframes mm-ring {
+  0% { transform: scale(0.7); opacity: 0.9; box-shadow: 0 0 0 0 rgba(233,196,106,0.3); }
+  100% { transform: scale(1.15); opacity: 0; box-shadow: 0 0 0 26px rgba(233,196,106,0); }
+}
+
+/* ---- Reduced motion: freeze the expensive stuff, keep it legible ---- */
+@media (prefers-reduced-motion: reduce) {
+  .mm-aurora-a, .mm-aurora-b, .mm-aurora-c { animation: none; }
+  .mm-aurora-c { transform: none; transition: none; }
+  .mm-content { animation: none; }
+  .mm-listen-rings { animation: none; opacity: 0.5; }
+}

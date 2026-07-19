@@ -1,71 +1,90 @@
-// MusicMemory — the ear-training / music-memory tab.
+// MusicMemory — the ear-training / music-memory tab, as a cinematic full-screen
+// experience.
 //
-// The app plays or names a music element (note, interval, chord, scale degree, or
-// the next chord of a progression); the user answers by singing/humming OR playing
-// into the mic; it grades the answer octave-agnostically and gives feedback. The
-// whole loop is wrapped in a guided EMDR-style calming layer: a session check-in,
-// a bilateral breathing pacer during the answer window, never-punitive feedback,
-// a warm celebration on advancement, and a check-out.
+// The app plays a soft, warm prompt (a note, interval, chord, scale degree, or the
+// next chord of a progression); the user SAYS the answer aloud (sing/hum or play)
+// and sees it recognized live on screen; the correct answer is shown at round end.
+// The whole loop sits inside a calming EMDR-style stage: a bilateral glowing pacer
+// (with a synced left↔right stereo tone), a breathing cue, a plain-language
+// explanation of why the motion helps, a session check-in/out, and never-punitive
+// feedback.
 //
-// This file is presentation + flow. The mic loop lives in useMusicMemory; all the
-// element/grading/adaptive logic is pure and unit-tested in memoryTrain.js.
+// The stage is portalled to document.body as a fixed overlay so it can go truly
+// full-bleed (it would otherwise be clipped by the tab panel's transformed,
+// overflow-hidden ancestor). Presentation + flow only — the mic loop is in
+// useMusicMemory; grading/adaptive/theory is pure in memoryTrain.js.
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../lib/i18n';
 import { useMusicMemory } from '../lib/useMusicMemory';
-import { pcName, memoryMastery } from '../lib/memoryTrain';
+import { pcName, memoryMastery, answerLabelFor } from '../lib/memoryTrain';
 import BilateralPacer from './BilateralPacer';
 import Celebration from './Celebration';
 import ChordTip from './ChordTip';
+import './MusicMemory.css';
 
-// A calm 0–10 wellbeing slider used at check-in and check-out.
-function MoodSlider({ value, onChange, lowLabel, highLabel }) {
+function moodWord(v, tr) {
+  if (v <= 3) return tr.mmMoodTense || 'Tense';
+  if (v <= 6) return tr.mmMoodOk || 'Settling';
+  return tr.mmMoodCalm || 'Calm';
+}
+
+function centsLabel(c, tr) {
+  if (c > 8) return `♯ ${c}¢`;
+  if (c < -8) return `♭ ${-c}¢`;
+  return tr.mmInTune || 'in tune';
+}
+
+// A glass 0–10 wellbeing slider with a live feeling word.
+function MoodSlider({ value, onChange, lowLabel, highLabel, tr }) {
   return (
-    <div className="w-full max-w-sm mx-auto">
-      <input
-        type="range" min={0} max={10} step={1} value={value}
-        onChange={(e) => onChange(parseInt(e.target.value, 10))}
-        className="w-full"
-        style={{ accentColor: 'var(--color-brand)' }}
-      />
-      <div className="flex justify-between text-[11px] mt-1" style={{ color: 'var(--color-ink-faint)' }}>
+    <div className="mm-mood">
+      <input type="range" min={0} max={10} step={1} value={value}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))} />
+      <div className="mm-mood-row">
         <span>{lowLabel}</span>
-        <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-brand)' }}>{value}</span>
+        <span className="mm-mood-word">{moodWord(value, tr)}</span>
         <span>{highLabel}</span>
       </div>
     </div>
   );
 }
 
-// The prompt card — what the user is being asked to recall. Chord/progression
-// element names show their fretboard shape on hover (the app-wide rule).
-function PromptCard({ element, tr }) {
+// The prompt name + ask line. Chord/progression names show their shape on hover.
+function Prompt({ element, tr, dim }) {
   if (!element) return null;
   const { type, meta, label } = element;
-  const title =
+  const ask =
     type === 'note' ? (tr.mmPlayNote || 'Sing or play the note you heard')
     : type === 'interval' ? (tr.mmPlayInterval || 'Sing or play both notes')
     : type === 'chord' ? (tr.mmPlayChord || 'Sing or play the chord tones')
     : type === 'degree' ? ((tr.mmNameDegree || 'Sing or play the ${degree} of ${key}')
         .replace('${degree}', meta.degName).replace('${key}', pcName(meta.keyPc)))
     : (tr.mmNextChord || 'What chord comes next? Sing or play its notes');
+  const word = type === 'progression' ? label : (type === 'chord' ? meta.name : label);
+  const chordName = type === 'chord' ? meta.name : (type === 'progression' ? meta.nextName : null);
 
   return (
-    <div className="text-center">
-      <div className="text-[11px] uppercase tracking-[0.3em] font-semibold mb-3" style={{ color: 'var(--color-info)' }}>
-        {tr.mmYourTurn || 'Your turn'}
-      </div>
-      <div className="text-2xl sm:text-3xl font-black mb-2" style={{ color: 'var(--color-ink)' }}>
-        {type === 'chord' || type === 'progression' ? (
-          <ChordTip name={type === 'chord' ? meta.name : meta.nextName}
-            className="cursor-help" style={{ color: 'var(--color-brand)' }}>
-            <span>{type === 'progression' ? label : meta.name}</span>
+    <div>
+      <div className={`mm-prompt-word${dim ? ' is-dim' : ''}`}>
+        {chordName ? (
+          <ChordTip name={chordName} className="cursor-help" style={{ color: 'inherit' }}>
+            <span>{word}</span>
           </ChordTip>
-        ) : (
-          <span style={{ color: 'var(--color-brand)' }}>{label}</span>
-        )}
+        ) : word}
       </div>
-      <div className="text-sm" style={{ color: 'var(--color-ink-subtle)' }}>{title}</div>
+      {!dim && <div className="mm-prompt-ask">{ask}</div>}
+    </div>
+  );
+}
+
+// Committed pitch-class chips ("what you've said so far").
+function Chips({ pcs, tr }) {
+  if (!pcs || !pcs.length) return <div className="mm-chips-empty">{tr.mmNothingYet || '—'}</div>;
+  return (
+    <div className="mm-chips">
+      {pcs.map((pc) => <span key={pc} className="mm-chip">{pcName(pc)}</span>)}
     </div>
   );
 }
@@ -78,208 +97,201 @@ export default function MusicMemory({ lang }) {
 
   const mastery = useMemo(() => memoryMastery(), [game.result]);
 
-  // ── Check-in ────────────────────────────────────────────────────────────────
-  if (game.phase === 'checkin') {
-    return (
-      <Shell>
-        <div className="text-center mb-6">
-          <div className="text-3xl mb-2">🧠</div>
-          <h2 className="text-xl font-black mb-1" style={{ color: 'var(--color-ink)' }}>
-            {tr.tabMemory || 'Music Memory'}
-          </h2>
-          <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--color-ink-subtle)' }}>
-            {tr.mmIntro || 'A calm ear-training drill. Hear an element, then sing, hum, or play your answer into the mic. There is no failing here — just noticing and remembering.'}
-          </p>
-        </div>
+  // Hold the last non-null live note ~180ms so the hero doesn't strobe to "·"
+  // every frame YIN momentarily drops (calmer to read).
+  const [heldNote, setHeldNote] = useState(null);
+  const holdRef = useRef(null);
+  useEffect(() => {
+    if (game.liveNote) {
+      if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null; }
+      setHeldNote(game.liveNote);
+    } else if (!holdRef.current) {
+      holdRef.current = setTimeout(() => { setHeldNote(null); holdRef.current = null; }, 180);
+    }
+    return undefined;
+  }, [game.liveNote]);
+  useEffect(() => () => { if (holdRef.current) clearTimeout(holdRef.current); }, []);
 
-        <div className="rounded-2xl p-5 mb-5" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
-          <div className="text-sm font-semibold mb-3 text-center" style={{ color: 'var(--color-ink-muted)' }}>
-            {tr.mmCheckInPrompt || 'How are you feeling right now?'}
-          </div>
-          <MoodSlider value={checkIn} onChange={setCheckIn}
-            lowLabel={tr.mmScaleLow || 'Tense'} highLabel={tr.mmScaleHigh || 'Calm'} />
-        </div>
-
-        {mastery.sessions > 0 && (
-          <div className="text-center text-[11px] mb-4" style={{ color: 'var(--color-ink-faint)' }}>
-            {(tr.mmYourBest || 'Your best: ${score}% · level ${level}')
-              .replace('${score}', mastery.bestScore).replace('${level}', mastery.level || 1)}
-          </div>
-        )}
-
-        {game.error && (
-          <div className="text-center text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{game.error}</div>
-        )}
-
-        <div className="flex justify-center">
-          <button onClick={() => game.start({ checkInMood: checkIn })}
-            className="ui-press px-6 py-3 rounded-xl font-bold"
-            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
-            {tr.mmCheckInStart || 'Begin'}
-          </button>
-        </div>
-      </Shell>
-    );
-  }
-
-  // ── Check-out / results ───────────────────────────────────────────────────────
-  if (game.phase === 'checkout' && game.result) {
-    const r = game.result;
-    return (
-      <Shell>
-        {r.advancement?.advanced && <Celebration advancement={r.advancement} tr={tr} />}
-        <div className="text-center mb-5">
-          <div className="text-2xl mb-1">🎧</div>
-          <h2 className="text-xl font-black" style={{ color: 'var(--color-ink)' }}>
-            {tr.mmSessionDone || 'Session complete'}
-          </h2>
-          <p className="text-lg font-bold mt-1" style={{ color: 'var(--color-brand)' }}>
-            {(tr.mmYouHeard || 'You heard ${n} of ${total}')
-              .replace('${n}', r.correct).replace('${total}', r.total)}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>
-            {(tr.mmReachedLevel || 'Reached level ${level} · best streak ${streak}')
-              .replace('${level}', r.level).replace('${streak}', r.streakBest)}
-          </p>
-        </div>
-
-        <div className="rounded-2xl p-5 mb-5" style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
-          <div className="text-sm font-semibold mb-3 text-center" style={{ color: 'var(--color-ink-muted)' }}>
-            {tr.mmCheckOutTitle || 'How do you feel now?'}
-          </div>
-          <MoodSlider value={checkOut} onChange={setCheckOut}
-            lowLabel={tr.mmScaleLow || 'Tense'} highLabel={tr.mmScaleHigh || 'Calm'} />
-          {r.checkInMood != null && checkOut !== r.checkInMood && (
-            <div className="text-center text-[11px] mt-2" style={{ color: 'var(--color-success)' }}>
-              {(tr.mmMoodShift || 'You went from ${a} to ${b} — well done showing up for yourself.')
-                .replace('${a}', r.checkInMood).replace('${b}', checkOut)}
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-center gap-3">
-          <button onClick={() => game.start({ checkInMood: checkOut })}
-            className="ui-press px-5 py-2.5 rounded-xl font-bold"
-            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
-            {tr.mmAgain || 'Another round'}
-          </button>
-          <button onClick={game.abort}
-            className="ui-press px-5 py-2.5 rounded-xl font-semibold"
-            style={{ background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)' }}>
-            {tr.mmCheckOutDone || 'Finish'}
-          </button>
-        </div>
-      </Shell>
-    );
-  }
-
-  // ── Active session: prompt / answer / feedback ────────────────────────────────
-  const inFeedback = game.phase === 'feedback' && game.lastResult;
-  const correct = inFeedback && game.lastResult.correct;
+  const phase = game.phase;
+  const inSession = phase === 'prompt' || phase === 'answer' || phase === 'feedback';
 
   return (
-    <Shell>
-      {/* Progress + running tally */}
-      <div className="flex items-center justify-between mb-4 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-        <span>{(tr.mmItemOf || 'Round ${n} of ${total}').replace('${n}', game.itemNo).replace('${total}', game.sessionItems)}</span>
-        <span className="flex items-center gap-2">
-          <span style={{ color: 'var(--color-success)' }}>✓ {game.tally.correct}</span>
-          <span style={{ color: 'var(--color-ink-ghost)' }}>·</span>
-          <span>{(tr.mmLevel || 'Level ${n}').replace('${n}', game.levelState.level)}</span>
-        </span>
-      </div>
-
-      <div className="rounded-2xl p-6 mb-5 min-h-[168px] flex flex-col items-center justify-center"
-        style={{ background: 'var(--color-surface-900)', border: '1px solid var(--color-surface-700)' }}>
-        {game.phase === 'prompt' && (
-          <div className="text-center">
-            <div className="text-[11px] uppercase tracking-[0.3em] font-semibold mb-2" style={{ color: 'var(--color-ink-faint)' }}>
-              {tr.mmListen || 'Listen…'}
-            </div>
-            <div className="text-3xl">🎵</div>
-          </div>
-        )}
-
-        {game.phase === 'answer' && (
-          <div className="w-full text-center">
-            <PromptCard element={game.element} tr={tr} />
-            {game.countdown > 0 ? (
-              <div className="mt-4">
-                <div className="text-4xl font-black tabular-nums" style={{ color: 'var(--color-brand)' }}>{game.countdown}</div>
-                <div className="text-[11px] mt-1" style={{ color: 'var(--color-ink-ghost)' }}>
-                  {tr.mmGetReady || 'Settle in — answer when the count reaches zero'}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4">
-                <div className="text-xs mb-1" style={{ color: 'var(--color-info)' }}>
-                  {tr.mmListening || 'Listening… take your time'}
-                </div>
-                <div className="text-2xl font-bold tabular-nums h-8" style={{ color: game.liveNote ? 'var(--color-success)' : 'var(--color-ink-ghost)' }}>
-                  {game.liveNote ? pcName(game.liveNote.pc) : '…'}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {inFeedback && (
-          <div className="text-center">
-            <div className="text-4xl mb-2">{correct ? '✨' : '🌱'}</div>
-            <div className="text-lg font-bold mb-1" style={{ color: correct ? 'var(--color-success)' : 'var(--color-brand)' }}>
-              {correct ? (tr.mmNice || 'Beautiful — that was it.') : (tr.mmClose || 'Not quite — here it is again. No rush.')}
-            </div>
-            <div className="text-xs" style={{ color: 'var(--color-ink-subtle)' }}>
-              {(tr.mmWas || 'It was ${label}.').replace('${label}', answerLabel(game.lastResult.element))}
-            </div>
-            {!correct && (
-              <button onClick={game.replay}
-                className="ui-press mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold"
-                style={{ background: 'var(--color-surface-700)', color: 'var(--color-info)' }}>
-                {tr.mmReplay || '↻ Hear it again'}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* The EMDR breathing pacer — a calm regulator present throughout the loop. */}
-      <BilateralPacer active={game.phase === 'answer' || game.phase === 'prompt'}
-        inLabel={tr.mmBreatheIn || 'Breathe in'} outLabel={tr.mmBreatheOut || 'Breathe out'} />
-
-      {game.micOk === false && (
-        <div className="text-center text-[11px] mt-3" style={{ color: 'var(--color-warning)' }}>
-          {tr.mmMicQuiet || 'I couldn’t hear you — a little louder, or move closer.'}
+    <Stage phase={phase} onExit={game.abort}>
+      {/* HUD during the session */}
+      {inSession && (
+        <div className="mm-hud">
+          <span>{(tr.mmItemOf || 'Round ${n} of ${total}').replace('${n}', game.itemNo).replace('${total}', game.sessionItems)}</span>
+          <span className="mm-dots">
+            {Array.from({ length: game.sessionItems }, (_, i) => (
+              <span key={i} className={`mm-dot${i + 1 < game.itemNo ? ' is-done' : i + 1 === game.itemNo ? ' is-now' : ''}`} />
+            ))}
+          </span>
+          <span>{(tr.mmLevel || 'Level ${n}').replace('${n}', game.levelState.level)} · ✦{game.tally.correct}</span>
         </div>
       )}
 
-      <div className="flex justify-center mt-4">
-        <button onClick={game.abort}
-          className="text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-ink-faint)' }}>
-          {tr.mmStop || 'End session'}
-        </button>
-      </div>
-    </Shell>
+      {/* ── CHECK-IN ─────────────────────────────────────────────────────────── */}
+      {phase === 'checkin' && (
+        <>
+          <div className="mm-eyebrow">{tr.tabMemory || 'Music Memory'}</div>
+          <h1 className="mm-title">{tr.mmIntroTitle || 'Follow the light. Trust your ear.'}</h1>
+          <p className="mm-sub">{tr.mmIntro || 'A calm way to train your ear. You’ll hear something, then sing or play it back while a soft light drifts side to side. There’s no failing here, only noticing.'}</p>
+
+          <details className="mm-why">
+            <summary>{tr.mmWhyLight || 'Why the moving light?'}</summary>
+            <p>{tr.mmWhatIsThis || 'This side-to-side motion is borrowed from EMDR, a calming technique. The steady bilateral rhythm lowers tension and gives your memory a quiet, even backdrop to work against — so recalling a note feels easy, not tested.'}</p>
+          </details>
+
+          <div style={{ height: 14 }} />
+          <div className="mm-sub" style={{ marginBottom: 8 }}>{tr.mmCheckInPrompt || 'How are you feeling right now?'}</div>
+          <MoodSlider value={checkIn} onChange={setCheckIn} tr={tr}
+            lowLabel={tr.mmMoodTense || 'Tense'} highLabel={tr.mmMoodCalm || 'Calm'} />
+
+          {mastery.sessions > 0 && (
+            <div className="mm-sub" style={{ fontSize: '0.8rem', marginTop: 10 }}>
+              {(tr.mmYourBest || 'Your best: ${score}% · level ${level}')
+                .replace('${score}', mastery.bestScore).replace('${level}', mastery.level || 1)}
+            </div>
+          )}
+          {game.error && <div style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginTop: 8 }}>{game.error}</div>}
+
+          <div style={{ height: 18 }} />
+          <button className="mm-cta" onClick={() => game.start({ checkInMood: checkIn })}>
+            {tr.mmCheckInStart || 'Begin'}
+          </button>
+        </>
+      )}
+
+      {/* ── PROMPT (listening to the cue) ────────────────────────────────────── */}
+      {phase === 'prompt' && (
+        <>
+          <div className="mm-eyebrow">{tr.mmListen || 'Listen…'}</div>
+          <div className="mm-listen-rings" aria-hidden="true" />
+          <Prompt element={game.element} tr={tr} dim />
+        </>
+      )}
+
+      {/* ── ANSWER (count-in, then say it) ───────────────────────────────────── */}
+      {phase === 'answer' && (
+        <>
+          {game.countdown > 0 ? (
+            <>
+              <div className="mm-eyebrow">{tr.mmGetReady || 'Settle in'}</div>
+              <Prompt element={game.element} tr={tr} />
+              <div style={{ height: 10 }} />
+              <div className="mm-countdown">{game.countdown}</div>
+              <div className="mm-sub" style={{ fontSize: '0.85rem' }}>{tr.mmCountInHint || 'Answer out loud when the count reaches zero. Sing it, hum it, or play it.'}</div>
+            </>
+          ) : (
+            <>
+              <div className="mm-eyebrow is-listening">{tr.mmListening || 'Listening… take your time'}</div>
+              <Prompt element={game.element} tr={tr} />
+              <div style={{ height: 12 }} />
+              <div className="mm-live" data-active={!!heldNote} data-intune={!!(heldNote && Math.abs(heldNote.cents) <= 20)}>
+                <span className="mm-live-note">{heldNote ? pcName(heldNote.pc) : '·'}</span>
+                {heldNote && <span className="mm-live-cents">{centsLabel(heldNote.cents, tr)}</span>}
+              </div>
+              <Chips pcs={game.heardPcs} tr={tr} />
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── FEEDBACK (verdict + say-vs-answer, persists) ─────────────────────── */}
+      {phase === 'feedback' && game.lastResult && (
+        <div className="mm-verdict" data-correct={game.lastResult.correct}>
+          <div className="mm-verdict-mark">{game.lastResult.correct ? '✨' : '🌱'}</div>
+          <div className="mm-verdict-head">
+            {game.lastResult.correct ? (tr.mmNice || 'Beautiful — that was it.') : (tr.mmClose || 'Not quite — here it is again. No rush.')}
+          </div>
+          <div className="mm-compare">
+            <span>
+              {tr.mmYouSang || 'You sang'}{' '}
+              <span className="mm-key" style={{ color: 'var(--color-success)' }}>
+                {(game.lastResult.detail.got || []).map((pc) => pcName(pc)).join(' ') || (tr.mmNothingYet || '—')}
+              </span>
+            </span>
+            <span>
+              {tr.mmTheAnswer || 'The answer was'}{' '}
+              {(() => {
+                const el = game.lastResult.element;
+                const chordName = el.type === 'chord' ? el.meta.name : (el.type === 'progression' ? el.meta.nextName : null);
+                const text = answerLabelFor(el);
+                return chordName
+                  ? <ChordTip name={chordName} className="cursor-help"><span className="mm-key">{text}</span></ChordTip>
+                  : <span className="mm-key">{text}</span>;
+              })()}
+            </span>
+          </div>
+          {!game.lastResult.correct && (
+            <button className="mm-replay" onClick={game.replay}>{tr.mmReplay || '↻ Hear it again'}</button>
+          )}
+        </div>
+      )}
+
+      {/* The pacer — present through prompt + answer, with its caption. */}
+      {(phase === 'prompt' || phase === 'answer') && (
+        <div style={{ marginTop: 22, width: '100%' }}>
+          <BilateralPacer active breathMs={game.breathMs} pacerEpoch={game.pacerEpoch}
+            inLabel={tr.mmBreatheIn || 'Breathe in'} outLabel={tr.mmBreatheOut || 'Breathe out'}
+            caption={tr.mmPacerCaption || 'Breathe with the light — in as it rises, out as it falls. The gentle rhythm settles the mind and helps new sounds stick.'} />
+          {game.micOk === false && (
+            <div style={{ color: 'var(--color-warning)', fontSize: '0.8rem', marginTop: 10, textAlign: 'center' }}>
+              {tr.mmMicQuiet || 'I couldn’t hear you — a little louder, or move closer.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── CHECK-OUT / RESULTS ──────────────────────────────────────────────── */}
+      {phase === 'checkout' && game.result && (
+        <>
+          {game.result.advancement?.advanced && <Celebration advancement={game.result.advancement} tr={tr} />}
+          <div className="mm-eyebrow">{tr.mmSessionDone || 'Session complete'}</div>
+          <h1 className="mm-title" style={{ fontSize: 'clamp(1.6rem,4.4vw,2.4rem)' }}>
+            {(tr.mmYouHeard || 'You heard ${n} of ${total}')
+              .replace('${n}', game.result.correct).replace('${total}', game.result.total)}
+          </h1>
+          <div className="mm-sub" style={{ fontSize: '0.85rem' }}>
+            {(tr.mmReachedLevel || 'Reached level ${level} · best streak ${streak}')
+              .replace('${level}', game.result.level).replace('${streak}', game.result.streakBest)}
+          </div>
+
+          <div style={{ height: 16 }} />
+          <div className="mm-sub" style={{ marginBottom: 8 }}>{tr.mmCheckOutTitle || 'How do you feel now?'}</div>
+          <MoodSlider value={checkOut} onChange={setCheckOut} tr={tr}
+            lowLabel={tr.mmMoodTense || 'Tense'} highLabel={tr.mmMoodCalm || 'Calm'} />
+          {game.result.checkInMood != null && checkOut !== game.result.checkInMood && (
+            <div className="mm-sub" style={{ color: 'var(--color-success)', fontSize: '0.82rem', marginTop: 8 }}>
+              {(tr.mmMoodShift || 'You arrived at ${a}, you’re leaving at ${b}. That’s the whole point — well done showing up for yourself.')
+                .replace('${a}', game.result.checkInMood).replace('${b}', checkOut)}
+            </div>
+          )}
+
+          <div style={{ height: 20, display: 'flex' }} />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="mm-cta" onClick={() => game.start({ checkInMood: checkOut })}>{tr.mmAgain || 'Another round'}</button>
+            <button className="mm-ghost" onClick={game.abort}>{tr.mmCheckOutDone || 'Finish'}</button>
+          </div>
+        </>
+      )}
+    </Stage>
   );
 }
 
-// A human answer label for feedback.
-function answerLabel(element) {
-  if (!element) return '';
-  switch (element.type) {
-    case 'note': return pcName(element.meta.pc);
-    case 'interval': return `${element.label}`;
-    case 'chord': return element.meta.name;
-    case 'degree': return `${element.meta.degName} of ${pcName(element.meta.keyPc)} = ${pcName(element.meta.targetPc)}`;
-    case 'progression': return element.meta.nextName;
-    default: return element.label || '';
-  }
-}
-
-function Shell({ children }) {
-  return (
-    <div className="max-w-xl mx-auto px-3 sm:px-4 py-6">
-      {children}
-    </div>
+// The full-screen aurora stage, portalled to document.body so it escapes the tab
+// panel's transformed/overflow-hidden ancestor. `key={phase}` replays the content
+// fade/scale on each phase change.
+function Stage({ phase, onExit, children }) {
+  return createPortal(
+    <div className="mm-stage" role="dialog" aria-modal="true" aria-label="Music Memory">
+      <div className="mm-aurora" aria-hidden="true">
+        <span className="mm-aurora-a" /><span className="mm-aurora-b" /><span className="mm-aurora-c" />
+      </div>
+      <div className="mm-vignette" aria-hidden="true" />
+      <button className="mm-exit" onClick={onExit} aria-label="Close">✕</button>
+      <div className="mm-content" key={phase}>{children}</div>
+    </div>,
+    document.body,
   );
 }

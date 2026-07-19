@@ -6,6 +6,8 @@ const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 let _ctx = null;
 let _timeouts = [];
 let _lastState = 'none';
+let _emdr = null;      // bilateral EMDR bed: { osc, c2, panner, lfo, lfoDepth, bedMaster, extra } | null
+let _ambient = null;   // calm ambient drone: { oscs, lfo, ambMaster } | null
 let _silentEl = null;   // looping silent <audio> — flips iOS into the "media"
                         // audio category so Web Audio plays even with the
                         // physical ringer/silent switch ON (see enableMediaPlayback).
@@ -223,6 +225,206 @@ function pluck(ctx, hz, startTime, decay) {
 
   src.start(startTime);
   src.stop(startTime + decay + 0.12);
+}
+
+// ─── Calm voice + EMDR beds (for the Music Memory / ear-training tab) ─────────
+// A soft, warm prompt voice (not the metallic Karplus–Strong pluck), a bilateral
+// stereo EMDR pad that pans LEFT↔RIGHT once per breath, and a quiet ambient drone.
+// The two beds route to ctx.destination on their OWN gain (NOT ctx._out): _out is
+// a mono-summing DynamicsCompressor whose sidechain would duck the pad on every
+// strum, and stopAudio() disconnects+rebuilds _out (which would orphan, not
+// silence, a bed on it). The beds hold their own node handles and are stopped
+// explicitly by stopEmdrBed()/stopAmbient() (also called from stopAudio()).
+
+/**
+ * Soft, warm prompt voice for Music Memory (replaces the metallic pluck for
+ * prompts). Two detuned sines + a quiet sub-octave triangle → gentle lowpass →
+ * slow ADSR → ctx._out (foreground cue, mono-summed with guitar, silenced by
+ * stopAudio()). Does NOT call musicHeard() — the calm session keeps the guide still.
+ */
+export function playSoftTone(ctx, hz, startTime, dur = 1.2, opts = {}) {
+  const g0      = opts.gain ?? 0.18;
+  const attack  = opts.attack ?? 0.06;
+  const release = opts.release ?? 0.40;
+  const detune  = opts.detuneCents ?? 7;
+
+  const osc1 = ctx.createOscillator(); osc1.type = 'sine';     osc1.frequency.value = hz;
+  const osc2 = ctx.createOscillator(); osc2.type = 'sine';     osc2.frequency.value = hz; osc2.detune.value = detune;
+  const sub  = ctx.createOscillator(); sub.type  = 'triangle'; sub.frequency.value  = hz / 2;
+
+  const mix = ctx.createGain();
+  const subGain = ctx.createGain(); subGain.gain.value = 0.35;
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = Math.min(2600, hz * 6 + 400);
+  lp.Q.value = 0.4;
+
+  const env = ctx.createGain();
+  const t = startTime;
+  const end = t + dur;
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.linearRampToValueAtTime(g0, t + attack);
+  env.gain.setValueAtTime(g0, Math.max(t + attack, end - release));
+  env.gain.exponentialRampToValueAtTime(0.0001, end + release);
+
+  osc1.connect(mix); osc2.connect(mix);
+  sub.connect(subGain); subGain.connect(mix);
+  mix.connect(lp); lp.connect(env);
+  env.connect(ctx._out);
+
+  const stopAt = end + release + 0.05;
+  osc1.start(t); osc2.start(t); sub.start(t);
+  osc1.stop(stopAt); osc2.stop(stopAt); sub.stop(stopAt);
+}
+
+/**
+ * Soft chord/arpeggio prompt (warm, lightly rolled). Per-voice gain stays low so
+ * the summed voices never clip ctx._out (an un-catalogued chord can carry 3–4
+ * tones as plucks).
+ */
+export function playSoftChord(ctx, hzs, startTime, opts = {}) {
+  const list = hzs || [];
+  const dur    = opts.dur ?? 1.6;
+  const spread = (opts.spreadMs ?? 90) / 1000;
+  const per = opts.gain ?? Math.max(0.07, Math.min(0.13, 0.34 / Math.max(1, list.length)));
+  list.forEach((hz, i) => {
+    playSoftTone(ctx, hz, startTime + i * spread, dur, { gain: per, release: 0.5 });
+  });
+}
+
+/**
+ * Bilateral EMDR stereo bed. A soft drone whose stereo PAN sweeps LEFT↔RIGHT once
+ * per breathMs, phase-exact via a cosine PeriodicWave LFO. Pan = 0 + (−1)·cos(2πt/T)
+ * = −cos, so it is −1 (LEFT) at t=0 (matching the pacer orb, which starts left) and
+ * +1 (RIGHT) at T/2. Routes to ctx.destination on its own gain to preserve stereo
+ * and avoid the master compressor's ducking. Idempotent.
+ *
+ * @returns {number} perfEpoch — performance.now() at LFO start, for the CSS pacer
+ *          to phase-offset against (never ctx.currentTime — different clock).
+ */
+export function startEmdrBed({ breathMs = 8000, gain = 0.05, droneHz = 174.6 } = {}) {
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+  stopEmdrBed();
+
+  const breathS = breathMs / 1000;
+  const now = ctx.currentTime + 0.02;
+  const perfEpoch = performance.now();
+
+  const bedMaster = ctx.createGain();
+  bedMaster.gain.setValueAtTime(0.0001, now);
+  bedMaster.gain.linearRampToValueAtTime(gain, now + 1.5);
+  bedMaster.connect(ctx.destination);
+
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.2;
+  const c1 = ctx.createOscillator(); c1.type = 'sine'; c1.frequency.value = droneHz;
+  const c2 = ctx.createOscillator(); c2.type = 'sine'; c2.frequency.value = droneHz * 2 ** (7 / 12);
+  const c2g = ctx.createGain(); c2g.gain.value = 0.35;
+  c1.connect(lp); c2.connect(c2g); c2g.connect(lp);
+
+  if (typeof ctx.createStereoPanner === 'function') {
+    const panner = ctx.createStereoPanner();
+    panner.pan.setValueAtTime(0, now);                 // BASE 0 — LFO supplies the full swing
+    const lfo = ctx.createOscillator();
+    // Cosine wave: real=[0,1] → lfo(t)=cos(2πft). No negative start; exact period.
+    const cosWave = ctx.createPeriodicWave(new Float32Array([0, 1]), new Float32Array([0, 0]));
+    lfo.setPeriodicWave(cosWave);
+    lfo.frequency.value = 1 / breathS;
+    const lfoDepth = ctx.createGain(); lfoDepth.gain.value = -1;  // pan = -cos → LEFT at t=0
+    lfo.connect(lfoDepth); lfoDepth.connect(panner.pan);
+    lp.connect(panner); panner.connect(bedMaster);
+    lfo.start(now);
+    c1.start(now); c2.start(now);
+    _emdr = { osc: c1, c2, panner, lfo, lfoDepth, bedMaster, extra: [] };
+    return perfEpoch;
+  }
+
+  // Fallback (no StereoPanner): equal-power L/R via a merger, sin/cos gains.
+  const merger = ctx.createChannelMerger(2);
+  const gL = ctx.createGain(); const gR = ctx.createGain();
+  const cosWave = ctx.createPeriodicWave(new Float32Array([0, 1]), new Float32Array([0, 0]));
+  const sinWave = ctx.createPeriodicWave(new Float32Array([0, 0]), new Float32Array([0, 1]));
+  const lCos = ctx.createOscillator(); lCos.setPeriodicWave(cosWave); lCos.frequency.value = 1 / breathS;
+  const rSin = ctx.createOscillator(); rSin.setPeriodicWave(sinWave); rSin.frequency.value = 1 / breathS;
+  const lDepth = ctx.createGain(); lDepth.gain.value = -0.5;
+  const rDepth = ctx.createGain(); rDepth.gain.value = 0.5;
+  const biasL = ctx.createConstantSource(); biasL.offset.value = 0.5;
+  const biasR = ctx.createConstantSource(); biasR.offset.value = 0.5;
+  biasL.connect(gL.gain); lCos.connect(lDepth); lDepth.connect(gL.gain);
+  biasR.connect(gR.gain); rSin.connect(rDepth); rDepth.connect(gR.gain);
+  lp.connect(gL); lp.connect(gR);
+  gL.connect(merger, 0, 0); gR.connect(merger, 0, 1);
+  merger.connect(bedMaster);
+  biasL.start(now); biasR.start(now); lCos.start(now); rSin.start(now);
+  c1.start(now); c2.start(now);
+  _emdr = { osc: c1, c2, panner: null, lfo: lCos, lfoDepth: rSin, bedMaster, extra: [biasL, biasR, rSin] };
+  return perfEpoch;
+}
+
+export function stopEmdrBed() {
+  const ctx = _ctx;
+  if (!ctx || !_emdr) return;
+  const n = _emdr; _emdr = null;
+  const t = ctx.currentTime;
+  try {
+    n.bedMaster.gain.cancelScheduledValues(t);
+    n.bedMaster.gain.setValueAtTime(n.bedMaster.gain.value, t);
+    n.bedMaster.gain.linearRampToValueAtTime(0.0001, t + 0.4);
+  } catch { /* ignore */ }
+  const stopAt = t + 0.45;
+  [n.osc, n.c2, n.lfo, ...(n.extra || [])].forEach((o) => {
+    if (o) { try { o.stop(stopAt); } catch { /* ignore */ } }
+  });
+  setTimeout(() => { try { n.bedMaster.disconnect(); } catch { /* ignore */ } }, 600);
+}
+
+/**
+ * Calm ambient bed: a very quiet, slowly-evolving 3-partial sine drone with a
+ * ~30 s filter-drift LFO. Own gain → ctx.destination (independent of _out). Idempotent.
+ */
+export function startAmbient({ gain = 0.04, rootHz = 130.8 } = {}) {
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch { /* ignore */ } }
+  stopAmbient();
+
+  const now = ctx.currentTime + 0.02;
+  const ambMaster = ctx.createGain();
+  ambMaster.gain.setValueAtTime(0.0001, now);
+  ambMaster.gain.linearRampToValueAtTime(gain, now + 2.0);
+  ambMaster.connect(ctx.destination);
+
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 0.3;
+  lp.connect(ambMaster);
+  const mix = ctx.createGain(); mix.gain.value = 0.5; mix.connect(lp);
+
+  const partials = [1, 1.5, 2.02];
+  const oscs = partials.map((r, i) => {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = rootHz * r;
+    const g = ctx.createGain(); g.gain.value = i === 0 ? 1 : 0.4;
+    o.connect(g); g.connect(mix); o.start(now); return o;
+  });
+
+  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.033;
+  const lpDepth = ctx.createGain(); lpDepth.gain.value = 220;
+  lfo.connect(lpDepth); lpDepth.connect(lp.frequency); lfo.start(now);
+
+  _ambient = { oscs, lfo, ambMaster };
+}
+
+export function stopAmbient() {
+  const ctx = _ctx;
+  if (!ctx || !_ambient) return;
+  const n = _ambient; _ambient = null;
+  const t = ctx.currentTime;
+  try {
+    n.ambMaster.gain.cancelScheduledValues(t);
+    n.ambMaster.gain.setValueAtTime(n.ambMaster.gain.value, t);
+    n.ambMaster.gain.linearRampToValueAtTime(0.0001, t + 0.6);
+  } catch { /* ignore */ }
+  const stopAt = t + 0.65;
+  [...(n.oscs || []), n.lfo].forEach((o) => { if (o) { try { o.stop(stopAt); } catch { /* ignore */ } } });
+  setTimeout(() => { try { n.ambMaster.disconnect(); } catch { /* ignore */ } }, 800);
 }
 
 /**
@@ -683,6 +885,10 @@ export function playFanfare({ big = false } = {}) {
 }
 
 export function stopAudio() {
+  // The EMDR/ambient beds live on ctx.destination (not _out), so the _out rebuild
+  // below would NOT silence them — stop them explicitly first.
+  stopEmdrBed();
+  stopAmbient();
   _timeouts.forEach(clearTimeout);
   _timeouts = [];
   // Silence any currently-ringing notes by disconnecting the master output,

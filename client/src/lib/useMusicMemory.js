@@ -18,39 +18,58 @@ import { detectPitchYIN, hzToMidi } from './pitchDetect';
 import { makeOnsetDetector } from './improvEngine';
 import { makeNoteCapture } from './scaleGame';
 import { COUNTDOWN_MS } from './scalePractice';
-import { unlockAudio, pluckNylon, playProgression, stopAudio } from './audio';
 import {
-  nextElement, adjustLevel, accept, elementToAudioSpec,
-  saveMemoryRun, memoryMastery, detectMemoryAdvancement,
+  unlockAudio, playSoftTone, playSoftChord, stopAudio,
+  startEmdrBed, stopEmdrBed, startAmbient, stopAmbient,
+} from './audio';
+import {
+  nextElement, adjustLevel, accept,
+  saveMemoryRun, memoryMastery, detectMemoryAdvancement, answerLabelFor,
 } from './memoryTrain';
 
 const FRAME_MS = 1000 / 60;
 const SILENCE_RMS = 0.01;
-const ANSWER_MS = 5000;       // generous window to sing/play the answer (calm, no early stop)
-const FEEDBACK_MS = 2200;     // how long the calm feedback shows before auto-advancing
+const ANSWER_MS = 6500;       // generous window to sing/play the answer (calm, no early stop)
+const BREATH_MS = 8000;       // MUST equal BilateralPacer's default breathMs
+const FEEDBACK_MS = 2600;     // how long the calm feedback shows before auto-advancing
 const SESSION_ITEMS = 8;      // items per session
 
-// Turn an element's declarative AudioSpec into real sound on the shared ctx.
-// Returns a promise that resolves ~when the prompt finishes, so the caller can
-// open the mic only AFTER the prompt (no bleed into the graded window).
+// Open-string Hz (low E → high e) — mirror of audio.js's private fretHz, since
+// it isn't exported. Turns a 6-char tab into the sounding frequencies.
+const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
+function tabToHz(tab) {
+  return (tab || '').split('')
+    .map((v, s) => (v === 'x' ? null : OPEN_HZ[s] * 2 ** (parseInt(v, 10) / 12)))
+    .filter((x) => x != null);
+}
+
+// Turn an element's declarative AudioSpec into SOFT sound on the shared ctx (never
+// the metallic pluck). Returns a promise that resolves ~when the prompt finishes,
+// so the caller opens the mic only AFTER the prompt (no bleed into the window).
 function playPrompt(spec) {
   return new Promise((resolve) => {
     if (!spec) { resolve(); return; }
-    if (spec.kind === 'progression') {
+    unlockAudio().then((ctx) => {
+      if (!ctx) { resolve(); return; }
+      if (spec.kind === 'plucks') {
+        const hzs = spec.hz || [];
+        if (!hzs.length) { resolve(); return; }
+        const gap = (spec.gapMs || 0) / 1000;
+        const t0 = ctx.currentTime + 0.08;
+        if (gap === 0 && hzs.length > 1) playSoftChord(ctx, hzs, t0);
+        else hzs.forEach((hz, i) => playSoftTone(ctx, hz, t0 + i * gap, 1.0));
+        setTimeout(resolve, hzs.length * (spec.gapMs || 0) + 1400);
+        return;
+      }
+      // 'progression' → soft chord blocks (warm, not the metallic guitar).
       const voicings = spec.voicings || [];
       if (!voicings.length) { resolve(); return; }
-      playProgression(voicings, spec.bpm || 90, undefined, () => resolve());
-      return;
-    }
-    // 'plucks'
-    unlockAudio().then((ctx) => {
-      const hzs = spec.hz || [];
-      if (!ctx || !hzs.length) { resolve(); return; }
-      const gap = (spec.gapMs || 0) / 1000;
-      const t0 = ctx.currentTime + 0.06;
-      hzs.forEach((hz, i) => pluckNylon(ctx, hz, t0 + i * gap, 0.9));
-      const totalMs = (hzs.length * (spec.gapMs || 0)) + 900;
-      setTimeout(resolve, totalMs);
+      const chordDur = (60 / (spec.bpm || 90)) * 2;   // 2 beats/chord — calm
+      const t0 = ctx.currentTime + 0.08;
+      voicings.forEach((v, i) => {
+        playSoftChord(ctx, tabToHz(v.tab), t0 + i * chordDur, { dur: chordDur * 0.9, spreadMs: 70 });
+      });
+      setTimeout(resolve, (voicings.length * chordDur + 0.6) * 1000);
     }).catch(() => resolve());
   });
 }
@@ -81,6 +100,8 @@ export function useMusicMemory() {
   const [micOk, setMicOk] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [heardPcs, setHeardPcs] = useState([]);     // committed PCs THIS item (live → chips)
+  const [pacerEpoch, setPacerEpoch] = useState(0);  // performance.now() when the EMDR bed started
 
   // Mutable run state the async loop reads fresh.
   const abortRef = useRef(false);
@@ -91,6 +112,8 @@ export function useMusicMemory() {
   // each item; the rAF tick reads the current instance through these refs.
   const noteCaptureRef = useRef(null);
   const micOkRef = useRef(null);
+  const committedPcsRef = useRef(null);  // the Set the tick mutates (surfaced via heardPcs)
+  const bedsOnRef = useRef(false);       // are the session EMDR/ambient beds running?
 
   const stopMic = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -98,17 +121,27 @@ export function useMusicMemory() {
     try { mic.current.close(); } catch { /* noop */ }
   }, [mic]);
 
-  useEffect(() => () => { abortRef.current = true; stopMic(); stopAudio(); }, [stopMic]);
+  // Stop the session-scoped calm beds (idempotent; guarded so 'Another round'
+  // can't double-start and every exit path funnels here).
+  const stopBeds = useCallback(() => {
+    if (!bedsOnRef.current) return;
+    bedsOnRef.current = false;
+    stopEmdrBed();
+    stopAmbient();
+  }, []);
+
+  useEffect(() => () => { abortRef.current = true; stopMic(); stopAudio(); stopBeds(); }, [stopMic, stopBeds]);
 
   const abort = useCallback(() => {
     abortRef.current = true;
     stopMic();
     stopAudio();
+    stopBeds();
     setPhase('checkin');
     setCountdown(null);
     setElement(null);
     setLiveNote(null);
-  }, [stopMic]);
+  }, [stopMic, stopBeds]);
 
   // Replay the current element's prompt audio (the calm "hear it again").
   const replay = useCallback(() => {
@@ -131,12 +164,18 @@ export function useMusicMemory() {
       setError(e && e.name === 'NotAllowedError'
         ? 'Microphone permission denied — allow mic access and try again.'
         : 'Could not access the microphone.');
+      // Recover the session rather than freezing on 'prompt'/'answer'.
+      stopMic();
+      stopBeds();
+      setPhase('checkin');
       return null;
     }
 
     const onset = makeOnsetDetector();
-    const committedPcs = new Set();
+    committedPcsRef.current = new Set();
+    setHeardPcs([]);              // clear last item's chips
     let heardDuringCountIn = false;
+    let captureReset = false;
 
     setPhase('answer');
     setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
@@ -156,6 +195,16 @@ export function useMusicMemory() {
           if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
         } else if (lastCountdown !== 0) {
           lastCountdown = 0; setCountdown(0);
+        }
+
+        // At the count-in→answer boundary, reset the capture machine so a note
+        // that stabilized DURING the count-in can't suppress the user's first
+        // real answer note (makeNoteCapture carries committedMidi/armed until a
+        // silence frame). Without this, "show the answer live" would miss it.
+        if (!inCountIn && !captureReset) {
+          captureReset = true;
+          noteCaptureRef.current.reset();
+          onset.reset();
         }
 
         // End when the answer window (after the count-in) elapses.
@@ -179,9 +228,14 @@ export function useMusicMemory() {
             } else setLiveNote(null);
           } else setLiveNote(null);
 
-          // Commit stable notes (ring-over aware) during the SCORED window only.
+          // Commit stable notes (ring-over aware) during the SCORED window only,
+          // surfacing each NEW pitch class to render (one re-render per new pc).
           const c = noteCaptureRef.current.push({ midi, rms, onset: isOnset, tMs: elapsed });
-          if (c && !inCountIn) committedPcs.add(((Math.round(c.midi) % 12) + 12) % 12);
+          if (c && !inCountIn) {
+            const pc = ((Math.round(c.midi) % 12) + 12) % 12;
+            const set = committedPcsRef.current;
+            if (!set.has(pc)) { set.add(pc); setHeardPcs([...set]); }
+          }
 
           if (!inCountIn && micOkRef.current === null) {
             micOkRef.current = heardDuringCountIn;
@@ -198,8 +252,9 @@ export function useMusicMemory() {
     setCountdown(null);
     if (abortRef.current) return null;
 
-    return accept(el, committedPcs);
-  }, [mic, stopMic]);
+    // Leave heardPcs populated — it must persist through the feedback phase.
+    return accept(el, committedPcsRef.current);
+  }, [mic, stopMic, stopBeds]);
 
   const start = useCallback(async ({ checkInMood } = {}) => {
     setError(null);
@@ -215,6 +270,15 @@ export function useMusicMemory() {
 
     // Prime audio inside the user gesture that called start().
     try { await unlockAudio(); } catch { /* noop */ }
+
+    // Start the session-scoped calm beds ONCE (idempotent). The EMDR bed returns
+    // its performance.now() epoch so the CSS pacer can phase-align its sweep.
+    if (!bedsOnRef.current) {
+      startAmbient();
+      const epoch = startEmdrBed({ breathMs: BREATH_MS });
+      setPacerEpoch(epoch);
+      bedsOnRef.current = true;
+    }
 
     let correct = 0;
     for (let i = 0; i < SESSION_ITEMS; i++) {
@@ -274,16 +338,19 @@ export function useMusicMemory() {
       checkInMood: checkInMood ?? null,
       advancement,
     };
+    stopBeds();   // drill over — quiet the beds for the calm check-out
     setResult(out);
     setPhase('checkout');
     return out;
-  }, [runItem]);
+  }, [runItem, stopBeds]);
 
   return {
     phase, setPhase,
     countdown, element, itemNo, sessionItems: SESSION_ITEMS,
     liveNote, lastResult, tally, levelState, micOk, result, error,
-    answerMs: ANSWER_MS,
+    heardPcs, pacerEpoch,
+    expectedAnswerLabel: element ? answerLabelFor(element) : null,
+    answerMs: ANSWER_MS, breathMs: BREATH_MS,
     start, abort, replay,
   };
 }
