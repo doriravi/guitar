@@ -294,6 +294,52 @@ export function playSoftChord(ctx, hzs, startTime, opts = {}) {
 }
 
 /**
+ * A single clock "tick" — the per-second sound of a count-in. Modeled as a very
+ * short, fast-decaying blip (a tuned sine transient plus a tiny filtered-noise
+ * click) so it reads as a mechanical clock tick, not a musical note. Cheap and
+ * self-contained: schedules on the shared ctx._out and needs no cleanup.
+ *
+ * @param {AudioContext} ctx    shared context (from unlockAudio/getCtx)
+ * @param {number} [startTime]  when to fire (defaults to now)
+ * @param {object} [opts]       { hz, gain, accent }  accent=true → brighter/louder
+ *                              (used for the final tick before "go")
+ */
+export function playTick(ctx, startTime, opts = {}) {
+  const c = ctx || getCtx();
+  const t = Math.max(startTime ?? c.currentTime, c.currentTime);
+  const accent = !!opts.accent;
+  const hz = opts.hz ?? (accent ? 2000 : 1500);
+  const g0 = opts.gain ?? (accent ? 0.22 : 0.16);
+  const dur = accent ? 0.05 : 0.035;   // very short → a "tick", not a "beep"
+
+  // Tonal transient — a sine that snaps on and decays almost instantly.
+  const osc = c.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(hz, t);
+  osc.frequency.exponentialRampToValueAtTime(hz * 0.6, t + dur);
+
+  const env = c.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.linearRampToValueAtTime(g0, t + 0.001);      // near-instant attack = click
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+  // A whisper of high-passed noise gives the tick its mechanical "tk" edge.
+  const noiseLen = Math.max(1, Math.floor(c.sampleRate * dur));
+  const nbuf = c.createBuffer(1, noiseLen, c.sampleRate);
+  const nd = nbuf.getChannelData(0);
+  for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+  const noise = c.createBufferSource(); noise.buffer = nbuf;
+  const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+  const ng = c.createGain(); ng.gain.value = g0 * 0.5;
+
+  osc.connect(env); env.connect(c._out);
+  noise.connect(hp); hp.connect(ng); ng.connect(c._out);
+
+  osc.start(t); osc.stop(t + dur + 0.02);
+  noise.start(t); noise.stop(t + dur + 0.02);
+}
+
+/**
  * Bilateral EMDR stereo bed. A soft drone whose stereo PAN sweeps LEFT↔RIGHT once
  * per breathMs, phase-exact via a cosine PeriodicWave LFO. Pan = 0 + (−1)·cos(2πt/T)
  * = −cos, so it is −1 (LEFT) at t=0 (matching the pacer orb, which starts left) and

@@ -23,6 +23,7 @@ import { makeOnsetDetector, SCALE_LABELS } from './improvEngine';
 import { COUNTDOWN_MS, PER_NOTE_MS, saveScaleRun, scaleMastery } from './scalePractice';
 import { advanceForRecording } from './levelPlan';
 import { NOTE_NAMES } from './chordAnalyzer';
+import { makeCountdownCue } from './countdownCue';
 import {
   makeNoteCapture,
   buildTargetSequence,
@@ -74,10 +75,12 @@ export function useScaleQuest() {
   const runRef = useRef(null);
   const comboRef = useRef(0);
   const micOkRef = useRef(null);
+  const cueRef = useRef(null);   // count-in tick/go cue (see countdownCue)
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    try { cueRef.current?.cancel(); } catch { /* noop */ }
     try { mic.current.close(); } catch { /* noop */ }
   }, [mic]);
 
@@ -134,7 +137,11 @@ export function useScaleQuest() {
     runRef.current = { config, scaleSet, targets, capture, onset, committed, perNoteMs, playMs };
 
     setPhase('countin');
-    setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
+    const cue = makeCountdownCue();
+    cueRef.current = cue;
+    const firstCount = Math.ceil(COUNTDOWN_MS / 1000);
+    setCountdown(firstCount);
+    cue.set(firstCount);
     setCurrentIdx(-1);
 
     const started = performance.now();
@@ -150,9 +157,9 @@ export function useScaleQuest() {
         // Countdown UI.
         if (inCountIn) {
           const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
-          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); cue.set(remain); }
         } else if (lastCountdown !== 0) {
-          lastCountdown = 0; setCountdown(0);
+          lastCountdown = 0; setCountdown(0); cue.set(0);
           setPhase('play');
         }
 

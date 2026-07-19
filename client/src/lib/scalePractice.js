@@ -18,6 +18,7 @@ import { useMic, loadConfig } from './micDetect';
 import { detectPitchYIN, hzToMidi } from './pitchDetect';
 import { gradeFor } from './practiceGame';
 import { advanceForRecording, RECORDING_PASS_STARS } from './levelPlan';
+import { makeCountdownCue } from './countdownCue';
 
 // Exported so the Scale screen can pace its on-fretboard "play this note next"
 // target cue in sync with the recording window.
@@ -214,6 +215,7 @@ export function useScaleRecorder() {
   // 5..1 during the pre-play countdown, 0 once the notes begin, null when idle.
   const [countdown, setCountdown] = useState(null);
   const busyRef = useRef(false);
+  const cueRef = useRef(null);   // the active count-in tick/go cue (see countdownCue)
 
   useEffect(() => () => { try { mic.current.close(); } catch { /* noop */ } }, [mic]);
 
@@ -243,7 +245,12 @@ export function useScaleRecorder() {
     }
 
     setState('recording');
-    setCountdown(Math.ceil(COUNTDOWN_MS / 1000));   // show "5" immediately
+    // Clock-tick + spoken "go" for the count-in (shared cue used app-wide).
+    const cue = makeCountdownCue();
+    cueRef.current = cue;
+    const firstCount = Math.ceil(COUNTDOWN_MS / 1000);
+    setCountdown(firstCount);       // show "5" immediately
+    cue.set(firstCount);            // …and tick on it
 
     // Collect the sequence of stable pitch classes the player sounds — but ONLY
     // after the countdown. During the count-in the mic is live (so live-indication
@@ -263,9 +270,9 @@ export function useScaleRecorder() {
         // Countdown 5..1 during the lead-in, then 0 once the notes begin.
         if (inCountdown) {
           const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
-          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); cue.set(remain); }
         } else if (lastCountdown !== 0) {
-          lastCountdown = 0; setCountdown(0);
+          lastCountdown = 0; setCountdown(0); cue.set(0);   // fires the spoken "go"
         }
         setProgress(Math.min(1, Math.max(0, (elapsed - COUNTDOWN_MS) / recordMs)));
         if (elapsed >= COUNTDOWN_MS + recordMs) { resolve(); return; }
@@ -336,6 +343,7 @@ export function useScaleRecorder() {
   const cancel = useCallback(() => {
     // best-effort: closing the mic ends the capture; the rAF loop resolves next
     // frame with whatever was collected. (Used if the user leaves the screen.)
+    try { cueRef.current?.cancel(); } catch { /* noop */ }
     try { mic.current.close(); } catch { /* noop */ }
   }, [mic]);
 

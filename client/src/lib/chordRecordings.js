@@ -15,6 +15,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { useMic, detectPeaksConfigured, loadConfig } from './micDetect';
 import { classifyChordPCs, windowScorer, GRADE_POINTS, gradeFor } from './practiceGame';
 import { advanceForRecording } from './levelPlan';
+import { makeCountdownCue } from './countdownCue';
 
 // One recording window: how long we listen, and the detection cadence — matched
 // to Play-Along (100 ms FFT ticks). 1.6 s is long enough for a strum to ring and
@@ -239,9 +240,13 @@ export function useChordRecorder() {
   // 5..1 during the pre-strum countdown, 0 once the chord window begins, null idle.
   const [countdown, setCountdown] = useState(null);
   const busyRef = useRef(false);
+  const cueRef = useRef(null);   // the active count-in tick/go cue (see countdownCue)
 
   // Ensure the mic is released if the component using the hook unmounts mid-record.
-  useEffect(() => () => { try { mic.current.close(); } catch { /* noop */ } }, [mic]);
+  useEffect(() => () => {
+    try { cueRef.current?.cancel(); } catch { /* noop */ }
+    try { mic.current.close(); } catch { /* noop */ }
+  }, [mic]);
 
   const record = useCallback(async (chordName) => {
     if (busyRef.current) return null;
@@ -264,7 +269,12 @@ export function useChordRecorder() {
     }
 
     setState('recording');
-    setCountdown(Math.ceil(COUNTDOWN_MS / 1000));   // show "5" immediately
+    // Clock-tick + spoken "go" for the count-in (shared cue used app-wide).
+    const cue = makeCountdownCue();
+    cueRef.current = cue;
+    const firstCount = Math.ceil(COUNTDOWN_MS / 1000);
+    setCountdown(firstCount);       // show "5" immediately
+    cue.set(firstCount);            // …and tick on it
     const durSec = RECORD_MS / 1000;
     const scorer = windowScorer(targetWindow(chordName, durSec), cfg, null);
 
@@ -280,9 +290,9 @@ export function useChordRecorder() {
         const elapsed = now - started;
         if (elapsed < COUNTDOWN_MS) {
           const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
-          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); cue.set(remain); }
         } else if (lastCountdown !== 0) {
-          lastCountdown = 0; setCountdown(0);
+          lastCountdown = 0; setCountdown(0); cue.set(0);   // fires the spoken "go"
         }
         if (elapsed >= tCapture0 + RECORD_MS) { resolve(); return; }
         // Only feed the scorer AFTER the countdown — warm-up isn't graded.

@@ -41,6 +41,16 @@ export function say(text, { voiceId, rate = 1, pitch = 1, volume = 1, onEnd } = 
   return () => stopSinging();
 }
 
+/**
+ * Speak the count-in's "go!" — the shared voice cue every countdown fires when it
+ * finishes (see the count-in tick+go rule). Snappy and upbeat. Degrades silently
+ * where speech isn't supported (the audible tick still marks the moment).
+ * @returns {() => void} cancel fn
+ */
+export function sayGo() {
+  return say('Go!', { rate: 1.3, pitch: 1.1 });
+}
+
 // Is browser speech available at all?
 export function vocalsSupported() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;

@@ -27,6 +27,13 @@ import {
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, answerLabelFor,
 } from './memoryTrain';
 import { useSpeechAnswer } from './useSpeechAnswer';
+import { makeCountdownCue } from './countdownCue';
+
+// The Music Memory screen's "quiet mode" toggle (persisted by MusicMemory.jsx).
+// When the user has muted narration, the count-in tick/go stays quiet too.
+function narrationMuted() {
+  try { return localStorage.getItem('guitar_mm_narrate') === '0'; } catch { return false; }
+}
 
 const FRAME_MS = 1000 / 60;
 const SILENCE_RMS = 0.01;
@@ -121,10 +128,12 @@ export function useMusicMemory() {
   const micOkRef = useRef(null);
   const committedPcsRef = useRef(null);  // the Set the tick mutates (surfaced via heardPcs)
   const bedsOnRef = useRef(false);       // are the session EMDR/ambient beds running?
+  const cueRef = useRef(null);           // count-in tick/go cue (see countdownCue)
 
   const stopMic = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    try { cueRef.current?.cancel(); } catch { /* noop */ }
     try { mic.current.close(); } catch { /* noop */ }
     try { speech.stop(); } catch { /* noop */ }
   }, [mic, speech]);
@@ -189,7 +198,11 @@ export function useMusicMemory() {
       try { speech.start('en-US'); } catch { /* handled via onError */ }
 
       setPhase('answer');
-      setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
+      const sayCue = makeCountdownCue({ muted: narrationMuted });
+      cueRef.current = sayCue;
+      const sayFirst = Math.ceil(COUNTDOWN_MS / 1000);
+      setCountdown(sayFirst);
+      sayCue.set(sayFirst);
       const started = performance.now();
       let clearedForAnswer = false;
       let hitDuringWindow = null;   // grade as soon as a candidate matches (before the window ends)
@@ -201,9 +214,9 @@ export function useMusicMemory() {
           const inCountIn = elapsed < COUNTDOWN_MS;
           if (inCountIn) {
             const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
-            if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+            if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); sayCue.set(remain); }
           } else {
-            if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); }
+            if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); sayCue.set(0); }
             if (!clearedForAnswer) { clearedForAnswer = true; speech.reset(); setLiveTranscript(''); setLiveCandidates([]); }
           }
           if (!inCountIn) {
@@ -256,7 +269,11 @@ export function useMusicMemory() {
     let captureReset = false;
 
     setPhase('answer');
-    setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
+    const singCue = makeCountdownCue({ muted: narrationMuted });
+    cueRef.current = singCue;
+    const singFirst = Math.ceil(COUNTDOWN_MS / 1000);
+    setCountdown(singFirst);
+    singCue.set(singFirst);
 
     const started = performance.now();
     await new Promise((resolve) => {
@@ -270,9 +287,9 @@ export function useMusicMemory() {
 
         if (inCountIn) {
           const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
-          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+          if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); singCue.set(remain); }
         } else if (lastCountdown !== 0) {
-          lastCountdown = 0; setCountdown(0);
+          lastCountdown = 0; setCountdown(0); singCue.set(0);
         }
 
         // At the count-in→answer boundary, reset the capture machine so a note
