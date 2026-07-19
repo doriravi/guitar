@@ -79,8 +79,14 @@ export const LEVEL_PLAN = [
   {
     id: 'beg-note-names', tier: 'Beginner', column: 'theory', type: 'auto', tab: 'memory',
     title: 'Recognise the note names by ear',
-    detail: 'Music Memory tab → score 80%+ in a session. It drills note names and grades your mic answer — the anchor for finding any chord or scale.',
+    detail: 'Music Memory tab (Stage 1 · Notes) → score 80%+ in a session. Naming a pitch you hear is the anchor for finding any chord or scale.',
     check: { kind: 'memoryMastered', level: 1, minScore: 80 },
+  },
+  {
+    id: 'beg-ear-intervals', tier: 'Beginner', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Recognise intervals by ear',
+    detail: 'Music Memory tab (Stage 2 · Intervals) → score 80%+ in a session that reaches Level 2. Hearing the distance between two notes is the first real "theory ear".',
+    check: { kind: 'memoryMastered', level: 2, minScore: 80 },
   },
   {
     id: 'beg-strum-calluses', tier: 'Beginner', column: 'practical', type: 'offapp',
@@ -131,9 +137,9 @@ export const LEVEL_PLAN = [
     tip: 'Use the Chord Finder to see the notes in each voicing while you learn the theory.',
   },
   {
-    id: 'int-ear-triads', tier: 'Intermediate', column: 'theory', type: 'auto', tab: 'memory',
-    title: 'Hear intervals & triads',
-    detail: 'Music Memory tab → score 80%+ in a session that reaches Level 3, where the drill adds intervals and triads by ear.',
+    id: 'int-ear-chords', tier: 'Intermediate', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Recognise chord quality by ear',
+    detail: 'Music Memory tab (Stage 3 · Chords) → score 80%+ in a session that reaches Level 3. Hear a triad and name it — major vs minor and beyond.',
     check: { kind: 'memoryMastered', level: 3, minScore: 80 },
   },
   {
@@ -190,9 +196,15 @@ export const LEVEL_PLAN = [
     check: { kind: 'anySongGrade', minGrade: 'A', minSpeed: 1.0 },
   },
   {
-    id: 'adv-ear-master', tier: 'Advanced', column: 'theory', type: 'auto', tab: 'memory',
-    title: 'Master the full ear-training ladder',
-    detail: 'Music Memory tab → score 80%+ in a session that reaches Level 5, recognising scale degrees and whole progressions by ear.',
+    id: 'adv-ear-degrees', tier: 'Advanced', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Hear scale degrees & harmonic function',
+    detail: 'Music Memory tab (Stage 4 · Scale degrees) → score 80%+ in a session that reaches Level 4. Place a note as the 1, 4, 5, etc. within its key.',
+    check: { kind: 'memoryMastered', level: 4, minScore: 80 },
+  },
+  {
+    id: 'adv-ear-progressions', tier: 'Advanced', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Recognise whole progressions by ear',
+    detail: 'Music Memory tab (Stage 5 · Progressions) → score 80%+ in a session that reaches Level 5 — the top of the ear-training ladder.',
     check: { kind: 'memoryMastered', level: 5, minScore: 80 },
   },
   {
