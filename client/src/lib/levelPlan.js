@@ -18,6 +18,7 @@
 
 import { loadHistory, bestForSong, reachedLevelForSong, gradeFor } from './practiceGame';
 import { DEFAULT_PROFILE } from './handProfile';
+import { memoryMastery } from './memoryTrain';
 
 // ── The plan ──────────────────────────────────────────────────────────────────
 // Tiers, in order. Each milestone:
@@ -36,6 +37,8 @@ import { DEFAULT_PROFILE } from './handProfile';
 //   { kind: 'songAtSpeed',  minSpeed }                    — a completed run ≥ speed
 //   { kind: 'anySongGrade', minGrade, minSpeed? }         — best grade on any song
 //   { kind: 'songGradeCount', minGrade, count, minSpeed } — N distinct songs graded
+//   { kind: 'memorySessions', count }                     — N Music Memory sessions done
+//   { kind: 'memoryLevel', level }                        — reached Music Memory level N
 
 export const TIERS = ['Beginner', 'Intermediate', 'Advanced', 'Master'];
 
@@ -68,10 +71,10 @@ export const LEVEL_PLAN = [
     detail: 'The Chords and Audio → Tab tabs show the 6-string EADGBe tab notation — learn to read it.',
   },
   {
-    id: 'beg-note-names', tier: 'Beginner', column: 'theory', type: 'offapp',
-    title: 'Know the note names on the low E & A strings',
-    detail: 'Memorise where each note sits on strings 6 and 5 — the anchor for finding any chord or scale.',
-    tip: 'Say the note out loud as you fret each one up the neck. (No in-app fretboard-note quiz yet.)',
+    id: 'beg-note-names', tier: 'Beginner', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Recognise the note names by ear',
+    detail: 'Music Memory tab → play a full session. It drills note names (and more) and grades your mic answer — the anchor for finding any chord or scale.',
+    check: { kind: 'memorySessions', count: 1 },
   },
   {
     id: 'beg-strum-calluses', tier: 'Beginner', column: 'practical', type: 'offapp',
@@ -120,6 +123,12 @@ export const LEVEL_PLAN = [
     title: 'Understand intervals & chord construction',
     detail: 'Know how a chord is built from a root, third and fifth, and what turns it major/minor/7th.',
     tip: 'Use the Chord Finder to see the notes in each voicing while you learn the theory.',
+  },
+  {
+    id: 'int-ear-triads', tier: 'Intermediate', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Hear intervals & triads',
+    detail: 'Music Memory tab → climb to Level 3, where the drill adds intervals and triads by ear on top of single notes.',
+    check: { kind: 'memoryLevel', level: 3 },
   },
   {
     id: 'int-root-tracking', tier: 'Intermediate', column: 'theory', type: 'offapp',
@@ -175,10 +184,16 @@ export const LEVEL_PLAN = [
     check: { kind: 'anySongGrade', minGrade: 'A', minSpeed: 1.0 },
   },
   {
+    id: 'adv-ear-master', tier: 'Advanced', column: 'theory', type: 'auto', tab: 'memory',
+    title: 'Master the full ear-training ladder',
+    detail: 'Music Memory tab → reach Level 5, recognising scale degrees and whole progressions by ear.',
+    check: { kind: 'memoryLevel', level: 5 },
+  },
+  {
     id: 'adv-improvise-by-ear', tier: 'Advanced', column: 'practical', type: 'offapp',
     title: 'Improvise fluidly & learn parts by ear',
     detail: 'Solo confidently across genres and pick up new parts by listening.',
-    tip: 'Audio → Tab can transcribe a clip to help, but ear-training itself is off-app.',
+    tip: 'Train your ear in the Music Memory tab and use Audio → Tab to transcribe a clip; applying it live is still on you.',
   },
 
   // ── MASTER ──────────────────────────────────────────────────────────────────
@@ -295,6 +310,15 @@ export function isAutoComplete(milestone, { handProfile } = {}) {
       }
       return winners.size >= check.count;
     }
+
+    // ── Music Memory (ear-training) ──────────────────────────────────────────
+    // Read from guitar_memory_train_v1 via memoryMastery(); the roadmap can only
+    // ever UNDER-report (an unplayed drill returns 0 sessions / level 0).
+    case 'memorySessions':
+      return memoryMastery().sessions >= (check.count ?? 1);
+
+    case 'memoryLevel':
+      return memoryMastery().level >= (check.level ?? 1);
 
     default:
       return false;
