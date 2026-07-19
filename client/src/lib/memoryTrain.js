@@ -302,16 +302,25 @@ export function accept(element, committed) {
 // SPECIFIC answer and compare it directly to the element — more accurate than
 // routing speech through pitch detection. Pure + deterministic (unit-testable).
 
-// Spoken words → pitch class. Accepts letter names, "sharp"/"flat", and common
-// mishears ("be"→B, "see"→C, "eh/ay"→A). Longest-first so "c sharp" beats "c".
+// Spoken words → pitch class. Accepts letter names, "sharp"/"flat", and the MANY
+// ways browser speech mis-hears a single spoken letter (a note name is one of the
+// hardest things to recognize). Longest-first so "c sharp" beats "c".
 const SPOKEN_PC = [
-  ['c sharp', 1], ['c#', 1], ['d flat', 1], ['db', 1], ['c natural', 0],
-  ['d sharp', 3], ['d#', 3], ['e flat', 3], ['eb', 3],
-  ['f sharp', 6], ['f#', 6], ['g flat', 6], ['gb', 6],
-  ['g sharp', 8], ['g#', 8], ['a flat', 8], ['ab', 8],
-  ['a sharp', 10], ['a#', 10], ['b flat', 10], ['bb', 10],
-  ['sea', 0], ['see', 0], ['dee', 2], ['ee', 4], ['eff', 5], ['gee', 7],
-  ['jee', 7], ['be', 11], ['bee', 11], ['ay', 9], ['eh', 9],
+  // Accidentals first (longest phrases win).
+  ['c sharp', 1], ['see sharp', 1], ['c#', 1], ['d flat', 1], ['dee flat', 1], ['db', 1], ['c natural', 0],
+  ['d sharp', 3], ['dee sharp', 3], ['d#', 3], ['e flat', 3], ['ee flat', 3], ['eb', 3],
+  ['f sharp', 6], ['eff sharp', 6], ['f#', 6], ['g flat', 6], ['gee flat', 6], ['gb', 6],
+  ['g sharp', 8], ['gee sharp', 8], ['g#', 8], ['a flat', 8], ['ay flat', 8], ['ab', 8],
+  ['a sharp', 10], ['ay sharp', 10], ['a#', 10], ['b flat', 10], ['bee flat', 10], ['bb', 10],
+  // Common mis-hears for each spoken letter (browser ASR).
+  ['sea', 0], ['see', 0], ['si', 0], ['cee', 0], ['ce', 0], ['c.', 0], ['do', 0], ['doh', 0],
+  ['dee', 2], ['de', 2], ['d.', 2], ['di', 2], ['re', 2], ['ray', 2],
+  ['ee', 4], ['eee', 4], ['he', 4], ['e.', 4], ['mi', 4], ['me', 4],
+  ['eff', 5], ['ef', 5], ['f.', 5], ['fa', 5], ['fah', 5],
+  ['gee', 7], ['jee', 7], ['ji', 7], ['g.', 7], ['sol', 7], ['so', 7], ['soh', 7],
+  ['ay', 9], ['hey', 9], ['eh', 9], ['a.', 9], ['la', 9], ['lah', 9],
+  ['be', 11], ['bee', 11], ['bi', 11], ['b.', 11], ['ti', 11], ['te', 11],
+  // Single letters last (shortest).
   ['c', 0], ['d', 2], ['e', 4], ['f', 5], ['g', 7], ['a', 9], ['b', 11],
 ];
 
@@ -420,6 +429,30 @@ export function acceptSpoken(element, transcript) {
   }
 
   return { correct, detail: { spoken: transcript, parsed, said } };
+}
+
+/**
+ * Grade a SPOKEN answer against MANY candidate phrases (the browser's alternatives
+ * + interim guesses). A single spoken letter is ambiguous, so the right answer is
+ * often not the top guess — accept if ANY candidate parses correctly. Returns the
+ * correct candidate's result when one matches, else the best (first) candidate's.
+ *
+ * @param {object} element
+ * @param {string[]} candidates
+ * @returns {{correct:boolean, detail:{ spoken, parsed, said, candidates }}}
+ */
+export function acceptSpokenAny(element, candidates) {
+  const list = (candidates || []).filter(Boolean);
+  let firstResult = null;
+  for (const c of list) {
+    const r = acceptSpoken(element, c);
+    if (!firstResult) firstResult = r;
+    if (r.correct) {
+      return { correct: true, detail: { ...r.detail, candidates: list } };
+    }
+  }
+  const base = firstResult || acceptSpoken(element, '');
+  return { correct: false, detail: { ...base.detail, candidates: list } };
 }
 
 // ─── Adaptive difficulty (streak-driven; NOT spaced repetition) ─────────────────

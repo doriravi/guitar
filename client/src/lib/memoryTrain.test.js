@@ -3,7 +3,7 @@ import {
   noteElement, intervalElement, chordElement, degreeElement, progressionElement,
   accept, elementToAudioSpec, nextElement, adjustLevel, LEVELS, MAX_LEVEL, UP_THRESHOLD,
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, pcName,
-  parseSpokenAnswer, acceptSpoken, promptSpeech, answerSpeech,
+  parseSpokenAnswer, acceptSpoken, acceptSpokenAny, promptSpeech, answerSpeech,
 } from './memoryTrain';
 
 // Pitch classes (sharp): C0 C#1 D2 D#3 E4 F5 F#6 G7 G#8 A9 A#10 B11
@@ -234,5 +234,26 @@ describe('acceptSpoken', () => {
     const el = progressionElement('C', 'major', 2, 2); // next = Am
     expect(acceptSpoken(el, 'A minor').correct).toBe(true);
     expect(acceptSpoken(el, 'A major').correct).toBe(false);
+  });
+  it('recognizes common single-letter mishears', () => {
+    expect(acceptSpoken(noteElement(0), 'see').correct).toBe(true);   // C
+    expect(acceptSpoken(noteElement(7), 'gee').correct).toBe(true);   // G
+    expect(acceptSpoken(noteElement(4), 'he').correct).toBe(true);    // E
+    expect(acceptSpoken(noteElement(9), 'hey').correct).toBe(true);   // A
+    expect(acceptSpoken(noteElement(0), 'do').correct).toBe(true);    // solfège C
+  });
+});
+
+describe('acceptSpokenAny (multiple candidates)', () => {
+  it('passes if ANY candidate parses to the right answer', () => {
+    const el = noteElement(0); // C
+    // The top guess is wrong ("the"), but an alternative ("see") is right.
+    expect(acceptSpokenAny(el, ['the', 'sea', 'blah']).correct).toBe(true);
+    expect(acceptSpokenAny(el, ['the', 'gee']).correct).toBe(false); // gee=G, none match C
+    expect(acceptSpokenAny(el, []).correct).toBe(false);
+  });
+  it('exposes the candidate list in detail', () => {
+    const r = acceptSpokenAny(noteElement(0), ['x', 'see']);
+    expect(r.detail.candidates).toEqual(['x', 'see']);
   });
 });

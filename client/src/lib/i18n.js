@@ -23,6 +23,7 @@ export const t = {
     mmModeSing: 'Sing / play it', mmModeSay: 'Say the name',
     mmSingHint: 'Sing, hum, or play the answer into the mic.',
     mmSayHint: 'Speak the answer out loud — e.g. “C sharp”, “G minor”, “perfect fifth”.',
+    mmSayTip: 'Say it clearly, like a word — “see” for C, “ee” for E, or “C sharp”, “G minor”.',
     mmSayNow: 'Say the answer…', mmYouSaid: 'You said',
     mmCheckInPrompt: 'How are you feeling right now?',
     mmScaleLow: 'Tense', mmScaleHigh: 'Calm',

@@ -23,7 +23,7 @@ import {
   startEmdrBed, stopEmdrBed, startAmbient, stopAmbient,
 } from './audio';
 import {
-  nextElement, adjustLevel, accept, acceptSpoken,
+  nextElement, adjustLevel, accept, acceptSpokenAny,
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, answerLabelFor,
 } from './memoryTrain';
 import { useSpeechAnswer } from './useSpeechAnswer';
@@ -173,16 +173,20 @@ export function useMusicMemory() {
         stopBeds(); setPhase('checkin'); return null;
       }
       speech.reset();
+      setHeardPcs([]);
       speech.onError = (err) => {
         if (err === 'not-allowed' || err === 'service-not-allowed') {
           setError('Microphone permission denied — allow mic access and try again.');
         }
       };
+      // Start listening NOW (during the count-in) so the recognizer is warm and
+      // the mic permission prompt is out of the way before the user answers.
       try { speech.start('en-US'); } catch { /* handled via onError */ }
 
       setPhase('answer');
       setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
       const started = performance.now();
+      let clearedForAnswer = false;
       await new Promise((resolve) => {
         let lastCountdown = -1;
         const tick = (now) => {
@@ -192,9 +196,14 @@ export function useMusicMemory() {
           if (inCountIn) {
             const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
             if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
-          } else if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); }
+          } else {
+            if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); }
+            // At the count-in→answer boundary, drop anything heard during the
+            // count-in so only the real answer counts.
+            if (!clearedForAnswer) { clearedForAnswer = true; speech.reset(); setLiveTranscript(''); }
+          }
           // Surface what's been heard so the user sees their words appear.
-          setLiveTranscript(speech.getTranscript());
+          if (!inCountIn) setLiveTranscript(speech.getTranscript());
           if (elapsed >= COUNTDOWN_MS + ANSWER_MS) { resolve(); return; }
           rafRef.current = requestAnimationFrame(tick);
         };
@@ -204,9 +213,10 @@ export function useMusicMemory() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       setCountdown(null);
       if (abortRef.current) return null;
-      const transcript = speech.getTranscript();
-      setLiveTranscript(transcript);
-      return acceptSpoken(el, transcript);
+      setLiveTranscript(speech.getTranscript());
+      // Grade against EVERY candidate the recognizer produced (a spoken letter is
+      // ambiguous; the right answer often isn't the top guess).
+      return acceptSpokenAny(el, speech.getCandidates());
     }
 
     // ── SING MODE: pitch via mic + YIN ───────────────────────────────────────

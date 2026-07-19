@@ -1,17 +1,24 @@
 // useSpeechAnswer — a thin wrapper over the browser's Web Speech API
 // (SpeechRecognition) for the Music Memory "Say it" answer mode: the user speaks
 // the answer in words ("C sharp", "G minor", "perfect fifth", "the third") and we
-// hand the running transcript to memoryTrain's acceptSpoken() for grading.
+// hand every heard candidate phrase to memoryTrain's acceptSpoken() for grading.
+//
+// Short note names ("C", "E", "G") are the hardest thing for browser speech to
+// get right — a single letter is often mis-heard ("C"→"see"/"sea"/"si") and the
+// top guess is frequently wrong. So we (a) ask for SEVERAL alternatives per result
+// and expose ALL of them as candidates (the grader accepts if ANY parses to the
+// right answer), and (b) AUTO-RESTART recognition if the browser ends it early on
+// silence, so the mic keeps listening for the whole answer window.
 //
 // Imperative (ref-based) like useMic, so the session hook's async answer-window
-// loop can start()/stop() it and pull the latest transcript each frame without
-// re-subscribing. It does NOT run the mic's YIN pitch pipeline — in "say" mode the
-// browser owns the mic for recognition, so the two never run at once.
+// loop can start()/stop() it and pull candidates each frame without re-subscribing.
+// In "say" mode the browser owns the mic for recognition, so the YIN pitch path is
+// never running at the same time.
 //
-// Graceful degradation: `isSpeechSupported()` is false in Firefox and limited on
-// iOS Safari; the UI hides the "Say it" option there and falls back to sing/play.
+// Graceful degradation: `supported` is false in Firefox and limited on iOS Safari;
+// the UI hides the "Say it" option there and falls back to sing/play.
 
-import { useRef, useCallback } from 'react';
+import { useRef } from 'react';
 
 function getRecognitionCtor() {
   if (typeof window === 'undefined') return null;
@@ -26,12 +33,13 @@ export function isSpeechSupported() {
 /**
  * @returns a stable ref-object API:
  *   supported            — boolean
- *   start(lang?)         — begin listening; resolves nothing (fire-and-forget)
- *   stop()               — stop listening
- *   getTranscript()      — the accumulated transcript so far (lowercased, trimmed)
- *   getInterim()         — the latest interim (not-yet-final) phrase, for a live cue
- *   reset()              — clear the transcript for a new item
- *   onError              — assignable callback (err) => void
+ *   start(lang?)         — begin listening (auto-restarts on early end)
+ *   stop()               — stop listening for good
+ *   getTranscript()      — the best running transcript (for the on-screen cue)
+ *   getCandidates()      — ALL heard phrases (final + interim + alternatives),
+ *                          deduped — the grader tries each
+ *   reset()              — clear for a new item
+ *   onError              — assignable (err) => void
  */
 export function useSpeechAnswer() {
   const api = useRef(null);
@@ -41,56 +49,75 @@ export function useSpeechAnswer() {
   const supported = !!Ctor;
 
   let rec = null;
-  let finalText = '';
-  let interimText = '';
-  let running = false;
+  let lang = 'en-US';
+  let running = false;      // are we in an active listen window?
+  let bestText = '';        // best single transcript (highest-confidence final/interim)
+  const candidates = new Set();  // every phrase we've heard, any alternative
+
+  function addCandidate(txt) {
+    const t = (txt || '').trim().toLowerCase();
+    if (t) candidates.add(t);
+  }
+
+  function build() {
+    const r = new Ctor();
+    r.lang = lang;
+    r.continuous = true;         // keep listening across pauses
+    r.interimResults = true;     // stream partial words for a live cue
+    r.maxAlternatives = 5;       // several guesses — a single letter is ambiguous
+    r.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const result = e.results[i];
+        // Capture EVERY alternative (not just [0]) — "C" often ranks below "see".
+        for (let a = 0; a < result.length; a++) {
+          addCandidate(result[a] && result[a].transcript);
+        }
+        // Track the top guess as the display transcript.
+        const top = (result[0] && result[0].transcript) || '';
+        if (result.isFinal) bestText = `${bestText} ${top}`.trim();
+        else if (top) bestText = top.trim();
+      }
+    };
+    r.onerror = (e) => {
+      const err = e && e.error;
+      if (err && err !== 'no-speech' && err !== 'aborted' && api.current.onError) {
+        api.current.onError(err);
+      }
+    };
+    // Browsers end recognition after a short silence. While our window is still
+    // open, immediately restart so the user can answer at any point.
+    r.onend = () => {
+      if (running) {
+        try { rec = build(); rec.start(); } catch { /* ignore — window will end */ }
+      }
+    };
+    return r;
+  }
 
   const obj = {
     supported,
     onError: null,
 
-    start(lang = 'en-US') {
+    start(l = 'en-US') {
       if (!supported || running) return;
-      try {
-        rec = new Ctor();
-        rec.lang = lang;
-        rec.continuous = true;         // keep listening across pauses
-        rec.interimResults = true;     // stream interim words for a live cue
-        rec.maxAlternatives = 1;
-        rec.onresult = (e) => {
-          let interim = '';
-          for (let i = e.resultIndex; i < e.results.length; i++) {
-            const r = e.results[i];
-            const txt = (r[0] && r[0].transcript) || '';
-            if (r.isFinal) finalText = `${finalText} ${txt}`.trim();
-            else interim += ` ${txt}`;
-          }
-          interimText = interim.trim();
-        };
-        rec.onerror = (e) => {
-          // 'no-speech'/'aborted' are normal window ends — don't surface them.
-          if (e && e.error && e.error !== 'no-speech' && e.error !== 'aborted' && obj.onError) {
-            obj.onError(e.error);
-          }
-        };
-        rec.onend = () => { running = false; };
-        rec.start();
-        running = true;
-      } catch (err) {
+      lang = l;
+      running = true;
+      try { rec = build(); rec.start(); }
+      catch (err) {
         running = false;
         if (obj.onError) obj.onError(err && err.message ? err.message : 'speech-failed');
       }
     },
 
     stop() {
-      running = false;
+      running = false;   // set first so onend doesn't restart
       if (rec) { try { rec.stop(); } catch { /* ignore */ } }
       rec = null;
     },
 
-    getTranscript() { return `${finalText} ${interimText}`.trim(); },
-    getInterim() { return interimText; },
-    reset() { finalText = ''; interimText = ''; },
+    getTranscript() { return bestText; },
+    getCandidates() { return [...candidates]; },
+    reset() { bestText = ''; candidates.clear(); },
   };
 
   api.current = obj;

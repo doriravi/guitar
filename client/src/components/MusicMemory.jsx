@@ -307,6 +307,9 @@ export default function MusicMemory({ lang }) {
               <div className="mm-live" data-active={!!game.liveTranscript}>
                 <span className="mm-transcript">{game.liveTranscript || (tr.mmSayNow || 'Say the answer…')}</span>
               </div>
+              <div className="mm-sub" style={{ fontSize: '0.78rem', marginTop: 6 }}>
+                {tr.mmSayTip || 'Say it clearly, like a word — “see” for C, “ee” for E, or “C sharp”, “G minor”.'}
+              </div>
             </>
           ) : (
             <>
