@@ -59,6 +59,23 @@ function describe(top, tr) {
         headline: `${tr.sqCelebStar || 'New personal best!'} ${'★'.repeat(d.stars || 1)}`,
         detail: `${d.mode === 'hunt' ? (tr.sqModeHunt || 'Note-Hunt') : (tr.sqModeRun || 'Run')} · ${tr.sqCelebFrom || 'up from'} ${'★'.repeat(d.prev || 0) || '—'}.`,
       };
+    // ── Music Memory (ear-training) achievements — additive, so ScaleQuest's
+    //    cases are untouched and an un-extended build still hits `default`. ──
+    case 'mmLevelUp':
+      return {
+        headline: tr.mmCelebLevelUp || 'Ear level up! 🎧',
+        detail: (tr.mmCelebLevelUpSub || 'Now training at level ${level}.').replace('${level}', d.level || 1),
+      };
+    case 'mmBestScore':
+      return {
+        headline: tr.mmCelebBest || 'New best ear score!',
+        detail: (tr.mmCelebBestSub || '${score} of ${total} heard.').replace('${score}', d.score ?? '').replace('${total}', d.total ?? ''),
+      };
+    case 'mmPerfect':
+      return {
+        headline: tr.mmCelebPerfect || 'Perfect session! ✨',
+        detail: tr.mmCelebPerfectSub || 'Every element, by ear.',
+      };
     default:
       return { headline: tr.sqCelebGeneric || 'You advanced! 🎉', detail: '' };
   }

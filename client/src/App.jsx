@@ -4,6 +4,7 @@ import LevelPlan from './components/LevelPlan';
 import FretboardMeasures from './components/FretboardMeasures';
 import ChordTable from './components/ChordTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
+import MusicMemory from './components/MusicMemory';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
 import TabTranscriber from './components/TabTranscriber';
@@ -136,6 +137,7 @@ function getTabs(tr) {
     { id: 'strings',      label: tr.tabStrings,      icon: '🎶' },
     { id: 'play',         label: tr.tabPlay || 'Play',        icon: '🎸', side: true },
     { id: 'scale',        label: tr.tabScale || 'Scales',     icon: '🎵', side: true },
+    { id: 'memory',       label: tr.tabMemory || 'Music Memory', icon: '🧠', side: true },
     { id: 'chordfinder',  label: tr.tabChordFinder || 'Chord Finder', icon: '🔎', side: true },
     { id: 'tuner',        label: tr.tabTuner,        icon: '🎚️', side: true },
     { id: 'recorder',     label: tr.tabRecorder || 'Recorder',     icon: '🎤', side: true },
@@ -160,6 +162,7 @@ const TAB_HELP = {
   strings:      'The Composer tab is a step editor: lay out your song beat by beat, hear it back, and read it as sheet music in any key.',
   play:         'The Play tab is a live fretboard. Tap frets to sound notes and strum any shape you build.',
   scale:        'The Scale tab shows any scale across the fretboard so you can see and hear its notes in every position.',
+  memory:       'Music Memory is an ear-training drill wrapped in a calming routine. The app plays or names a note, interval, chord, scale degree, or progression; you answer by singing, humming, or playing into the mic; it grades your ear and guides your breathing between rounds.',
   chordfinder:  'The Chord Finder lets you search a chord and see its playable voicings on the fretboard, each rated for your hand.',
   tuner:        'The Tuner listens through your microphone and tells you whether each string is in tune.',
   recorder:     'The Recorder listens through your microphone and names the chords you play in real time.',
@@ -408,6 +411,7 @@ export default function App() {
         'guitar_saved_sequences',
         'guitar_detect_config',
         'guitar_practice_history_v1',
+        'guitar_memory_train_v1',
       ].forEach(key => localStorage.removeItem(key));
     } catch {}
     window.location.href = '/?login=1';
@@ -806,6 +810,7 @@ export default function App() {
             {activeTab === 'strings'      && <GuitarStrings lang={lang} mode="editor" />}
             {activeTab === 'play'         && <GuitarStrings lang={lang} mode="play" />}
             {activeTab === 'scale'        && <GuitarStrings lang={lang} mode="scale" />}
+            {activeTab === 'memory'       && <MusicMemory lang={lang} onClose={() => setActiveTab('start')} />}
             {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
             {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
