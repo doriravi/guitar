@@ -16,6 +16,31 @@ export function stopSinging() {
   }
 }
 
+/**
+ * Speak a single short line of narration (not sung) — used by the Music Memory
+ * tab to read prompts and feedback aloud. Cancels any prior speech first so
+ * narration never overlaps. Returns a cancel fn.
+ *
+ * @param {string} text
+ * @param {object} [opts] { voiceId?, rate?, pitch?, volume?, onEnd? }
+ * @returns {() => void}
+ */
+export function say(text, { voiceId, rate = 1, pitch = 1, volume = 1, onEnd } = {}) {
+  if (!vocalsSupported() || !text) { onEnd?.(); return () => {}; }
+  stopSinging();
+  try {
+    const u = new SpeechSynthesisUtterance(String(text));
+    const chosen = resolveVoice(voiceId);
+    if (chosen?._voice) u.voice = chosen._voice;
+    u.rate = Math.min(1.6, Math.max(0.6, rate));
+    u.pitch = Math.min(2, Math.max(0.5, pitch));
+    u.volume = Math.min(1, Math.max(0, volume));
+    if (onEnd) u.onend = onEnd;
+    window.speechSynthesis.speak(u);
+  } catch { onEnd?.(); }
+  return () => stopSinging();
+}
+
 // Is browser speech available at all?
 export function vocalsSupported() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;

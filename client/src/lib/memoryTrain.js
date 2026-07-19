@@ -55,6 +55,33 @@ const TRIAD_INTERVALS = {
 export const pcName = (pc) => PC_NAMES[((pc % 12) + 12) % 12];
 const normPc = (pc) => ((Math.round(pc) % 12) + 12) % 12;
 
+// A short spoken instruction for an element, read aloud (TTS) when the prompt
+// plays. Kept plain and speakable ("Name the chord you hear").
+export function promptSpeech(element) {
+  if (!element) return '';
+  switch (element.type) {
+    case 'note':        return 'Name the note you hear.';
+    case 'interval':    return 'Name the interval you hear.';
+    case 'chord':       return 'Name the chord you hear.';
+    case 'degree':      return `Which note is the ${element.meta.degName} of ${pcName(element.meta.keyPc)}?`;
+    case 'progression': return 'Which chord comes next?';
+    default:            return 'Give your answer.';
+  }
+}
+
+// A spoken form of the answer for TTS feedback — spells accidentals so a synth
+// voice says "C sharp" not "C hash". ("Gm" → "G minor", "C#" → "C sharp".)
+export function answerSpeech(element) {
+  const label = answerLabelFor(element);
+  return label
+    .replace(/([A-G])#/g, '$1 sharp')
+    .replace(/([A-G])b/g, '$1 flat')
+    .replace(/m7\b/g, ' minor seven')
+    .replace(/maj7\b/g, ' major seven')
+    .replace(/([A-G](?: sharp| flat)?)m\b/g, '$1 minor')
+    .replace(/7\b/g, ' seven');
+}
+
 // A human-readable label for an element's correct answer — shared by the hook
 // (feedback state) and the component (feedback display) so there's one source.
 export function answerLabelFor(element) {

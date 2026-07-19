@@ -412,6 +412,7 @@ export default function App() {
         'guitar_detect_config',
         'guitar_practice_history_v1',
         'guitar_memory_train_v1',
+        'guitar_mm_narrate',
       ].forEach(key => localStorage.removeItem(key));
     } catch {}
     window.location.href = '/?login=1';

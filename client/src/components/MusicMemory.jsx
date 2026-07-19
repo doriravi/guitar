@@ -18,11 +18,49 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../lib/i18n';
 import { useMusicMemory } from '../lib/useMusicMemory';
-import { pcName, memoryMastery, answerLabelFor } from '../lib/memoryTrain';
+import { pcName, memoryMastery, answerLabelFor, promptSpeech, answerSpeech, LEVELS } from '../lib/memoryTrain';
+import { say, stopSinging, vocalsSupported } from '../lib/vocals';
 import BilateralPacer from './BilateralPacer';
 import Celebration from './Celebration';
 import ChordTip from './ChordTip';
 import './MusicMemory.css';
+
+const NARRATE_KEY = 'guitar_mm_narrate';
+
+// The plan/roadmap: the 5 difficulty stages and this session's 8 rounds. Shows
+// the whole journey and where the user is right now.
+const STAGE_LABELS = ['Notes', 'Intervals', 'Chords', 'Scale degrees', 'Progressions'];
+
+function PlanRoadmap({ level, itemNo, sessionItems, tr, compact }) {
+  const curLevel = Math.max(1, Math.min(LEVELS.length, level || 1));
+  return (
+    <div className={`mm-plan${compact ? ' is-compact' : ''}`}>
+      {!compact && (
+        <div className="mm-plan-title">{tr.mmPlanStages || 'Your path — 5 stages'}</div>
+      )}
+      <ol className="mm-plan-stages">
+        {STAGE_LABELS.map((label, i) => {
+          const n = i + 1;
+          const state = n < curLevel ? 'done' : n === curLevel ? 'now' : 'todo';
+          const key = ['mmStageNotes', 'mmStageIntervals', 'mmStageChords', 'mmStageDegrees', 'mmStageProgressions'][i];
+          return (
+            <li key={label} className={`mm-stage is-${state}`}>
+              <span className="mm-stage-num">{n}</span>
+              <span className="mm-stage-label">{tr[key] || label}</span>
+            </li>
+          );
+        })}
+      </ol>
+      {itemNo != null && (
+        <div className="mm-plan-rounds" aria-label="Rounds this session">
+          {Array.from({ length: sessionItems }, (_, i) => (
+            <span key={i} className={`mm-round-dot${i + 1 < itemNo ? ' is-done' : i + 1 === itemNo ? ' is-now' : ''}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function moodWord(v, tr) {
   if (v <= 3) return tr.mmMoodTense || 'Tense';
@@ -100,6 +138,49 @@ export default function MusicMemory({ lang }) {
 
   const mastery = useMemo(() => memoryMastery(), [game.result]);
 
+  // Spoken narration (TTS): the app reads the prompt and feedback aloud. On by
+  // default where speech synthesis exists; muteable + persisted.
+  const ttsOk = vocalsSupported();
+  const [narrate, setNarrate] = useState(() => {
+    try { return localStorage.getItem(NARRATE_KEY) !== '0'; } catch { return true; }
+  });
+  const toggleNarrate = () => setNarrate((v) => {
+    const next = !v;
+    try { localStorage.setItem(NARRATE_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+    if (!next) stopSinging();
+    return next;
+  });
+
+  // Narrate the PROMPT when a new item's prompt phase begins.
+  const spokeForItem = useRef(-1);
+  useEffect(() => {
+    if (!narrate || !ttsOk) return;
+    if (game.phase === 'prompt' && game.element && spokeForItem.current !== game.itemNo) {
+      spokeForItem.current = game.itemNo;
+      // Let the soft audio prompt lead; speak the instruction shortly after.
+      const t = setTimeout(() => say(promptSpeech(game.element), { rate: 1, pitch: 1, volume: 0.9 }), 700);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [game.phase, game.itemNo, game.element, narrate, ttsOk]);
+
+  // Narrate FEEDBACK (correct / not quite + the answer) once per verdict.
+  const spokeFeedbackFor = useRef(-1);
+  useEffect(() => {
+    if (!narrate || !ttsOk) return;
+    if (game.phase === 'feedback' && game.lastResult && spokeFeedbackFor.current !== game.itemNo) {
+      spokeFeedbackFor.current = game.itemNo;
+      const lead = game.lastResult.correct
+        ? (tr.mmSpokenNice || 'Correct.')
+        : (tr.mmSpokenClose || 'Not quite.');
+      say(`${lead} ${answerSpeech(game.lastResult.element)}.`, { rate: 1, pitch: 1, volume: 0.9 });
+    }
+    return undefined;
+  }, [game.phase, game.itemNo, game.lastResult, narrate, ttsOk, tr]);
+
+  // Stop any narration when leaving the tab.
+  useEffect(() => () => stopSinging(), []);
+
   // Hold the last non-null live note ~180ms so the hero doesn't strobe to "·"
   // every frame YIN momentarily drops (calmer to read).
   const [heldNote, setHeldNote] = useState(null);
@@ -120,17 +201,24 @@ export default function MusicMemory({ lang }) {
 
   return (
     <Stage phase={phase} onExit={game.abort}>
-      {/* HUD during the session */}
+      {/* Narration mute (top-left, mirrors the close button) */}
+      {ttsOk && (
+        <button className="mm-mute" onClick={toggleNarrate}
+          aria-label={narrate ? 'Mute narration' : 'Unmute narration'}
+          title={narrate ? (tr.mmVoiceOn || 'Voice on — tap to mute') : (tr.mmVoiceOff || 'Voice off — tap to unmute')}>
+          {narrate ? '🔊' : '🔇'}
+        </button>
+      )}
+
+      {/* HUD + compact plan during the session */}
       {inSession && (
-        <div className="mm-hud">
-          <span>{(tr.mmItemOf || 'Round ${n} of ${total}').replace('${n}', game.itemNo).replace('${total}', game.sessionItems)}</span>
-          <span className="mm-dots">
-            {Array.from({ length: game.sessionItems }, (_, i) => (
-              <span key={i} className={`mm-dot${i + 1 < game.itemNo ? ' is-done' : i + 1 === game.itemNo ? ' is-now' : ''}`} />
-            ))}
-          </span>
-          <span>{(tr.mmLevel || 'Level ${n}').replace('${n}', game.levelState.level)} · ✦{game.tally.correct}</span>
-        </div>
+        <>
+          <div className="mm-hud">
+            <span>{(tr.mmItemOf || 'Round ${n} of ${total}').replace('${n}', game.itemNo).replace('${total}', game.sessionItems)}</span>
+            <span>{(tr.mmLevel || 'Level ${n}').replace('${n}', game.levelState.level)} · ✦{game.tally.correct}</span>
+          </div>
+          <PlanRoadmap level={game.levelState.level} itemNo={game.itemNo} sessionItems={game.sessionItems} tr={tr} compact />
+        </>
       )}
 
       {/* ── CHECK-IN ─────────────────────────────────────────────────────────── */}
@@ -179,6 +267,10 @@ export default function MusicMemory({ lang }) {
             </div>
           )}
           {game.error && <div style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginTop: 8 }}>{game.error}</div>}
+
+          {/* The full plan — 5 stages you climb through. */}
+          <div style={{ height: 18 }} />
+          <PlanRoadmap level={mastery.level || 1} tr={tr} />
 
           <div style={{ height: 18 }} />
           <button className="mm-cta" onClick={() => game.start({ checkInMood: checkIn, inputMode: answerMode })}>

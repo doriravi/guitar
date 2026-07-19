@@ -3,7 +3,7 @@ import {
   noteElement, intervalElement, chordElement, degreeElement, progressionElement,
   accept, elementToAudioSpec, nextElement, adjustLevel, LEVELS, MAX_LEVEL, UP_THRESHOLD,
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, pcName,
-  parseSpokenAnswer, acceptSpoken,
+  parseSpokenAnswer, acceptSpoken, promptSpeech, answerSpeech,
 } from './memoryTrain';
 
 // Pitch classes (sharp): C0 C#1 D2 D#3 E4 F5 F#6 G7 G#8 A9 A#10 B11
@@ -189,6 +189,19 @@ describe('parseSpokenAnswer', () => {
   it('parses ordinals for degrees', () => {
     expect(parseSpokenAnswer('the third').ordinal).toBe(3);
     expect(parseSpokenAnswer('root').ordinal).toBe(1);
+  });
+});
+
+describe('promptSpeech / answerSpeech (TTS narration)', () => {
+  it('gives a speakable prompt per type', () => {
+    expect(promptSpeech(noteElement(0))).toMatch(/note/i);
+    expect(promptSpeech(chordElement('G'))).toMatch(/chord/i);
+    expect(promptSpeech(intervalElement(C, 7))).toMatch(/interval/i);
+  });
+  it('spells accidentals and qualities for the voice', () => {
+    expect(answerSpeech(noteElement(1))).toBe('C sharp');       // C#
+    expect(answerSpeech(chordElement('Am'))).toBe('A minor');
+    expect(answerSpeech(chordElement('G7'))).toContain('seven');
   });
 });
 

@@ -158,6 +158,54 @@
 .mm-compare { font-size: 0.9rem; color: var(--color-ink-subtle, #b9b9b9); display: flex; flex-direction: column; gap: 2px; }
 .mm-key { font-weight: 800; color: var(--mm-gold); }
 
+/* ---- Narration mute (mirror of the close button, top-left) ---- */
+.mm-mute {
+  position: absolute; top: 16px; left: 18px; z-index: 3;
+  width: 38px; height: 38px; border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+  backdrop-filter: blur(6px); cursor: pointer; transition: background .2s, transform .12s;
+}
+.mm-mute:hover { background: rgba(255,255,255,0.1); }
+.mm-mute:active { transform: scale(0.94); }
+
+/* ---- Plan / roadmap: the 5 stages you climb + this session's rounds ---- */
+.mm-plan { width: 100%; max-width: 26rem; margin: 0 auto; }
+.mm-plan.is-compact { position: absolute; top: 46px; left: 0; right: 0; margin: 0 auto; max-width: 30rem; }
+.mm-plan-title {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--color-ink-faint, #7a7a7a); margin-bottom: 8px; text-align: center;
+}
+.mm-plan-stages {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
+}
+.mm-plan.is-compact .mm-plan-stages { gap: 4px; }
+.mm-stage {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 9999px; font-size: 0.78rem; font-weight: 600;
+  border: 1px solid transparent; transition: color .3s, background .3s, border-color .3s;
+}
+.mm-plan.is-compact .mm-stage { padding: 3px 8px; font-size: 0.68rem; }
+.mm-stage-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 9999px; font-size: 0.66rem; font-weight: 800;
+}
+.mm-plan.is-compact .mm-stage-label { display: none; }   /* compact strip = numbered dots only */
+.mm-stage.is-done { color: var(--color-success, #4ade80); }
+.mm-stage.is-done .mm-stage-num { background: rgba(74,222,128,0.16); color: var(--color-success, #4ade80); }
+.mm-stage.is-now {
+  color: #1a1508; background: linear-gradient(180deg, #f7e6b8, var(--mm-gold));
+  box-shadow: 0 4px 16px rgba(233,196,106,0.3);
+}
+.mm-stage.is-now .mm-stage-num { background: rgba(0,0,0,0.18); color: #1a1508; }
+.mm-stage.is-todo { color: var(--color-ink-faint, #7a7a7a); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.07); }
+.mm-stage.is-todo .mm-stage-num { background: rgba(255,255,255,0.06); color: var(--color-ink-faint, #7a7a7a); }
+.mm-plan-rounds { display: flex; gap: 5px; justify-content: center; margin-top: 8px; }
+.mm-round-dot { width: 7px; height: 7px; border-radius: 9999px; background: rgba(255,255,255,0.14); }
+.mm-round-dot.is-done { background: var(--color-success, #4ade80); }
+.mm-round-dot.is-now { background: var(--mm-gold); box-shadow: 0 0 8px 2px rgba(233,196,106,0.5); }
+
 /* ---- Session HUD ---- */
 .mm-hud {
   display: flex; align-items: center; justify-content: space-between; width: 100%;
