@@ -181,26 +181,30 @@
   display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
 }
 .mm-plan.is-compact .mm-plan-stages { gap: 4px; }
-.mm-stage {
+/* NOTE: these classes must NOT be named .mm-stage — that collides with the
+   full-screen .mm-stage overlay (position:fixed; inset:0), which would make each
+   roadmap pill fill the whole screen. Use .mm-pstage. */
+.mm-pstage {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 10px; border-radius: 9999px; font-size: 0.78rem; font-weight: 600;
   border: 1px solid transparent; transition: color .3s, background .3s, border-color .3s;
 }
-.mm-plan.is-compact .mm-stage { padding: 3px 8px; font-size: 0.68rem; }
-.mm-stage-num {
+.mm-plan.is-compact .mm-pstage { padding: 3px 8px; font-size: 0.68rem; }
+.mm-pstage-num {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 9999px; font-size: 0.66rem; font-weight: 800;
+  flex: none;
 }
-.mm-plan.is-compact .mm-stage-label { display: none; }   /* compact strip = numbered dots only */
-.mm-stage.is-done { color: var(--color-success, #4ade80); }
-.mm-stage.is-done .mm-stage-num { background: rgba(74,222,128,0.16); color: var(--color-success, #4ade80); }
-.mm-stage.is-now {
+.mm-plan.is-compact .mm-pstage-label { display: none; }   /* compact strip = numbered dots only */
+.mm-pstage.is-done { color: var(--color-success, #4ade80); }
+.mm-pstage.is-done .mm-pstage-num { background: rgba(74,222,128,0.16); color: var(--color-success, #4ade80); }
+.mm-pstage.is-now {
   color: #1a1508; background: linear-gradient(180deg, #f7e6b8, var(--mm-gold));
   box-shadow: 0 4px 16px rgba(233,196,106,0.3);
 }
-.mm-stage.is-now .mm-stage-num { background: rgba(0,0,0,0.18); color: #1a1508; }
-.mm-stage.is-todo { color: var(--color-ink-faint, #7a7a7a); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.07); }
-.mm-stage.is-todo .mm-stage-num { background: rgba(255,255,255,0.06); color: var(--color-ink-faint, #7a7a7a); }
+.mm-pstage.is-now .mm-pstage-num { background: rgba(0,0,0,0.18); color: #1a1508; }
+.mm-pstage.is-todo { color: var(--color-ink-faint, #7a7a7a); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.07); }
+.mm-pstage.is-todo .mm-pstage-num { background: rgba(255,255,255,0.06); color: var(--color-ink-faint, #7a7a7a); }
 .mm-plan-rounds { display: flex; gap: 5px; justify-content: center; margin-top: 8px; }
 .mm-round-dot { width: 7px; height: 7px; border-radius: 9999px; background: rgba(255,255,255,0.14); }
 .mm-round-dot.is-done { background: var(--color-success, #4ade80); }

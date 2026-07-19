@@ -44,9 +44,9 @@ function PlanRoadmap({ level, itemNo, sessionItems, tr, compact }) {
           const state = n < curLevel ? 'done' : n === curLevel ? 'now' : 'todo';
           const key = ['mmStageNotes', 'mmStageIntervals', 'mmStageChords', 'mmStageDegrees', 'mmStageProgressions'][i];
           return (
-            <li key={label} className={`mm-stage is-${state}`}>
-              <span className="mm-stage-num">{n}</span>
-              <span className="mm-stage-label">{tr[key] || label}</span>
+            <li key={label} className={`mm-pstage is-${state}`}>
+              <span className="mm-pstage-num">{n}</span>
+              <span className="mm-pstage-label">{tr[key] || label}</span>
             </li>
           );
         })}
