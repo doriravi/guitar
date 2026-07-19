@@ -149,6 +149,21 @@ describe('store round-trip + advancement', () => {
     expect(m.level).toBe(4);
   });
 
+  it('bestScoreAtLevel scopes the best score to sessions that reached the level', () => {
+    // A great score, but only at Level 1 (notes). And a weaker score at Level 5.
+    saveMemoryRun({ correct: 10, total: 10, score: 100, level: 1, streakBest: 10, perType: {} });
+    saveMemoryRun({ correct: 6, total: 10, score: 60, level: 5, streakBest: 3, perType: {} });
+    const m = memoryMastery();
+    // Level-1 milestones see the 100%.
+    expect(m.bestScoreAtLevel(1)).toBe(100);
+    // A Level-5 milestone only sees the 60% run that actually reached Level 5 —
+    // the 100% Level-1 run must NOT satisfy it.
+    expect(m.bestScoreAtLevel(5)).toBe(60);
+    // No run reached Level 3+ with a high score → below an 80% bar.
+    expect(m.bestScoreAtLevel(3)).toBe(60);
+    expect(m.bestScoreAtLevel(3) >= 80).toBe(false);
+  });
+
   it('detectMemoryAdvancement flags a real new best / level-up / perfect', () => {
     const before = { bestScore: 60, level: 2, streakBest: 3 };
     const after = { bestScore: 90, level: 3, streakBest: 6 };

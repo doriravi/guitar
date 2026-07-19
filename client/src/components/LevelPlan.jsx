@@ -6,6 +6,7 @@ import {
   milestonesForTier,
   isMilestoneDone,
   isAutoComplete,
+  milestoneProgress,
   tierStatus,
   loadManual,
   setManualDone,
@@ -58,16 +59,18 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
   // read-only. ROUTE/OFF-APP rows are manually checkable.
   const checkable = !auto;
 
-  // Three-state status. A milestone that targets specific chords is "partial"
-  // (yellow) when some — but not all — of them are recorded; otherwise it's the
-  // binary done/not-started. Green if actually done.
+  // Three-state status. "partial" (yellow) when work is underway but short of
+  // done: a chord-goal milestone with some — not all — chords recorded, OR an
+  // auto milestone with partial progress toward its bar (e.g. an ear-training
+  // session scored below the 80% pass mark). Green only when actually done.
   const chordProg = useMemo(
     () => (m.chords && m.chords.length ? chordListProgress(m.chords) : null),
     [m.chords],
   );
+  const autoProg = useMemo(() => milestoneProgress(m, ctx), [m, ctx]);
   const state = done
     ? 'complete'
-    : (chordProg && chordProg.done > 0) ? 'partial'
+    : ((chordProg && chordProg.done > 0) || autoProg > 0) ? 'partial'
     : 'notStarted';
   const status = STATUS[state];
 

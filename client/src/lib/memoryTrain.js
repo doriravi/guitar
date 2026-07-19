@@ -598,14 +598,23 @@ export function saveMemoryRun(run) {
 
 /**
  * Mastery snapshot across all saved sessions.
- * @returns {{sessions, bestScore, streakBest, level, perType}}
+ *
+ * `bestScoreAtLevel(minLevel)` is the completion signal the Level Plan gates on:
+ * the best score (0..100) among sessions that actually REACHED at least `minLevel`.
+ * A 100% run that only got to Level 1 must not satisfy a Level-3/5 milestone, so we
+ * scope "best score" to runs that climbed high enough — mastery = accuracy AT the
+ * required difficulty, not merely having touched it once.
+ *
+ * @returns {{sessions, bestScore, streakBest, level, bestScoreAtLevel}}
  */
 export function memoryMastery() {
   const runs = readStore().runs;
   const bestScore = runs.reduce((m, r) => Math.max(m, r.score || 0), 0);
   const streakBest = runs.reduce((m, r) => Math.max(m, r.streakBest || 0), 0);
   const level = runs.reduce((m, r) => Math.max(m, r.level || 0), 0);
-  return { sessions: runs.length, bestScore, streakBest, level };
+  const bestScoreAtLevel = (minLevel = 1) =>
+    runs.reduce((m, r) => ((r.level || 0) >= minLevel ? Math.max(m, r.score || 0) : m), 0);
+  return { sessions: runs.length, bestScore, streakBest, level, bestScoreAtLevel };
 }
 
 /**

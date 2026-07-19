@@ -37,10 +37,16 @@ import { memoryMastery } from './memoryTrain';
 //   { kind: 'songAtSpeed',  minSpeed }                    — a completed run ≥ speed
 //   { kind: 'anySongGrade', minGrade, minSpeed? }         — best grade on any song
 //   { kind: 'songGradeCount', minGrade, count, minSpeed } — N distinct songs graded
-//   { kind: 'memorySessions', count }                     — N Music Memory sessions done
-//   { kind: 'memoryLevel', level }                        — reached Music Memory level N
+//   { kind: 'memoryMastered', level, minScore }           — scored ≥minScore% (0–100)
+//                                                            in a Music Memory session
+//                                                            that reached ≥level
 
 export const TIERS = ['Beginner', 'Intermediate', 'Advanced', 'Master'];
+
+// Ear-training (Music Memory) completion bar: a milestone is only "done" when the
+// user scored at least this % in a session that reached the required difficulty.
+// 80 = master the vast majority of the program, not just show up.
+export const MEMORY_PASS_SCORE = 80;
 
 export const LEVEL_PLAN = [
   // ── BEGINNER ────────────────────────────────────────────────────────────────
@@ -73,8 +79,8 @@ export const LEVEL_PLAN = [
   {
     id: 'beg-note-names', tier: 'Beginner', column: 'theory', type: 'auto', tab: 'memory',
     title: 'Recognise the note names by ear',
-    detail: 'Music Memory tab → play a full session. It drills note names (and more) and grades your mic answer — the anchor for finding any chord or scale.',
-    check: { kind: 'memorySessions', count: 1 },
+    detail: 'Music Memory tab → score 80%+ in a session. It drills note names and grades your mic answer — the anchor for finding any chord or scale.',
+    check: { kind: 'memoryMastered', level: 1, minScore: 80 },
   },
   {
     id: 'beg-strum-calluses', tier: 'Beginner', column: 'practical', type: 'offapp',
@@ -127,8 +133,8 @@ export const LEVEL_PLAN = [
   {
     id: 'int-ear-triads', tier: 'Intermediate', column: 'theory', type: 'auto', tab: 'memory',
     title: 'Hear intervals & triads',
-    detail: 'Music Memory tab → climb to Level 3, where the drill adds intervals and triads by ear on top of single notes.',
-    check: { kind: 'memoryLevel', level: 3 },
+    detail: 'Music Memory tab → score 80%+ in a session that reaches Level 3, where the drill adds intervals and triads by ear.',
+    check: { kind: 'memoryMastered', level: 3, minScore: 80 },
   },
   {
     id: 'int-root-tracking', tier: 'Intermediate', column: 'theory', type: 'offapp',
@@ -186,8 +192,8 @@ export const LEVEL_PLAN = [
   {
     id: 'adv-ear-master', tier: 'Advanced', column: 'theory', type: 'auto', tab: 'memory',
     title: 'Master the full ear-training ladder',
-    detail: 'Music Memory tab → reach Level 5, recognising scale degrees and whole progressions by ear.',
-    check: { kind: 'memoryLevel', level: 5 },
+    detail: 'Music Memory tab → score 80%+ in a session that reaches Level 5, recognising scale degrees and whole progressions by ear.',
+    check: { kind: 'memoryMastered', level: 5, minScore: 80 },
   },
   {
     id: 'adv-improvise-by-ear', tier: 'Advanced', column: 'practical', type: 'offapp',
@@ -312,13 +318,14 @@ export function isAutoComplete(milestone, { handProfile } = {}) {
     }
 
     // ── Music Memory (ear-training) ──────────────────────────────────────────
-    // Read from guitar_memory_train_v1 via memoryMastery(); the roadmap can only
-    // ever UNDER-report (an unplayed drill returns 0 sessions / level 0).
-    case 'memorySessions':
-      return memoryMastery().sessions >= (check.count ?? 1);
-
-    case 'memoryLevel':
-      return memoryMastery().level >= (check.level ?? 1);
+    // Read from guitar_memory_train_v1 via memoryMastery(). Completion requires
+    // real MASTERY — scoring at least `minScore`% (default 80) in a session that
+    // actually reached the required difficulty `level`. Merely playing a session,
+    // or briefly touching a level, is not enough. Read-only: can only under-report.
+    case 'memoryMastered': {
+      const minScore = check.minScore ?? MEMORY_PASS_SCORE;
+      return memoryMastery().bestScoreAtLevel(check.level ?? 1) >= minScore;
+    }
 
     default:
       return false;
@@ -423,6 +430,26 @@ export function isMilestoneDone(milestone, ctx = {}) {
   if (manual[milestone.id]) return true;
   if (milestone.type === 'auto') return isAutoComplete(milestone, ctx);
   return false;
+}
+
+/**
+ * Partial-progress signal for a milestone, so the UI can show yellow "in progress"
+ * for auto milestones that are underway but not yet complete. Currently the
+ * ear-training (memoryMastered) checks report progress as best-score-so-far vs the
+ * required minScore; everything else is binary (done → 1, else 0). Returns a
+ * fraction 0..1 (1 = done). Never fakes completion — capped below 1 until actually
+ * done so isMilestoneDone stays the single source of truth for "complete".
+ */
+export function milestoneProgress(milestone, ctx = {}) {
+  if (isMilestoneDone(milestone, ctx)) return 1;
+  const check = milestone?.check;
+  if (milestone?.type === 'auto' && check?.kind === 'memoryMastered') {
+    const minScore = check.minScore ?? MEMORY_PASS_SCORE;
+    const best = memoryMastery().bestScoreAtLevel(check.level ?? 1);
+    if (minScore <= 0) return 0;
+    return Math.min(0.99, Math.max(0, best / minScore));
+  }
+  return 0;
 }
 
 /** Milestones of a tier. */
