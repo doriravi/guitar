@@ -1,18 +1,19 @@
 /* Music Memory — cinematic, immersive, calming stage.
-   Rendered as a fixed full-screen overlay portalled to document.body (it must
-   escape the tab panel's transformed, overflow-hidden ancestor). All motion is
-   compositor-only (transform/opacity/filter). prefers-reduced-motion freezes it. */
+   Rendered INLINE inside the tab panel (like every other tab), NOT a full-screen
+   overlay — the app shell stays visible around it. The aurora fills this panel.
+   All motion is compositor-only (transform/opacity/filter); prefers-reduced-motion
+   freezes it. */
 
 .mm-stage {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
+  position: relative;             /* contains the absolutely-positioned aurora */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow-y: auto;
-  padding: 24px 20px;
+  overflow: hidden;               /* clip the aurora to the panel */
+  min-height: min(78vh, 720px);   /* a tall, roomy stage inside the panel */
+  padding: 32px 20px;
+  border-radius: 16px;
   color: var(--color-ink, #f0ede8);
   background: var(--mm-void, #0a0a0f);
   /* subject atmosphere */

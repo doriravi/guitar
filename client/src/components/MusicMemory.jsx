@@ -15,7 +15,6 @@
 // useMusicMemory; grading/adaptive/theory is pure in memoryTrain.js.
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useT } from '../lib/i18n';
 import { useMusicMemory } from '../lib/useMusicMemory';
 import { pcName, memoryMastery, answerLabelFor, promptSpeech, answerSpeech, LEVELS } from '../lib/memoryTrain';
@@ -200,8 +199,8 @@ export default function MusicMemory({ lang }) {
   const inSession = phase === 'prompt' || phase === 'answer' || phase === 'feedback';
 
   return (
-    <Stage phase={phase} onExit={game.abort}>
-      {/* Narration mute (top-left, mirrors the close button) */}
+    <Stage phase={phase}>
+      {/* Narration mute (top-left) */}
       {ttsOk && (
         <button className="mm-mute" onClick={toggleNarrate}
           aria-label={narrate ? 'Mute narration' : 'Unmute narration'}
@@ -418,19 +417,19 @@ export default function MusicMemory({ lang }) {
   );
 }
 
-// The full-screen aurora stage, portalled to document.body so it escapes the tab
-// panel's transformed/overflow-hidden ancestor. `key={phase}` replays the content
-// fade/scale on each phase change.
-function Stage({ phase, onExit, children }) {
-  return createPortal(
-    <div className="mm-stage" role="dialog" aria-modal="true" aria-label="Music Memory">
+// The aurora stage, rendered INLINE inside the tab panel (like every other tab)
+// — not a full-screen overlay. The aurora fills this panel only; the app shell
+// (tab bar, header) stays visible around it. `key={phase}` replays the content
+// fade/scale on each phase change. `onExit` is kept for the mid-session "end"
+// action but there is no full-screen close button (leaving = switching tabs).
+function Stage({ phase, children }) {
+  return (
+    <div className="mm-stage mm-stage-inline" aria-label="Music Memory">
       <div className="mm-aurora" aria-hidden="true">
         <span className="mm-aurora-a" /><span className="mm-aurora-b" /><span className="mm-aurora-c" />
       </div>
       <div className="mm-vignette" aria-hidden="true" />
-      <button className="mm-exit" onClick={onExit} aria-label="Close">✕</button>
       <div className="mm-content" key={phase}>{children}</div>
-    </div>,
-    document.body,
+    </div>
   );
 }
