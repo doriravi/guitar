@@ -107,6 +107,8 @@ export function useMusicMemory() {
   const [pacerEpoch, setPacerEpoch] = useState(0);  // performance.now() when the EMDR bed started
   const [inputMode, setInputMode] = useState('sing'); // mirror of inputModeRef, for the UI
   const [liveTranscript, setLiveTranscript] = useState(''); // what speech heard so far (say mode)
+  const [liveCandidates, setLiveCandidates] = useState([]); // raw ASR candidates (say mode, debug/feedback)
+  const [speechError, setSpeechError] = useState(null);     // ASR error string, if any
 
   // Mutable run state the async loop reads fresh.
   const abortRef = useRef(false);
@@ -174,19 +176,23 @@ export function useMusicMemory() {
       }
       speech.reset();
       setHeardPcs([]);
+      setLiveCandidates([]);
+      setSpeechError(null);
       speech.onError = (err) => {
+        setSpeechError(err);
         if (err === 'not-allowed' || err === 'service-not-allowed') {
           setError('Microphone permission denied — allow mic access and try again.');
         }
       };
-      // Start listening NOW (during the count-in) so the recognizer is warm and
-      // the mic permission prompt is out of the way before the user answers.
+      // Start listening NOW so the recognizer is warm and the permission prompt
+      // is out of the way before the user answers.
       try { speech.start('en-US'); } catch { /* handled via onError */ }
 
       setPhase('answer');
       setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
       const started = performance.now();
       let clearedForAnswer = false;
+      let hitDuringWindow = null;   // grade as soon as a candidate matches (before the window ends)
       await new Promise((resolve) => {
         let lastCountdown = -1;
         const tick = (now) => {
@@ -198,25 +204,35 @@ export function useMusicMemory() {
             if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
           } else {
             if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); }
-            // At the count-in→answer boundary, drop anything heard during the
-            // count-in so only the real answer counts.
-            if (!clearedForAnswer) { clearedForAnswer = true; speech.reset(); setLiveTranscript(''); }
+            if (!clearedForAnswer) { clearedForAnswer = true; speech.reset(); setLiveTranscript(''); setLiveCandidates([]); }
           }
-          // Surface what's been heard so the user sees their words appear.
-          if (!inCountIn) setLiveTranscript(speech.getTranscript());
+          if (!inCountIn) {
+            // Surface transcript + raw candidates live (also used as feedback/debug).
+            const cands = speech.getCandidates();
+            setLiveTranscript(speech.getTranscript());
+            setLiveCandidates(cands);
+            // Grade continuously: the moment ANY candidate matches, we're done —
+            // this beats Chrome finalizing its alternatives after the window/stop.
+            if (!hitDuringWindow) {
+              const r = acceptSpokenAny(el, cands);
+              if (r.correct) { hitDuringWindow = r; resolve(); return; }
+            }
+          }
           if (elapsed >= COUNTDOWN_MS + ANSWER_MS) { resolve(); return; }
           rafRef.current = requestAnimationFrame(tick);
         };
         rafRef.current = requestAnimationFrame(tick);
       });
-      speech.stop();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       setCountdown(null);
-      if (abortRef.current) return null;
+      if (abortRef.current) { speech.stop(); return null; }
+      // Give Chrome a moment to deliver any final result, then stop + grade all.
+      await new Promise((r) => setTimeout(r, 350));
+      speech.stop();
+      const allCands = speech.getCandidates();
+      setLiveCandidates(allCands);
       setLiveTranscript(speech.getTranscript());
-      // Grade against EVERY candidate the recognizer produced (a spoken letter is
-      // ambiguous; the right answer often isn't the top guess).
-      return acceptSpokenAny(el, speech.getCandidates());
+      return hitDuringWindow || acceptSpokenAny(el, allCands);
     }
 
     // ── SING MODE: pitch via mic + YIN ───────────────────────────────────────
@@ -415,7 +431,7 @@ export function useMusicMemory() {
     countdown, element, itemNo, sessionItems: SESSION_ITEMS,
     liveNote, lastResult, tally, levelState, micOk, result, error,
     heardPcs, pacerEpoch,
-    inputMode, liveTranscript, speechSupported: speech.supported,
+    inputMode, liveTranscript, liveCandidates, speechError, speechSupported: speech.supported,
     expectedAnswerLabel: element ? answerLabelFor(element) : null,
     answerMs: ANSWER_MS, breathMs: BREATH_MS,
     start, abort, replay,

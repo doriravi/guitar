@@ -310,6 +310,14 @@ export default function MusicMemory({ lang }) {
               <div className="mm-sub" style={{ fontSize: '0.78rem', marginTop: 6 }}>
                 {tr.mmSayTip || 'Say it clearly, like a word — “see” for C, “ee” for E, or “C sharp”, “G minor”.'}
               </div>
+              {/* Diagnostic readout — shows exactly what the recognizer heard. */}
+              {(game.liveCandidates?.length > 0 || game.speechError) && (
+                <div className="mm-sub" style={{ fontSize: '0.72rem', marginTop: 8, opacity: 0.8, fontFamily: 'monospace' }}>
+                  {game.speechError
+                    ? `mic: ${game.speechError}`
+                    : `heard: ${game.liveCandidates.slice(0, 6).join(' · ')}`}
+                </div>
+              )}
             </>
           ) : (
             <>
