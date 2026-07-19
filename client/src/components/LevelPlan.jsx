@@ -26,6 +26,15 @@ const TIER_META = {
   Master:       { emoji: '👑', tint: 'rgba(201,169,110,0.12)', edge: 'rgba(201,169,110,0.35)' },
 };
 
+// Three-state status palette: green = complete, yellow = partial (started, not
+// finished), grey = not started. Used for tier badges, bars, and the legend so
+// the whole plan reads at a glance.
+const STATUS = {
+  complete:   { color: '#4ade80', soft: 'rgba(74,222,128,0.20)', ring: 'rgba(74,222,128,0.5)',  label: 'Complete' },
+  partial:    { color: '#eab308', soft: 'rgba(234,179,8,0.20)',  ring: 'rgba(234,179,8,0.55)',   label: 'In progress' },
+  notStarted: { color: 'var(--color-ink-ghost)', soft: 'var(--color-surface-700)', ring: 'var(--color-surface-600)', label: 'Not started' },
+};
+
 const TYPE_BADGE = {
   auto:   { label: 'Auto-tracked', cls: 'bg-surface-600 text-brand' },
   route:  { label: 'In-app',       cls: 'bg-surface-600 text-ink-subtle' },
@@ -49,33 +58,48 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
   // read-only. ROUTE/OFF-APP rows are manually checkable.
   const checkable = !auto;
 
+  // Three-state status. A milestone that targets specific chords is "partial"
+  // (yellow) when some — but not all — of them are recorded; otherwise it's the
+  // binary done/not-started. Green if actually done.
+  const chordProg = useMemo(
+    () => (m.chords && m.chords.length ? chordListProgress(m.chords) : null),
+    [m.chords],
+  );
+  const state = done
+    ? 'complete'
+    : (chordProg && chordProg.done > 0) ? 'partial'
+    : 'notStarted';
+  const status = STATUS[state];
+
   return (
     <div
       className="flex items-start gap-3 rounded-lg px-3 py-2.5 bg-surface-800 border border-surface-700"
-      style={done ? { borderColor: 'rgba(74,222,128,0.35)' } : undefined}
+      style={state !== 'notStarted' ? { borderColor: status.ring } : undefined}
     >
-      {/* Status control */}
+      {/* Status control — green complete / yellow partial / grey not started */}
       {checkable ? (
         <button
           onClick={() => onToggleManual(m.id, !done)}
           aria-pressed={done}
           aria-label={done ? 'Mark not done' : 'Mark done'}
           className="mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 text-xs font-bold border"
-          style={done
-            ? { background: 'rgba(74,222,128,0.20)', borderColor: 'rgba(74,222,128,0.5)', color: '#4ade80' }
-            : { background: 'transparent', borderColor: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
+          style={state === 'notStarted'
+            ? { background: 'transparent', borderColor: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }
+            : { background: status.soft, borderColor: status.ring, color: status.color }}
         >
-          {done ? '✓' : ''}
+          {done ? '✓' : state === 'partial' ? '◐' : ''}
         </button>
       ) : (
         <span
           className="mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 text-xs font-bold"
-          title={autoDone ? 'Completed — detected from your practice record' : 'Auto-tracked — do it in the app to complete'}
-          style={autoDone
-            ? { background: 'rgba(74,222,128,0.20)', color: '#4ade80' }
-            : { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)' }}
+          title={done ? 'Completed — detected from your practice record'
+            : state === 'partial' ? 'In progress — some sub-goals done'
+            : 'Auto-tracked — do it in the app to complete'}
+          style={state === 'notStarted'
+            ? { background: 'var(--color-surface-700)', color: 'var(--color-ink-ghost)' }
+            : { background: status.soft, color: status.color }}
         >
-          {autoDone ? '✓' : '○'}
+          {done ? '✓' : state === 'partial' ? '◐' : '○'}
         </span>
       )}
 
@@ -110,6 +134,7 @@ function TierCard({ tier, ctx, onNavigate, onToggleManual }) {
   const meta = TIER_META[tier] || {};
   const ms = milestonesForTier(tier);
   const st = tierStatus(tier, ctx);
+  const status = STATUS[st.state] || STATUS.notStarted;
 
   return (
     <section className="rounded-2xl p-4 border" style={{ background: meta.tint, borderColor: meta.edge }}>
@@ -117,12 +142,22 @@ function TierCard({ tier, ctx, onNavigate, onToggleManual }) {
         <h3 className="text-base font-bold flex items-center gap-2 text-ink">
           <span>{meta.emoji}</span>{tier}
         </h3>
-        <span className="text-xs font-semibold text-ink-subtle">{st.done}/{st.total}</span>
+        <div className="flex items-center gap-2">
+          {/* Status pill: green complete / yellow in-progress / grey not started */}
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: status.soft, color: status.color, border: `1px solid ${status.ring}` }}
+          >
+            <span className="w-2 h-2 rounded-full" style={{ background: status.color }} />
+            {status.label}
+          </span>
+          <span className="text-xs font-semibold text-ink-subtle">{st.done}/{st.total}</span>
+        </div>
       </header>
 
-      {/* Progress bar */}
+      {/* Progress bar — colored by state (green/yellow/grey) */}
       <div className="h-1.5 w-full rounded-full overflow-hidden mb-4 bg-surface-700">
-        <div className="h-full rounded-full" style={{ width: `${st.pct}%`, background: '#4ade80' }} />
+        <div className="h-full rounded-full" style={{ width: `${Math.max(st.pct, st.state === 'partial' ? 6 : 0)}%`, background: status.color }} />
       </div>
 
       <div className="flex flex-col gap-2">
@@ -335,8 +370,10 @@ export default function LevelPlan({ lang, onNavigate }) {
     const totals = TIERS.map((t) => tierStatus(t, ctx));
     const done = totals.reduce((n, s) => n + s.done, 0);
     const total = totals.reduce((n, s) => n + s.total, 0);
-    return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+    const state = total === 0 || done === total ? 'complete' : done > 0 ? 'partial' : 'notStarted';
+    return { done, total, pct: total ? Math.round((done / total) * 100) : 0, state };
   }, [ctx]);
+  const overallStatus = STATUS[overall.state] || STATUS.notStarted;
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto">
@@ -354,10 +391,10 @@ export default function LevelPlan({ lang, onNavigate }) {
       <div className="rounded-xl px-4 py-3 mb-4 bg-surface-800 border border-surface-700">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-ink-subtle">{tr.levelPlanOverall || 'Overall progress'}</span>
-          <span className="text-xs font-semibold text-brand">{overall.done}/{overall.total}</span>
+          <span className="text-xs font-semibold" style={{ color: overallStatus.color }}>{overall.done}/{overall.total}</span>
         </div>
         <div className="h-2 w-full rounded-full overflow-hidden bg-surface-700">
-          <div className="h-full rounded-full" style={{ width: `${overall.pct}%`, background: '#c9a96e' }} />
+          <div className="h-full rounded-full" style={{ width: `${Math.max(overall.pct, overall.state === 'partial' ? 4 : 0)}%`, background: overallStatus.color }} />
         </div>
       </div>
 
@@ -367,8 +404,19 @@ export default function LevelPlan({ lang, onNavigate }) {
         <TierStepper ctx={ctx} onNavigate={onNavigate} tr={tr} />
       </div>
 
-      {/* Legend — honest about how each milestone is tracked */}
+      {/* Legend — the status colors, then how each milestone is tracked */}
       <div className="rounded-xl px-4 py-3 mb-5 text-xs leading-relaxed bg-surface-800 border border-surface-700 text-ink-faint">
+        <div className="flex flex-wrap gap-x-5 gap-y-1.5 mb-2 pb-2 border-b border-surface-700">
+          {['complete', 'partial', 'notStarted'].map((k) => (
+            <span key={k} className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS[k].color }} />
+              <b style={{ color: STATUS[k].color }}>{STATUS[k].label}</b>
+              {k === 'complete' && ' — every milestone done.'}
+              {k === 'partial' && ' — started, some milestones left.'}
+              {k === 'notStarted' && ' — nothing done yet.'}
+            </span>
+          ))}
+        </div>
         <div className="flex flex-wrap gap-x-5 gap-y-1.5">
           <span><span className="inline-block w-4 text-center text-[#4ade80]">✓</span> <TypeChip type="auto" /> — the app detects this from your practice record.</span>
           <span><span className="inline-block w-4 text-center">☑</span> <TypeChip type="route" /> — a real app feature; tap <b className="text-brand">Go →</b>, then tick it yourself.</span>

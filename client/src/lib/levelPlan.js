@@ -430,7 +430,8 @@ export function milestonesForTier(tier) {
   return LEVEL_PLAN.filter((m) => m.tier === tier);
 }
 
-/** { tier, done, total, pct, nextMilestone } for one tier. */
+/** { tier, done, total, pct, nextMilestone, state } for one tier.
+ *  state: 'complete' (all done) | 'partial' (some done) | 'notStarted' (none). */
 export function tierStatus(tier, ctx = {}) {
   const ms = milestonesForTier(tier);
   let done = 0;
@@ -440,7 +441,8 @@ export function tierStatus(tier, ctx = {}) {
     else if (!next) next = m;
   }
   const total = ms.length;
-  return { tier, done, total, pct: total ? Math.round((done / total) * 100) : 0, nextMilestone: next };
+  const state = total === 0 ? 'complete' : done === total ? 'complete' : done > 0 ? 'partial' : 'notStarted';
+  return { tier, done, total, pct: total ? Math.round((done / total) * 100) : 0, nextMilestone: next, state };
 }
 
 /** Status for every tier, in order. */
