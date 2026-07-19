@@ -94,6 +94,9 @@ export default function MusicMemory({ lang }) {
   const game = useMusicMemory();
   const [checkIn, setCheckIn] = useState(5);
   const [checkOut, setCheckOut] = useState(5);
+  // How the user answers: 'sing' (sing/hum/play the pitch) | 'say' (speak the name).
+  // 'say' only offered where speech recognition is supported (Chrome/Edge/Android).
+  const [answerMode, setAnswerMode] = useState('sing');
 
   const mastery = useMemo(() => memoryMastery(), [game.result]);
 
@@ -143,6 +146,28 @@ export default function MusicMemory({ lang }) {
           </details>
 
           <div style={{ height: 14 }} />
+          {/* How to answer — sing the pitch, or say the name aloud. */}
+          <div className="mm-sub" style={{ marginBottom: 6 }}>{tr.mmHowAnswer || 'How would you like to answer?'}</div>
+          <div className="mm-segbar" role="group" aria-label="Answer mode">
+            <button
+              className={`mm-seg${answerMode === 'sing' ? ' is-on' : ''}`}
+              onClick={() => setAnswerMode('sing')}>
+              🎤 {tr.mmModeSing || 'Sing / play it'}
+            </button>
+            {game.speechSupported && (
+              <button
+                className={`mm-seg${answerMode === 'say' ? ' is-on' : ''}`}
+                onClick={() => setAnswerMode('say')}>
+                🗣️ {tr.mmModeSay || 'Say the name'}
+              </button>
+            )}
+          </div>
+          <div className="mm-sub" style={{ fontSize: '0.8rem', marginBottom: 12, opacity: 0.85 }}>
+            {answerMode === 'say'
+              ? (tr.mmSayHint || 'Speak the answer out loud — e.g. “C sharp”, “G minor”, “perfect fifth”.')
+              : (tr.mmSingHint || 'Sing, hum, or play the answer into the mic.')}
+          </div>
+
           <div className="mm-sub" style={{ marginBottom: 8 }}>{tr.mmCheckInPrompt || 'How are you feeling right now?'}</div>
           <MoodSlider value={checkIn} onChange={setCheckIn} tr={tr}
             lowLabel={tr.mmMoodTense || 'Tense'} highLabel={tr.mmMoodCalm || 'Calm'} />
@@ -156,7 +181,7 @@ export default function MusicMemory({ lang }) {
           {game.error && <div style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginTop: 8 }}>{game.error}</div>}
 
           <div style={{ height: 18 }} />
-          <button className="mm-cta" onClick={() => game.start({ checkInMood: checkIn })}>
+          <button className="mm-cta" onClick={() => game.start({ checkInMood: checkIn, inputMode: answerMode })}>
             {tr.mmCheckInStart || 'Begin'}
           </button>
         </>
@@ -182,6 +207,15 @@ export default function MusicMemory({ lang }) {
               <div className="mm-countdown">{game.countdown}</div>
               <div className="mm-sub" style={{ fontSize: '0.85rem' }}>{tr.mmCountInHint || 'Answer out loud when the count reaches zero. Sing it, hum it, or play it.'}</div>
             </>
+          ) : game.inputMode === 'say' ? (
+            <>
+              <div className="mm-eyebrow is-listening">{tr.mmListening || 'Listening… take your time'}</div>
+              <Prompt element={game.element} tr={tr} />
+              <div style={{ height: 12 }} />
+              <div className="mm-live" data-active={!!game.liveTranscript}>
+                <span className="mm-transcript">{game.liveTranscript || (tr.mmSayNow || 'Say the answer…')}</span>
+              </div>
+            </>
           ) : (
             <>
               <div className="mm-eyebrow is-listening">{tr.mmListening || 'Listening… take your time'}</div>
@@ -206,9 +240,11 @@ export default function MusicMemory({ lang }) {
           </div>
           <div className="mm-compare">
             <span>
-              {tr.mmYouSang || 'You sang'}{' '}
+              {game.lastResult.detail.spoken != null ? (tr.mmYouSaid || 'You said') : (tr.mmYouSang || 'You sang')}{' '}
               <span className="mm-key" style={{ color: 'var(--color-success)' }}>
-                {(game.lastResult.detail.got || []).map((pc) => pcName(pc)).join(' ') || (tr.mmNothingYet || '—')}
+                {game.lastResult.detail.spoken != null
+                  ? (game.lastResult.detail.said || (tr.mmNothingYet || '—'))
+                  : ((game.lastResult.detail.got || []).map((pc) => pcName(pc)).join(' ') || (tr.mmNothingYet || '—'))}
               </span>
             </span>
             <span>
@@ -270,7 +306,7 @@ export default function MusicMemory({ lang }) {
 
           <div style={{ height: 20, display: 'flex' }} />
           <div style={{ display: 'flex', gap: 12 }}>
-            <button className="mm-cta" onClick={() => game.start({ checkInMood: checkOut })}>{tr.mmAgain || 'Another round'}</button>
+            <button className="mm-cta" onClick={() => game.start({ checkInMood: checkOut, inputMode: game.inputMode })}>{tr.mmAgain || 'Another round'}</button>
             <button className="mm-ghost" onClick={game.abort}>{tr.mmCheckOutDone || 'Finish'}</button>
           </div>
         </>

@@ -23,9 +23,10 @@ import {
   startEmdrBed, stopEmdrBed, startAmbient, stopAmbient,
 } from './audio';
 import {
-  nextElement, adjustLevel, accept,
+  nextElement, adjustLevel, accept, acceptSpoken,
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, answerLabelFor,
 } from './memoryTrain';
+import { useSpeechAnswer } from './useSpeechAnswer';
 
 const FRAME_MS = 1000 / 60;
 const SILENCE_RMS = 0.01;
@@ -86,8 +87,10 @@ function playPrompt(spec) {
  */
 export function useMusicMemory() {
   const mic = useMic();
+  const speech = useSpeechAnswer();
   const rafRef = useRef(null);
   const cfgRef = useRef(loadConfig());
+  const inputModeRef = useRef('sing');   // 'sing' (pitch) | 'say' (spoken words)
 
   const [phase, setPhase] = useState('checkin');
   const [countdown, setCountdown] = useState(null);
@@ -102,6 +105,8 @@ export function useMusicMemory() {
   const [error, setError] = useState(null);
   const [heardPcs, setHeardPcs] = useState([]);     // committed PCs THIS item (live → chips)
   const [pacerEpoch, setPacerEpoch] = useState(0);  // performance.now() when the EMDR bed started
+  const [inputMode, setInputMode] = useState('sing'); // mirror of inputModeRef, for the UI
+  const [liveTranscript, setLiveTranscript] = useState(''); // what speech heard so far (say mode)
 
   // Mutable run state the async loop reads fresh.
   const abortRef = useRef(false);
@@ -119,7 +124,8 @@ export function useMusicMemory() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { mic.current.close(); } catch { /* noop */ }
-  }, [mic]);
+    try { speech.stop(); } catch { /* noop */ }
+  }, [mic, speech]);
 
   // Stop the session-scoped calm beds (idempotent; guarded so 'Another round'
   // can't double-start and every exit path funnels here).
@@ -148,16 +154,62 @@ export function useMusicMemory() {
     if (element?.prompt?.audio) playPrompt(element.prompt.audio);
   }, [element]);
 
-  // Run ONE item: play prompt → open mic → count-in → answer window → grade.
-  // Resolves to { correct, detail }.
+  // Run ONE item: play prompt → open input → count-in → answer window → grade.
+  // Two input modes: 'sing' (pitch via mic + YIN) and 'say' (spoken words via
+  // speech recognition). Resolves to { correct, detail }.
   const runItem = useCallback(async (el) => {
+    const mode = inputModeRef.current;
     setLiveNote(null);
-    // 1) Prompt (mic still closed so it can't bleed into the graded window).
+    setLiveTranscript('');
+    // 1) Prompt (input still closed so it can't bleed into the graded window).
     setPhase('prompt');
     if (el.prompt.mode === 'play') await playPrompt(el.prompt.audio);
     if (abortRef.current) return null;
 
-    // 2) Open the mic and run the count-in + answer window.
+    // ── SAY MODE: speech recognition ─────────────────────────────────────────
+    if (mode === 'say') {
+      if (!speech.supported) {
+        setError('Speech recognition isn’t available in this browser — switch to Sing/Play.');
+        stopBeds(); setPhase('checkin'); return null;
+      }
+      speech.reset();
+      speech.onError = (err) => {
+        if (err === 'not-allowed' || err === 'service-not-allowed') {
+          setError('Microphone permission denied — allow mic access and try again.');
+        }
+      };
+      try { speech.start('en-US'); } catch { /* handled via onError */ }
+
+      setPhase('answer');
+      setCountdown(Math.ceil(COUNTDOWN_MS / 1000));
+      const started = performance.now();
+      await new Promise((resolve) => {
+        let lastCountdown = -1;
+        const tick = (now) => {
+          if (abortRef.current) { resolve(); return; }
+          const elapsed = now - started;
+          const inCountIn = elapsed < COUNTDOWN_MS;
+          if (inCountIn) {
+            const remain = Math.ceil((COUNTDOWN_MS - elapsed) / 1000);
+            if (remain !== lastCountdown) { lastCountdown = remain; setCountdown(remain); }
+          } else if (lastCountdown !== 0) { lastCountdown = 0; setCountdown(0); }
+          // Surface what's been heard so the user sees their words appear.
+          setLiveTranscript(speech.getTranscript());
+          if (elapsed >= COUNTDOWN_MS + ANSWER_MS) { resolve(); return; }
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+      });
+      speech.stop();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      setCountdown(null);
+      if (abortRef.current) return null;
+      const transcript = speech.getTranscript();
+      setLiveTranscript(transcript);
+      return acceptSpoken(el, transcript);
+    }
+
+    // ── SING MODE: pitch via mic + YIN ───────────────────────────────────────
     try {
       await mic.current.open(cfgRef.current.smoothing, { raw: true });
     } catch (e) {
@@ -254,14 +306,18 @@ export function useMusicMemory() {
 
     // Leave heardPcs populated — it must persist through the feedback phase.
     return accept(el, committedPcsRef.current);
-  }, [mic, stopMic, stopBeds]);
+  }, [mic, speech, stopMic, stopBeds]);
 
-  const start = useCallback(async ({ checkInMood } = {}) => {
+  const start = useCallback(async ({ checkInMood, inputMode: mode } = {}) => {
     setError(null);
     setResult(null);
     setTally({ correct: 0, total: 0 });
     setLastResult(null);
     setMicOk(null);
+    // Lock in the answer mode for this session ('sing' pitch | 'say' spoken words).
+    const chosen = mode === 'say' && speech.supported ? 'say' : 'sing';
+    inputModeRef.current = chosen;
+    setInputMode(chosen);
     abortRef.current = false;
     levelRef.current = { level: 1, streak: 0 };
     setLevelState(levelRef.current);
@@ -342,13 +398,14 @@ export function useMusicMemory() {
     setResult(out);
     setPhase('checkout');
     return out;
-  }, [runItem, stopBeds]);
+  }, [runItem, stopBeds, speech]);
 
   return {
     phase, setPhase,
     countdown, element, itemNo, sessionItems: SESSION_ITEMS,
     liveNote, lastResult, tally, levelState, micOk, result, error,
     heardPcs, pacerEpoch,
+    inputMode, liveTranscript, speechSupported: speech.supported,
     expectedAnswerLabel: element ? answerLabelFor(element) : null,
     answerMs: ANSWER_MS, breathMs: BREATH_MS,
     start, abort, replay,

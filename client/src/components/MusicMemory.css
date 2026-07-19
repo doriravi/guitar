@@ -213,6 +213,35 @@
 .mm-why summary::-webkit-details-marker { display: none; }
 .mm-why p { font-size: 0.85rem; line-height: 1.6; color: var(--color-ink-subtle, #b9b9b9); margin-top: 4px; }
 
+/* ---- Answer-mode segmented toggle (sing / say) ---- */
+.mm-segbar {
+  display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 8px;
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(8px);
+}
+.mm-seg {
+  padding: 8px 16px; border-radius: 9999px; font-size: 0.85rem; font-weight: 700;
+  color: var(--color-ink-subtle, #b9b9b9);
+  background: transparent; border: none; cursor: pointer;
+  transition: color .2s, background .2s;
+}
+.mm-seg.is-on {
+  color: #1a1508;
+  background: linear-gradient(180deg, #f7e6b8, var(--mm-gold));
+  box-shadow: 0 4px 16px rgba(233,196,106,0.3);
+}
+
+/* ---- Live spoken transcript ---- */
+.mm-transcript {
+  font-size: clamp(1.3rem, 4.5vw, 2rem); font-weight: 800; line-height: 1.2;
+  color: var(--color-ink-ghost, #3a3a3a); max-width: 30rem; text-wrap: balance;
+  transition: color .18s, text-shadow .18s;
+}
+.mm-live[data-active="true"] .mm-transcript {
+  color: var(--color-success, #4ade80); text-shadow: 0 0 24px rgba(74,222,128,0.4);
+}
+
 .mm-listen-rings {
   width: 120px; height: 120px; border-radius: 9999px; margin: 8px auto;
   border: 2px solid rgba(233,196,106,0.4);

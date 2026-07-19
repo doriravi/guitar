@@ -269,6 +269,132 @@ export function accept(element, committed) {
   };
 }
 
+// ─── Spoken-answer grading (the "Say it" mode) ──────────────────────────────────
+// The user says the answer in words ("C sharp", "G minor", "perfect fifth",
+// "the third") instead of singing the pitch. We parse the transcript to the
+// SPECIFIC answer and compare it directly to the element — more accurate than
+// routing speech through pitch detection. Pure + deterministic (unit-testable).
+
+// Spoken words → pitch class. Accepts letter names, "sharp"/"flat", and common
+// mishears ("be"→B, "see"→C, "eh/ay"→A). Longest-first so "c sharp" beats "c".
+const SPOKEN_PC = [
+  ['c sharp', 1], ['c#', 1], ['d flat', 1], ['db', 1], ['c natural', 0],
+  ['d sharp', 3], ['d#', 3], ['e flat', 3], ['eb', 3],
+  ['f sharp', 6], ['f#', 6], ['g flat', 6], ['gb', 6],
+  ['g sharp', 8], ['g#', 8], ['a flat', 8], ['ab', 8],
+  ['a sharp', 10], ['a#', 10], ['b flat', 10], ['bb', 10],
+  ['sea', 0], ['see', 0], ['dee', 2], ['ee', 4], ['eff', 5], ['gee', 7],
+  ['jee', 7], ['be', 11], ['bee', 11], ['ay', 9], ['eh', 9],
+  ['c', 0], ['d', 2], ['e', 4], ['f', 5], ['g', 7], ['a', 9], ['b', 11],
+];
+
+// Spoken quality → the chord-name suffix the library uses ('', 'm', '7').
+const SPOKEN_QUALITY = [
+  ['minor seven', 'm7'], ['min seven', 'm7'], ['minor', 'm'], ['min', 'm'], ['moll', 'm'],
+  ['major seven', 'maj7'], ['dominant seven', '7'], ['seventh', '7'], ['seven', '7'],
+  ['major', ''], ['maj', ''], ['dur', ''],
+];
+
+// Spoken interval name → semitones. Longest-first.
+const SPOKEN_INTERVAL = [
+  ['minor second', 1], ['major second', 2], ['minor third', 3], ['major third', 4],
+  ['perfect fourth', 5], ['augmented fourth', 6], ['diminished fifth', 6], ['tritone', 6],
+  ['perfect fifth', 7], ['minor sixth', 8], ['major sixth', 9],
+  ['minor seventh', 10], ['major seventh', 11], ['octave', 12], ['unison', 0],
+  ['flat two', 1], ['flat three', 3], ['flat five', 6], ['flat six', 8], ['flat seven', 10],
+  ['second', 2], ['third', 4], ['fourth', 5], ['fifth', 7], ['sixth', 9], ['seventh', 11],
+];
+
+// Spoken ordinal → a scale-degree number (1-based). "the third" → 3.
+const SPOKEN_ORDINAL = [
+  ['first', 1], ['second', 2], ['third', 3], ['fourth', 4], ['fifth', 5],
+  ['sixth', 6], ['seventh', 7], ['root', 1], ['tonic', 1], ['one', 1],
+  ['two', 2], ['three', 3], ['four', 4], ['five', 5], ['six', 6], ['seven', 7],
+];
+
+const norm = (s) => (s || '').toLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
+function firstMatch(text, table) {
+  for (const [phrase, val] of table) {
+    const re = new RegExp(`(^|\\s)${phrase.replace(/[#]/g, '\\#')}(\\s|$)`);
+    if (re.test(text)) return val;
+  }
+  return null;
+}
+
+/**
+ * Parse a spoken transcript to a structured answer:
+ *   { pc, quality, semitones, ordinal, chordName } — any of which may be null.
+ * @param {string} transcript
+ */
+export function parseSpokenAnswer(transcript) {
+  const t = norm(transcript);
+  const pc = firstMatch(t, SPOKEN_PC);
+  const quality = firstMatch(t, SPOKEN_QUALITY);          // '', 'm', '7', 'm7', 'maj7' | null
+  const semitones = firstMatch(t, SPOKEN_INTERVAL);
+  const ordinal = firstMatch(t, SPOKEN_ORDINAL);
+  const chordName = pc != null ? pcName(pc) + (quality || '') : null;
+  return { pc, quality, semitones, ordinal, chordName, text: t };
+}
+
+// Same-note comparison by pitch class (so a spelled answer like Bb == A#).
+const chordRootQuality = (name) => {
+  const m = (name || '').match(/^([A-G][#b]?)(.*)$/);
+  if (!m) return null;
+  const rootPc = NOTE_TO_PC[m[1]];
+  return rootPc == null ? null : { rootPc, suffix: m[2] };
+};
+
+/**
+ * Grade a SPOKEN answer against an element.
+ * @param {object} element
+ * @param {string} transcript
+ * @returns {{correct:boolean, detail:{ spoken, parsed, said }}}
+ */
+export function acceptSpoken(element, transcript) {
+  const parsed = parseSpokenAnswer(transcript);
+  let correct = false;
+  let said = parsed.text;
+
+  switch (element.type) {
+    case 'note':
+      correct = parsed.pc != null && parsed.pc === normPc(element.meta.pc);
+      said = parsed.pc != null ? pcName(parsed.pc) : parsed.text;
+      break;
+    case 'interval':
+      // Accept the interval NAME (semitones) — the most natural spoken answer.
+      correct = parsed.semitones != null && (parsed.semitones % 12) === element.meta.semitones;
+      said = parsed.semitones != null ? (INTERVAL_LABELS[parsed.semitones % 12] || parsed.text) : parsed.text;
+      break;
+    case 'degree': {
+      // Either the ordinal ("the third") or the resulting note name.
+      const byNote = parsed.pc != null && parsed.pc === normPc(element.meta.targetPc);
+      // Ordinal → degreeIndex is ordinal-1; compare to the element's degreeIndex.
+      const byOrdinal = parsed.ordinal != null && (parsed.ordinal - 1) === element.meta.degreeIndex;
+      correct = byNote || byOrdinal;
+      said = parsed.pc != null ? pcName(parsed.pc) : (parsed.ordinal != null ? `degree ${parsed.ordinal}` : parsed.text);
+      break;
+    }
+    case 'chord':
+    case 'progression': {
+      const target = element.type === 'chord' ? element.meta.name : element.meta.nextName;
+      const tgt = chordRootQuality(target);
+      // Need the right root; quality must match, but a bare root spoken for a
+      // major chord ("G" for "G") is accepted (major is the unmarked default).
+      if (tgt && parsed.pc != null && parsed.pc === tgt.rootPc) {
+        const saidSuffix = parsed.quality == null ? '' : (parsed.quality === 'maj7' ? '' : parsed.quality);
+        const tgtSuffix = tgt.suffix === 'dim' ? 'dim' : tgt.suffix; // dim spoken rarely; require exact
+        correct = saidSuffix === tgtSuffix || (tgtSuffix === '' && parsed.quality == null);
+      }
+      said = parsed.chordName || parsed.text;
+      break;
+    }
+    default:
+      correct = false;
+  }
+
+  return { correct, detail: { spoken: transcript, parsed, said } };
+}
+
 // ─── Adaptive difficulty (streak-driven; NOT spaced repetition) ─────────────────
 // Each level widens the pool of element TYPES. Correct answers build a streak that
 // promotes the level; a miss eases it. Deterministic: nextElement(level, index)

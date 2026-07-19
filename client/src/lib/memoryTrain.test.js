@@ -3,6 +3,7 @@ import {
   noteElement, intervalElement, chordElement, degreeElement, progressionElement,
   accept, elementToAudioSpec, nextElement, adjustLevel, LEVELS, MAX_LEVEL, UP_THRESHOLD,
   saveMemoryRun, memoryMastery, detectMemoryAdvancement, pcName,
+  parseSpokenAnswer, acceptSpoken,
 } from './memoryTrain';
 
 // Pitch classes (sharp): C0 C#1 D2 D#3 E4 F5 F#6 G7 G#8 A9 A#10 B11
@@ -166,5 +167,59 @@ describe('pcName', () => {
     expect(pcName(0)).toBe('C');
     expect(pcName(6)).toBe('F#');
     expect(pcName(12)).toBe('C');
+  });
+});
+
+describe('parseSpokenAnswer', () => {
+  it('parses note names with accidentals', () => {
+    expect(parseSpokenAnswer('C sharp').pc).toBe(1);
+    expect(parseSpokenAnswer('b flat').pc).toBe(10);
+    expect(parseSpokenAnswer('G').pc).toBe(7);
+  });
+  it('parses chord quality', () => {
+    expect(parseSpokenAnswer('G minor').chordName).toBe('Gm');
+    expect(parseSpokenAnswer('C seven').chordName).toBe('C7');
+    expect(parseSpokenAnswer('A').chordName).toBe('A');
+  });
+  it('parses interval names', () => {
+    expect(parseSpokenAnswer('perfect fifth').semitones).toBe(7);
+    expect(parseSpokenAnswer('major third').semitones).toBe(4);
+    expect(parseSpokenAnswer('tritone').semitones).toBe(6);
+  });
+  it('parses ordinals for degrees', () => {
+    expect(parseSpokenAnswer('the third').ordinal).toBe(3);
+    expect(parseSpokenAnswer('root').ordinal).toBe(1);
+  });
+});
+
+describe('acceptSpoken', () => {
+  it('grades a spoken note', () => {
+    const el = noteElement(1); // C#
+    expect(acceptSpoken(el, 'C sharp').correct).toBe(true);
+    expect(acceptSpoken(el, 'D flat').correct).toBe(true);   // enharmonic
+    expect(acceptSpoken(el, 'C').correct).toBe(false);
+  });
+  it('grades a spoken interval by name', () => {
+    const el = intervalElement(C, 7); // perfect fifth
+    expect(acceptSpoken(el, 'perfect fifth').correct).toBe(true);
+    expect(acceptSpoken(el, 'a fifth').correct).toBe(true);
+    expect(acceptSpoken(el, 'major third').correct).toBe(false);
+  });
+  it('grades a spoken chord (root + quality; bare root = major)', () => {
+    expect(acceptSpoken(chordElement('Am'), 'A minor').correct).toBe(true);
+    expect(acceptSpoken(chordElement('G'), 'G').correct).toBe(true);       // bare root ok for major
+    expect(acceptSpoken(chordElement('G'), 'G minor').correct).toBe(false); // wrong quality
+    expect(acceptSpoken(chordElement('Am'), 'A').correct).toBe(false);      // missing minor
+  });
+  it('grades a spoken degree by ordinal OR note', () => {
+    const el = degreeElement(C, 'major', 2); // the 3rd of C = E, degreeIndex 2
+    expect(acceptSpoken(el, 'the third').correct).toBe(true);
+    expect(acceptSpoken(el, 'E').correct).toBe(true);
+    expect(acceptSpoken(el, 'the fifth').correct).toBe(false);
+  });
+  it('grades a spoken progression next-chord', () => {
+    const el = progressionElement('C', 'major', 2, 2); // next = Am
+    expect(acceptSpoken(el, 'A minor').correct).toBe(true);
+    expect(acceptSpoken(el, 'A major').correct).toBe(false);
   });
 });
