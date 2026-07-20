@@ -44,7 +44,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/users/forgot-password").permitAll()
                         .requestMatchers("/api/users/reset-password").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
-                        .requestMatchers("/api/payments/webhook").permitAll()
                         // Public PayPal client id + price, so the pricing screen
                         // renders before sign-in. Contains no secret.
                         .requestMatchers("/api/subscriptions/paypal/config").permitAll()

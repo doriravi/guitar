@@ -1,7 +1,6 @@
 package com.guitarreach.api.exception;
 
 import com.guitarreach.api.dto.response.ErrorResponse;
-import com.stripe.exception.StripeException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -61,12 +60,6 @@ public class GlobalExceptionHandler {
                 .fieldErrors(fieldErrors)
                 .build();
         return ResponseEntity.badRequest().body(body);
-    }
-
-    @ExceptionHandler(StripeException.class)
-    public ResponseEntity<ErrorResponse> handleStripe(StripeException ex) {
-        log.error("Stripe error: {}", ex.getMessage());
-        return build(HttpStatus.PAYMENT_REQUIRED, "Payment processing error");
     }
 
     @ExceptionHandler(Exception.class)

@@ -39,7 +39,7 @@ class PaidAccessFilterTest {
     private static final class StubSubscriptions extends SubscriptionService {
         boolean paid;
         int lookups = 0;
-        StubSubscriptions() { super(null, null, null, null, null); }
+        StubSubscriptions() { super(null, null, null, null); }
         @Override public boolean hasPaidAccess(String email) { lookups++; return paid; }
     }
 

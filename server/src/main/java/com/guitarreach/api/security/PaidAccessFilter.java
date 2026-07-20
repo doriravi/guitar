@@ -66,7 +66,6 @@ public class PaidAccessFilter extends OncePerRequestFilter {
             "/api/users/reset-password",
             "/api/users/me",          // reading your own account, incl. to sign out
             "/api/subscriptions/**",  // status + PayPal order create/capture
-            "/api/payments/**",       // provider callbacks
             "/api/version",
             "/actuator/**"
     );
