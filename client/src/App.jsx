@@ -18,6 +18,7 @@ import GuideAvatar from './components/GuideAvatar';
 import AdvisorWidget from './components/AdvisorWidget';
 import SongImporter from './components/SongImporter';
 import AccountSettings from './components/AccountSettings';
+import Paywall from './components/Paywall';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import Lazy3D from './components/Lazy3D';
@@ -25,7 +26,7 @@ import { DEFAULT_PROFILE } from './lib/handProfile';
 
 // Static-literal dynamic import → shares the lazily-fetched three-vendor chunk.
 const loadAmbient = () => import('./components/three/AmbientBackground');
-import { auth, handProfile as handProfileApi, user as userApi } from './lib/api';
+import { auth, handProfile as handProfileApi, user as userApi, subscriptions as subscriptionsApi, onPaymentRequired } from './lib/api';
 import { syncSongsOnLogin } from './lib/customSongs';
 import { unlockAudio } from './lib/audio';
 import { useT, LANGUAGES } from './lib/i18n';
@@ -198,6 +199,11 @@ export default function App() {
   const [showSignIn, setShowSignIn] = useState(() => getTokenFromUrl('login') === '1');
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Paywall: using the backend costs $10/year. `paywalled` is raised either by
+  // the subscription status check on login, or reactively by ANY api call that
+  // comes back 402 (see onPaymentRequired in lib/api.js). Guests are never
+  // paywalled — they already get no backend.
+  const [paywalled, setPaywalled] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('guitar_lang') || 'en');
   const [aiFingers, setAIFingers] = useState(() => {
@@ -241,6 +247,25 @@ export default function App() {
       try { localStorage.setItem('guitar_lang', code); } catch {}
     }
   }
+
+  // ── Paywall ────────────────────────────────────────────────────────────────
+  // Any API call that comes back 402 means "signed in, but the yearly pass isn't
+  // paid". Listening centrally means a feature added later is covered without
+  // touching it: whichever call trips the server's gate raises this screen.
+  useEffect(() => onPaymentRequired(() => setPaywalled(true)), []);
+
+  // Check paid status whenever a user session appears, so the paywall shows up
+  // front rather than on the first feature they try. Read-only and fail-open on
+  // a network error — the SERVER is the real gate, so a flaky status check must
+  // never lock out someone who has actually paid.
+  useEffect(() => {
+    if (!currentUser) { setPaywalled(false); return; }
+    let alive = true;
+    subscriptionsApi.getStatus()
+      .then(sub => { if (alive) setPaywalled(!sub?.active); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [currentUser]);
 
   // Handle deep-link tokens from email links
   const resetToken = getTokenFromUrl('reset-password') ? getTokenFromUrl('reset-password') : null;
@@ -554,6 +579,29 @@ export default function App() {
               {verifyMsg.type === 'success' ? tr.emailVerified : tr.emailVerifyFailed}
             </div>
           )}
+        </div>
+      </LangContext.Provider>
+    );
+  }
+
+  // --- Paywall gate: a signed-in account whose $10/year pass is unpaid or
+  // lapsed. Shown BEFORE onboarding — there's no point measuring a hand for an
+  // account that can't save it. Guests never reach here (they use no backend),
+  // and signing out is always available so nobody is trapped behind the wall.
+  if (currentUser && !guestMode && paywalled) {
+    return (
+      <LangContext.Provider value={lang}>
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-4 bg-surface-base">
+          <Paywall
+            lang={lang}
+            compact
+            onPaid={() => setPaywalled(false)}
+          />
+          <button
+            onClick={handleLogout}
+            className="text-xs underline text-ink-muted">
+            {tr.signOut || 'Sign out'}
+          </button>
         </div>
       </LangContext.Provider>
     );

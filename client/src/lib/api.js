@@ -33,6 +33,24 @@ function refreshAccessToken() {
   return _refreshPromise;
 }
 
+// ── Paywall signal ───────────────────────────────────────────────────────────
+// Using the backend costs $10/year. When the server answers 402 Payment
+// Required, ANY call — not just a billing one — should surface the paywall.
+// Subscribers are notified here rather than each caller checking status codes.
+const _paymentRequiredSubs = new Set();
+
+/** Subscribe to 402s. Returns an unsubscribe function. */
+export function onPaymentRequired(fn) {
+  _paymentRequiredSubs.add(fn);
+  return () => _paymentRequiredSubs.delete(fn);
+}
+
+function notifyPaymentRequired() {
+  for (const fn of _paymentRequiredSubs) {
+    try { fn(); } catch { /* a bad listener must not break the request */ }
+  }
+}
+
 async function apiFetch(path, options = {}, _retried = false) {
   const headers = {
     'Content-Type': 'application/json',
@@ -58,6 +76,11 @@ async function apiFetch(path, options = {}, _retried = false) {
       return apiFetch(path, options, true);
     } catch { /* refresh failed (e.g. logged out) — fall through to the original error */ }
   }
+
+  // 402 = signed in, but the yearly access pass isn't paid (or has lapsed).
+  // Broadcast it so the app can raise the paywall no matter which call tripped
+  // it, then still throw so the calling code takes its own error path.
+  if (res.status === 402) notifyPaymentRequired();
 
   if (res.status === 204) return null;
 
@@ -230,12 +253,26 @@ export const handAnalysis = {
 };
 
 export const subscriptions = {
+  // Returns { plan, status, currentPeriodEnd, active, priceUsd, paypalConfigured }.
+  // `active` is the server's own paywall predicate — trust it rather than
+  // re-deriving access from plan/status here, so the two can never disagree.
   getStatus: () => apiFetch('/api/subscriptions/me'),
 
-  createCheckout: (plan) =>
-    apiFetch('/api/subscriptions/checkout', {
+  // Public: PayPal client id + price, readable before sign-in so the paywall
+  // screen can render for a logged-out visitor.
+  paypalConfig: () => apiFetch('/api/subscriptions/paypal/config'),
+
+  // Step 1 — create the $10/year order; returns { orderId } for the PayPal
+  // JS buttons to approve.
+  createPayPalOrder: () =>
+    apiFetch('/api/subscriptions/paypal/order', { method: 'POST' }),
+
+  // Step 2 — capture it. The SERVER verifies status/owner/amount with PayPal
+  // before granting access, and returns the fresh subscription.
+  capturePayPalOrder: (orderId) =>
+    apiFetch('/api/subscriptions/paypal/capture', {
       method: 'POST',
-      body: JSON.stringify({ plan }),
+      body: JSON.stringify({ orderId }),
     }),
 
   cancel: () => apiFetch('/api/subscriptions/cancel', { method: 'POST' }),

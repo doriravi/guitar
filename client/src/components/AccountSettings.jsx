@@ -4,6 +4,7 @@ import { useT, LANGUAGES } from '../lib/i18n';
 import { useHandProfile } from '../App';
 import { recommendedMaxDifficulty, abilityLabel, flexibilityLabel } from '../lib/handProfile';
 import { currentTier, currentLevelCeiling, loadManual } from '../lib/levelPlan';
+import Paywall from './Paywall';
 
 function Section({ title, children }) {
   return (
@@ -69,7 +70,6 @@ function SubscriptionSection({ lang }) {
   const tr = useT(lang);
   const [sub, setSub] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [busyPlan, setBusyPlan] = useState(null); // plan key currently redirecting
   const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState('');
   const [banner, setBanner] = useState(() => consumeCheckoutResult());
@@ -93,23 +93,6 @@ function SubscriptionSection({ lang }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleUpgrade(plan) {
-    setBusyPlan(plan);
-    setError('');
-    try {
-      const { url } = await subscriptionsApi.createCheckout(plan);
-      if (url) {
-        window.location.href = url; // hand off to Stripe Checkout
-      } else {
-        setError(tr.subCheckoutFailed || 'Could not start checkout. Please try again.');
-        setBusyPlan(null);
-      }
-    } catch (err) {
-      setError(err.message || (tr.subCheckoutFailed || 'Could not start checkout. Please try again.'));
-      setBusyPlan(null);
-    }
-  }
-
   async function handleCancel() {
     setCanceling(true);
     setError('');
@@ -126,17 +109,18 @@ function SubscriptionSection({ lang }) {
 
   const plan = sub?.plan || 'FREE';
   const status = sub?.status || 'INACTIVE';
-  const isPremium = plan !== 'FREE' && (status === 'ACTIVE' || status === 'TRIALING');
-  const canCancel = plan !== 'FREE' && (status === 'ACTIVE' || status === 'TRIALING' || status === 'PAST_DUE');
+  // `active` is the server's own paywall predicate (ACTIVE and not yet expired).
+  // Read it rather than re-deriving access here, so this screen can never
+  // disagree with what the backend actually enforces.
+  const isPremium = !!sub?.active;
+  // The yearly pass is a one-off payment that simply lapses — there is nothing
+  // recurring to cancel. Cancellation stays available only for legacy Stripe
+  // subscriptions created before the switch to PayPal.
+  const canCancel = !!sub?.stripeSubscriptionId;
   const sm = statusMeta(status, tr);
   const renewsAt = sub?.currentPeriodEnd
     ? new Date(sub.currentPeriodEnd).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
     : null;
-
-  const PLANS = [
-    { key: 'MONTHLY', label: tr.planMonthlyName || 'Monthly', price: tr.planMonthlyPrice || '$4.99 / month', blurb: tr.planMonthlyBlurb || 'Billed monthly. Cancel anytime.' },
-    { key: 'YEARLY', label: tr.planYearlyName || 'Yearly', price: tr.planYearlyPrice || '$49.99 / year', blurb: tr.planYearlyBlurb || 'Two months free vs. monthly.' },
-  ];
 
   return (
     <Section title={tr.subscription || 'Subscription'}>
@@ -165,41 +149,30 @@ function SubscriptionSection({ lang }) {
             <span className="text-sm text-ink">{planLabel(plan, tr)}</span>
             <span className="text-xs font-semibold" style={{ color: sm.color }}>{sm.label}</span>
           </div>
+          {/* The yearly pass doesn't renew itself — it simply runs out — so the
+              date is always phrased as an END date, not a renewal. */}
           {isPremium && renewsAt && (
             <p className="text-xs text-ink-faint">
-              {status === 'CANCELED'
-                ? `${tr.subEndsOn || 'Access ends on'} ${renewsAt}`
-                : `${tr.subRenewsOn || 'Renews on'} ${renewsAt}`}
+              {`${tr.payActiveUntil || 'Full access until'} ${renewsAt}`}
             </p>
           )}
 
           {error && <p className="text-xs mt-2 text-danger">{error}</p>}
 
+          {/* Unpaid (or lapsed) → the PayPal $10/year pass. This is the same
+              component the full-screen paywall uses, rendered inline here so
+              there is exactly ONE checkout implementation to keep working. */}
           {!isPremium && (
-            <>
-              <p className="text-xs mt-3 mb-3 text-ink-subtle">
-                {tr.subUpgradeIntro || 'Upgrade to Premium to unlock everything.'}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {PLANS.map(p => (
-                  <div key={p.key} className="rounded-xl p-4 bg-surface-900 border border-surface-650 flex flex-col">
-                    <span className="text-sm font-semibold text-ink">{p.label}</span>
-                    <span className="text-brand text-base font-bold mt-1">{p.price}</span>
-                    <span className="text-[11px] text-ink-faint mt-1 mb-3 flex-1">{p.blurb}</span>
-                    <button
-                      onClick={() => handleUpgrade(p.key)}
-                      disabled={!!busyPlan}
-                      className="px-4 py-2 rounded-xl text-sm font-semibold bg-brand text-surface-base"
-                      style={{ opacity: busyPlan ? 0.6 : 1, cursor: busyPlan ? 'wait' : 'pointer' }}>
-                      {busyPlan === p.key ? (tr.subRedirecting || 'Redirecting…') : (tr.subscribe || 'Subscribe')}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] mt-3 text-ink-ghost">
-                {tr.subSecureNote || 'Payments are processed securely by Stripe. You’ll be redirected to complete checkout.'}
-              </p>
-            </>
+            <div className="mt-3">
+              <Paywall lang={lang} compact onPaid={() => refresh()} />
+            </div>
+          )}
+
+          {/* Already paid — paying again simply adds another year on top. */}
+          {isPremium && (
+            <p className="text-[11px] mt-3 text-ink-ghost">
+              {tr.payRenewNote || 'Pay again any time to add another year.'}
+            </p>
           )}
 
           {canCancel && (

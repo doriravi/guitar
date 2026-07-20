@@ -27,6 +27,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final com.guitarreach.api.security.PaidAccessFilter paidAccessFilter;
     private final UserDetailsService userDetailsService;
     private final org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource;
 
@@ -44,6 +45,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/users/reset-password").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
+                        // Public PayPal client id + price, so the pricing screen
+                        // renders before sign-in. Contains no secret.
+                        .requestMatchers("/api/subscriptions/paypal/config").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/version").permitAll()
                         // Live "jam" WebSocket handshake — the room relay does its
@@ -68,6 +72,10 @@ public class SecurityConfig {
                 .headers(headers -> headers.frameOptions(fo -> fo.sameOrigin()))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // The paywall runs immediately AFTER the JWT filter, so the
+                // principal is already resolved and it can tell "not logged in"
+                // (leave alone → 401) from "logged in but unpaid" (→ 402).
+                .addFilterAfter(paidAccessFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 

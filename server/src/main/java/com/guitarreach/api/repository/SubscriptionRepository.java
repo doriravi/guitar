@@ -9,4 +9,5 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, Long
     Optional<Subscription> findByUserId(Long userId);
     Optional<Subscription> findByStripeCustomerId(String customerId);
     Optional<Subscription> findByStripeSubscriptionId(String subscriptionId);
+    Optional<Subscription> findByPaypalOrderId(String paypalOrderId);
 }

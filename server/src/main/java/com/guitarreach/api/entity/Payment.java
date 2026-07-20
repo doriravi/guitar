@@ -33,6 +33,9 @@ public class Payment {
 
     private String stripePaymentIntentId;
 
+    /** PayPal capture (transaction) id for payments taken through PayPal. */
+    private String paypalCaptureId;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 }

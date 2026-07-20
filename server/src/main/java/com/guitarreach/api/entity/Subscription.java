@@ -37,6 +37,15 @@ public class Subscription {
 
     private String stripeCustomerId;
     private String stripeSubscriptionId;
+
+    /** PayPal order id of the most recent successful $10/year purchase. */
+    private String paypalOrderId;
+
+    /**
+     * When paid access ends. This is the single source of truth for the paywall
+     * ({@code PaidAccessFilter}): access is granted iff status is ACTIVE and this
+     * is in the future. A PayPal purchase pushes it out by one year.
+     */
     private LocalDateTime currentPeriodEnd;
 
     @CreationTimestamp
