@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A web app for guitar players to assess the physical difficulty of chord shapes and note combinations. The target user has short fingers and low flexibility. The system measures fret/string distances between notes and scores each combination on a **1–10 reach difficulty scale** (1 = easy, 10 = hardest stretch).
 
-It is a two-part app: a **React + Vite** frontend (`client/`) and a **Spring Boot 3 / Java 21** backend (`server/`). The frontend holds all the guitar-physics domain logic and runs standalone; the backend adds accounts, hand-profile persistence, Stripe subscriptions, and a Gemini-backed hand-photo analysis endpoint.
+It is a two-part app: a **React + Vite** frontend (`client/`) and a **Spring Boot 3 / Java 21** backend (`server/`). The frontend holds all the guitar-physics domain logic and runs standalone; the backend adds accounts, hand-profile persistence, a PayPal paywall, and a Gemini-backed hand-photo analysis endpoint.
 
 ## Commands
 
@@ -21,26 +21,22 @@ npm run gen-icons    # regenerate PWA icons from scripts/icon.svg (needs sharp)
 ```
 
 ### PWA — the frontend is an installable app on all platforms
-The client is a PWA (via `vite-plugin-pwa`, configured in [client/vite.config.js](client/vite.config.js)),
-so it installs to the home screen on Android/iOS/iPadOS and as a desktop app on
-Windows/macOS. The manifest + service worker are generated at build time; icons
-live in `client/public/` (`pwa-*.png`, `maskable-512x512.png`, `apple-touch-icon.png`,
-`favicon.png`) and are produced from `client/scripts/icon.svg` by `npm run gen-icons`.
-iOS home-screen behavior additionally relies on the `apple-mobile-web-app-*` meta
-tags in [client/index.html](client/index.html). [client/src/components/PWAPrompt.jsx](client/src/components/PWAPrompt.jsx)
-handles the update toast + install button (and the iOS "Add to Home Screen" hint).
-The service worker never intercepts `/api` calls (see `navigateFallbackDenylist` /
-`runtimeCaching` in the Vite config) — auth and backend requests always hit the network.
+Installable everywhere via `vite-plugin-pwa` ([client/vite.config.js](client/vite.config.js));
+manifest + service worker are build-time generated. Icons in `client/public/` come from
+`client/scripts/icon.svg` via `npm run gen-icons`; iOS relies on the `apple-mobile-web-app-*`
+meta in [client/index.html](client/index.html); [PWAPrompt.jsx](client/src/components/PWAPrompt.jsx)
+handles the update toast + install button. The service worker never intercepts `/api`
+(see `navigateFallbackDenylist`/`runtimeCaching`) — auth/backend requests always hit the network.
 
 ### Backend (`server/`)
 ```bash
 mvn spring-boot:run                  # run on :8080 (dev profile, SQLite at server/data)
 mvn clean package                    # build the jar (target/guitar-reach-api-0.0.1-SNAPSHOT.jar)
-mvn test                             # run all tests (note: no test classes exist yet)
-mvn test -Dtest=ClassName#methodName # run a single test once tests are added
+mvn test                             # run all tests
+mvn test -Dtest=ClassName#methodName # run a single test
 ```
 
-The backend selects a profile via `SPRING_PROFILES_ACTIVE` (`dev` default, `prod` for deploy). All secrets (`JWT_SECRET`, `STRIPE_*`, `GEMINI_API_KEY`, `MAIL_*`) come from env vars with dev placeholders in `application.properties` — features degrade gracefully when a key is absent (e.g. hand analysis returns 503).
+The backend selects a profile via `SPRING_PROFILES_ACTIVE` (`dev` default, `prod` for deploy). All secrets (`JWT_SECRET`, `PAYPAL_*`, `GEMINI_API_KEY`, `MAIL_*`; `STRIPE_*` legacy) come from env vars with dev placeholders in `application.properties` — features degrade gracefully when a key is absent (e.g. hand analysis returns 503).
 
 ## Verification — always confirm before reporting done
 
@@ -108,10 +104,10 @@ Standard Spring Boot layering under `com.guitarreach.api`: `controller → servi
 
 - **Persistence:** SQLite via `hibernate-community-dialects`, `ddl-auto=update` (schema auto-migrates). Dev DB at `server/data/`.
 - **Auth:** JWT access + refresh tokens delivered as cookies; `JwtAuthenticationFilter` + `JwtTokenProvider` + `UserDetailsServiceImpl`. Roles `USER`/`ADMIN`.
-- **Billing / paywall:** the backend is **paid access — $10 USD per year via PayPal**. `PayPalService` (Orders v2 over `RestTemplate`) sells a single one-off yearly order; `SubscriptionService.capturePayPalOrder` verifies capture status, owner and amount server-side, then extends `currentPeriodEnd` by a year. **`PaidAccessFilter` is the gate**: an authenticated user without paid access gets **402** on every `/api/**` route except auth/reset, `/api/users/me`, `/api/subscriptions/**`, `/api/payments/**`, `/api/version`, `/actuator/**`. Anonymous requests pass through untouched (so "not signed in" stays 401/403, not 402) and admins are exempt. New controllers are gated automatically — anything meant to be free must be added to `FREE_PATHS` deliberately. Set `PAYWALL_ENABLED=false` to develop without PayPal credentials; missing credentials → 503. Stripe (`StripeService`) remains only to keep pre-existing subscriptions resolving — it is no longer a checkout path.
+- **Billing / paywall:** paid access — **$10 USD/year via PayPal**. `PayPalService` (Orders v2) sells a one-off yearly order; `SubscriptionService.capturePayPalOrder` verifies capture status/owner/amount server-side before extending `currentPeriodEnd`. **`PaidAccessFilter` is the gate**: authenticated-but-unpaid users get **402** on all `/api/**` except a short `FREE_PATHS` list (auth/reset, `/api/users/me` exact, `/api/subscriptions/**`, `/api/payments/**`, `/api/version`, `/actuator/**`). Anonymous passes through (stays 401/403, not 402); admins exempt. **New controllers are gated automatically** — free routes must be added to `FREE_PATHS` deliberately. `PAYWALL_ENABLED=false` for local dev; missing credentials → 503. Stripe (`StripeService`) is legacy-only, no longer a checkout path.
 - **Email:** verification + password reset via `EmailService` (Spring Mail).
 - **Hand analysis:** [HandAnalysisController](server/src/main/java/com/guitarreach/api/controller/HandAnalysisController.java) proxies a hand photo (base64) to Google Gemini with a fixed biomechanics prompt and returns a strict-JSON capability profile. Returns 503 if `GEMINI_API_KEY` is unset.
-- **Audio → Tab:** [TabTranscriptionController](server/src/main/java/com/guitarreach/api/controller/TabTranscriptionController.java) proxies an uploaded guitar clip (multipart) to the **`tab-service/`** Python sidecar — a FastAPI wrapper around [fingerstyle-tab-mcp](https://github.com/blooper20/fingerstyle-tab-mcp) (Basic Pitch + Demucs + music21). The sidecar returns ASCII tab **plus structured `{string,fret}` events** (string convention 0=low E … 5=high e, matching the app), which the frontend (`TabTranscriber.jsx`) scores with the existing reach engine. Same graceful-degradation contract as Gemini: 503 when `tab.service.url` / `TAB_SERVICE_URL` is unset. Run locally with `cd tab-service && uvicorn app:app --port 8000`; production hosting is deferred — see [tab-service/README.md](tab-service/README.md).
+- **Audio → Tab:** [TabTranscriptionController](server/src/main/java/com/guitarreach/api/controller/TabTranscriptionController.java) proxies a guitar clip to the **`tab-service/`** Python sidecar (FastAPI over [fingerstyle-tab-mcp](https://github.com/blooper20/fingerstyle-tab-mcp): Basic Pitch + Demucs + music21). Returns ASCII tab **plus `{string,fret}` events** (0=low E … 5=high e) that `TabTranscriber.jsx` scores with the reach engine. 503 when `tab.service.url`/`TAB_SERVICE_URL` unset. Local: `cd tab-service && uvicorn app:app --port 8000`; prod hosting deferred — see [tab-service/README.md](tab-service/README.md).
 
 ### Deployment
 Both services run on **Railway**, as two separate services in the same project:
