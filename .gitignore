@@ -69,3 +69,6 @@ FretFit-*.apk
 # Editor scratch canvases (Obsidian/JSONCanvas) — never commit
 *.canvas
 *.base
+
+# Obsidian second-brain vault — local only, never committed
+brain/
