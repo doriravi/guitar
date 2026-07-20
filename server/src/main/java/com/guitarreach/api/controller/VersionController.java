@@ -16,7 +16,7 @@ import java.util.Map;
 @RequestMapping("/api/version")
 public class VersionController {
 
-    private static final String VERSION = "routing-fix-2";
+    private static final String VERSION = "paypal-paywall";
 
     @GetMapping
     public Map<String, String> version() {
