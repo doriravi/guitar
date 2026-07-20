@@ -182,7 +182,14 @@ const TAB_HELP = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('start');
+  // Optional chord sequence handed to the mic Practice screen when a Level Plan
+  // milestone routes there for a guided walk (e.g. "Learn C A G E D").
+  const [practiceSequence, setPracticeSequence] = useState(null);
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
+  // Switch tabs by hand (tab bar / ☰ menu). Always clears any pending guided
+  // practice sequence so opening Practice normally shows the free-pick screen,
+  // not a stale Level-Plan walk.
+  const selectTab = (id) => { setPracticeSequence(null); setActiveTab(id); };
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [limitToReach, setLimitToReach] = useState(loadLimitToReach);
   const [limitToLevel, setLimitToLevel] = useState(loadLimitToLevel);
@@ -801,7 +808,7 @@ export default function App() {
               <button
                 key={tab.id}
                 data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className="ui-press flex-1 flex flex-col sm:flex-row items-center justify-center gap-0 sm:gap-2 px-1 sm:px-3 py-2 sm:py-2.5 rounded-lg text-xs font-semibold transition-all"
                 style={activeTab === tab.id ? {
                   background: 'var(--color-surface-700)', color: 'var(--color-brand)', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
@@ -835,7 +842,7 @@ export default function App() {
                   <button
                     key={tab.id}
                     data-explain={TAB_HELP[tab.id] || `Opens the ${tab.label} tool.`}
-                    onClick={() => { setActiveTab(tab.id); setSideMenuOpen(false); }}
+                    onClick={() => { selectTab(tab.id); setSideMenuOpen(false); }}
                     className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all text-left"
                     style={activeTab === tab.id
                       ? { background: 'var(--color-surface-700)', color: 'var(--color-brand)' }
@@ -865,10 +872,10 @@ export default function App() {
             {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
             {activeTab === 'notemap'      && <FretboardNoteMap lang={lang} />}
             {activeTab === 'virtual'      && <VirtualFretboard lang={lang} />}
-            {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={setActiveTab} />}
+            {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={(tab, seq = null) => { setPracticeSequence(seq); setActiveTab(tab); }} />}
             {activeTab === 'fbmeasure'    && <FretboardMeasures lang={lang} />}
             {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}
-            {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" />}
+            {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" sequence={practiceSequence} />}
             {activeTab === 'mictune'      && <ChordListener lang={lang} mode="tune" />}
             {activeTab === 'audiotab'     && <TabTranscriber />}
             {activeTab === 'chords'       && <ChordTable lang={lang} />}

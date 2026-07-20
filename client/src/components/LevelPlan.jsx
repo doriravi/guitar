@@ -120,14 +120,37 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
         )}
       </div>
 
-      {/* Go → for any milestone with a home tab */}
-      {m.tab && onNavigate && (
-        <button
-          onClick={() => onNavigate(m.tab)}
-          className="mt-0.5 text-xs px-2.5 py-1 rounded-lg font-semibold shrink-0 bg-surface-600 text-brand"
-        >
-          Go →
-        </button>
+      {/* Go → for any milestone with a home tab. A milestone with a
+          practiceSequence routes to the guided mic walk and keeps a small
+          secondary link to its shapes tab. */}
+      {onNavigate && (m.practiceSequence?.length || m.tab) && (
+        <div className="mt-0.5 flex flex-col items-end gap-1 shrink-0">
+          {m.practiceSequence?.length ? (
+            <>
+              <button
+                onClick={() => onNavigate(m.practiceTab || 'micpractice', m.practiceSequence)}
+                className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
+              >
+                Go → 🎸
+              </button>
+              {m.tab && (
+                <button
+                  onClick={() => onNavigate(m.tab)}
+                  className="text-[11px] px-2 py-0.5 rounded-lg font-semibold bg-surface-600 text-brand"
+                >
+                  See shapes →
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => onNavigate(m.tab)}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand"
+            >
+              Go →
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -235,7 +258,7 @@ function RecordedChords({ tr, onNavigate }) {
 // Per-chord breakdown INSIDE a step whose goal is a specific set of chords
 // (e.g. "Learn C A G E D"). Shows which chords you've achieved (recorded/mastered)
 // and which are left, from your recording grades. Each chip hover-shows its shape.
-function ChordChecklist({ chords, onNavigate }) {
+function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, shapesTab }) {
   const prog = useMemo(() => chordListProgress(chords), [chords]);
   if (!prog.total) return null;
   return (
@@ -267,10 +290,27 @@ function ChordChecklist({ chords, onNavigate }) {
           </ChordTip>
         ))}
       </div>
-      {prog.done < prog.total && onNavigate && (
-        <button onClick={() => onNavigate('start')} className="mt-2 text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand">
-          Record chords →
-        </button>
+      {onNavigate && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {practiceSequence?.length > 0 && (
+            <button
+              onClick={() => onNavigate(practiceTab || 'micpractice', practiceSequence)}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
+            >
+              Play them one by one → 🎸
+            </button>
+          )}
+          {shapesTab && (
+            <button onClick={() => onNavigate(shapesTab)} className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand">
+              See shapes →
+            </button>
+          )}
+          {prog.done < prog.total && (
+            <button onClick={() => onNavigate('start')} className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand">
+              Record chords →
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -335,7 +375,8 @@ function TierStepper({ ctx, onNavigate, tr }) {
                     <p className="text-xs leading-relaxed text-ink-faint">{s.detail}</p>
                     {/* Per-chord breakdown when the step targets specific chords */}
                     {s.chords && s.chords.length > 0 && (
-                      <ChordChecklist chords={s.chords} onNavigate={onNavigate} />
+                      <ChordChecklist chords={s.chords} onNavigate={onNavigate}
+                        practiceSequence={s.practiceSequence} practiceTab={s.practiceTab} shapesTab={s.tab} />
                     )}
                     {s.tab && onNavigate && !(s.chords && s.chords.length) && (
                       <button

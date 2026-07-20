@@ -16,6 +16,7 @@ import {
   matchChordConfigured,
 } from '../lib/micDetect';
 import { playProgression, stopAudio } from '../lib/audio';
+import { makeCountdownCue } from '../lib/countdownCue';
 import { composeSong } from '../lib/melodyCompose';
 import { getActiveStyle, loadStyle, saveStyle, learnStyle,
          SCALE_FLAVORS, CHORD_COLORS, GENRES } from '../lib/styleProfile';
@@ -1304,7 +1305,31 @@ function RecorderMode({ cfg }) {
 // MODE: PRACTICE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PracticeMode({ cfg, tr }) {
+// Resolve a sequence of chord NAMES (e.g. ['C','A','G','E','D']) to the plain
+// open shapes a beginner is shown — the base 'Major' voicing, never a barre.
+// Falls back to the first scored chord of that name if no open Major exists.
+function resolveSequenceChords(names) {
+  return (names || []).map((name) => {
+    const byName = CHORDS_WITH_SCORE.filter((c) => c.name === name);
+    return byName.find((c) => c.type === 'Major')
+        || byName.find((c) => c.type === 'Major (easy)')
+        || byName[0]
+        || null;
+  }).filter(Boolean);
+}
+
+function PracticeMode({ cfg, tr, sequence = null, onDone = null }) {
+  // Guided timed-cycle walk (Level Plan "Learn your first open chords") — the
+  // milestone hands us a chord sequence; we walk it one at a time while the mic
+  // listens. The free-pick practice UI below is used when no sequence is given.
+  const seqChords = useMemo(() => resolveSequenceChords(sequence), [sequence]);
+  if (seqChords.length > 0) {
+    return <GuidedSequence cfg={cfg} tr={tr} chords={seqChords} onDone={onDone} />;
+  }
+  return <FreePractice cfg={cfg} tr={tr} />;
+}
+
+function FreePractice({ cfg, tr }) {
   const [listening, setListening]               = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [targetChord, setTargetChord]           = useState(CHORDS_WITH_SCORE[0]);
@@ -1507,6 +1532,328 @@ function PracticeMode({ cfg, tr }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODE: PRACTICE — GUIDED SEQUENCE (timed cycle)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Walks a fixed chord sequence (e.g. C→A→G→E→D from the Level Plan) one chord at
+// a time. Every start begins with a message + 5-second count-in that ticks like a
+// clock and says "Go!" (the app-wide convention). Then each chord gets a fixed
+// window with a visible countdown; the mic listens and scores the whole time,
+// and when the window elapses it auto-advances — pass or not — to the next chord,
+// strumming the new shape as a reference. At the end it reports how many chords
+// were played cleanly.
+
+const GUIDED_SECONDS_PER_CHORD = 8;   // window each chord gets before advancing
+const GUIDED_COUNT_IN          = 5;   // count-in seconds before the first chord
+
+function GuidedSequence({ cfg, tr, chords, onDone }) {
+  // phase: 'idle' → 'countin' → 'playing' → 'done'
+  const [phase, setPhase]                       = useState('idle');
+  const [index, setIndex]                       = useState(0);
+  const [remaining, setRemaining]               = useState(GUIDED_SECONDS_PER_CHORD);
+  const [countdown, setCountdown]               = useState(GUIDED_COUNT_IN);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [stringResults, setStringResults]       = useState(null);
+  const [autoDetected, setAutoDetected]         = useState(null);
+  const [volume, setVolume]                     = useState(0);
+  const [passed, setPassed]                     = useState(() => chords.map(() => false));
+
+  const mic     = useMic();
+  const rafRef  = useRef(null);
+  const cfgRef  = useRef(cfg);
+  cfgRef.current = cfg;
+  const cueRef  = useRef(null);
+  // Kept in refs so the single rAF loop reads fresh values without re-subscribing.
+  const phaseRef = useRef(phase);   phaseRef.current = phase;
+  const indexRef = useRef(index);   indexRef.current = index;
+
+  const target = chords[Math.min(index, chords.length - 1)];
+
+  const cleanup = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    try { mic.current.close(); } catch { /* ignore */ }
+    try { cueRef.current?.cancel(); } catch { /* ignore */ }
+    try { stopAudio(); } catch { /* ignore */ }
+    setVolume(0); setStringResults(null); setAutoDetected(null);
+  }, [mic]);
+
+  useEffect(() => () => cleanup(), [cleanup]);
+
+  // Strum the given chord shape once as an audible reference.
+  const demo = useCallback((chord) => {
+    if (!chord) return;
+    try { playProgression([chord], 60); } catch { /* ignore */ }
+  }, []);
+
+  const start = useCallback(async () => {
+    try {
+      await mic.current.open(cfgRef.current.smoothing);
+      setPermissionDenied(false);
+    } catch (err) {
+      if (err.name === 'NotAllowedError') setPermissionDenied(true);
+      return;   // no mic → don't pretend to listen
+    }
+    setPassed(chords.map(() => false));
+    setIndex(0);
+    setCountdown(GUIDED_COUNT_IN);
+    setRemaining(GUIDED_SECONDS_PER_CHORD);
+    cueRef.current = makeCountdownCue({ muted: () => false });
+    // Prime with the starting count so the first second (5) ticks too — the loop
+    // then reports 4,3,2,1,0 as it decrements, and "Go!" fires at 0.
+    try { cueRef.current.set(GUIDED_COUNT_IN); } catch { /* ignore */ }
+    setPhase('countin');
+  }, [mic, chords]);
+
+  const stop = useCallback(() => { cleanup(); setPhase('idle'); }, [cleanup]);
+
+  // The single driving loop: advances the count-in, then the per-chord timer,
+  // while continuously reading the mic and scoring the current target.
+  useEffect(() => {
+    if (phase !== 'countin' && phase !== 'playing') return;
+    let lastTs = performance.now();
+    let acc = 0;        // seconds accumulated toward the next 1s boundary
+    let sampleAcc = 0;  // throttle heavy FFT work to ~8/s
+
+    const loop = (ts) => {
+      rafRef.current = requestAnimationFrame(loop);
+      const dt = Math.min(0.25, (ts - lastTs) / 1000);
+      lastTs = ts;
+      acc += dt;
+
+      // ── Mic read (throttled) — score the current chord, show live volume ──
+      mic.current.updateSmoothing(cfgRef.current.smoothing);
+      const rms = mic.current.getRMS();
+      setVolume(Math.min(1, rms * 8));
+      sampleAcc += dt;
+      if (sampleAcc >= 0.12) {
+        sampleAcc = 0;
+        if (phaseRef.current === 'playing' && rms >= cfgRef.current.silenceRms) {
+          const fd = mic.current.getFreqData();
+          if (fd && mic.current.audioCtx) {
+            const sr    = mic.current.audioCtx.sampleRate;
+            const fftSz = mic.current.analyser.fftSize;
+            const ps    = detectPeaksConfigured(fd, sr, fftSz, cfgRef.current);
+            if (ps.length) {
+              const hzList = ps.map((p) => p.hz);
+              const tgt = chords[indexRef.current];
+              const res = evaluateStrings(hzList, tgt);
+              setStringResults(res);
+              const match = matchChordConfigured(hzList, cfgRef.current);
+              setAutoDetected(match);
+              // Mark this chord passed if the mic hears it as the right chord OR
+              // all fretted strings read correct at least once in its window.
+              const play = res.filter((s) => s.expected === 'play');
+              const ok = play.length > 0 && play.every((s) => s.status === 'correct');
+              if (ok || (match && match.chord === tgt)) {
+                setPassed((prev) => prev[indexRef.current]
+                  ? prev
+                  : prev.map((v, i) => (i === indexRef.current ? true : v)));
+              }
+            }
+          }
+        } else if (rms < cfgRef.current.silenceRms) {
+          setStringResults(null); setAutoDetected(null);
+        }
+      }
+
+      // ── Tick down whole seconds ──
+      if (acc < 1) return;
+      acc -= 1;
+
+      if (phaseRef.current === 'countin') {
+        setCountdown((c) => {
+          const next = c - 1;
+          try { cueRef.current?.set(next); } catch { /* ignore */ }
+          if (next <= 0) {
+            setPhase('playing');
+            setRemaining(GUIDED_SECONDS_PER_CHORD);
+            demo(chords[0]);          // strum the first chord as the count-in ends
+            return 0;
+          }
+          return next;
+        });
+      } else if (phaseRef.current === 'playing') {
+        setRemaining((r) => {
+          const next = r - 1;
+          if (next > 0) return next;
+          // Window elapsed → advance to the next chord (or finish).
+          setIndex((i) => {
+            const ni = i + 1;
+            if (ni >= chords.length) { setPhase('done'); return i; }
+            demo(chords[ni]);
+            setStringResults(null); setAutoDetected(null);
+            return ni;
+          });
+          return GUIDED_SECONDS_PER_CHORD;
+        });
+      }
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [phase, chords, demo, mic]);
+
+  // On reaching 'done', tear down the mic and report the result upward.
+  useEffect(() => {
+    if (phase !== 'done') return;
+    try { mic.current.close(); } catch { /* ignore */ }
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    setVolume(0);
+    try { onDone?.({ passed: passed.filter(Boolean).length, total: chords.length }); } catch { /* ignore */ }
+  }, [phase, mic, onDone, passed, chords.length]);
+
+  const passedCount = passed.filter(Boolean).length;
+
+  // ── DONE ──
+  if (phase === 'done') {
+    const all = passedCount === chords.length;
+    return (
+      <div className="text-center py-8 space-y-3">
+        <p className="text-5xl">{all ? '🎉' : '👏'}</p>
+        <p className="text-lg font-bold" style={{ color: 'var(--color-ink)' }}>
+          {all ? 'All chords played cleanly!' : 'Nice run!'}
+        </p>
+        <p className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>
+          You played <strong style={{ color: 'var(--color-success)' }}>{passedCount}</strong> of {chords.length} chords cleanly.
+        </p>
+        <div className="flex flex-wrap justify-center gap-1.5 pt-1">
+          {chords.map((c, i) => (
+            <span key={c.name + i} className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={passed[i]
+                ? { background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }
+                : { background: 'var(--color-surface-750)', color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-650)' }}>
+              {passed[i] ? '✓ ' : ''}{c.name}
+            </span>
+          ))}
+        </div>
+        <button onClick={start}
+          className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+          Run it again
+        </button>
+      </div>
+    );
+  }
+
+  // ── IDLE / COUNT-IN / PLAYING ──
+  return (
+    <div className="space-y-3 sm:space-y-4">
+      {/* Sequence progress strip */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chords.map((c, i) => (
+          <ChordTip key={c.name + i} name={c.name}>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+              style={
+                i === index && phase === 'playing'
+                  ? { background: 'var(--color-brand)', color: 'var(--color-surface-base)' }
+                  : passed[i]
+                    ? { background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.3)' }
+                    : { background: 'var(--color-surface-850)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }
+              }>
+              {passed[i] && i !== index ? '✓ ' : ''}{c.name}
+            </span>
+          </ChordTip>
+        ))}
+      </div>
+
+      {/* Current chord card with the shape + live countdown */}
+      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
+        <div className="flex items-start gap-3 sm:gap-4 px-3 sm:px-4 py-4">
+          <div className="shrink-0"><FretboardDiagram chord={target} /></div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-bold text-xl mb-0.5" style={{ color: 'var(--color-ink)' }}>{target.name}</p>
+              {phase === 'playing' && (
+                <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                  chord {index + 1} / {chords.length}
+                </span>
+              )}
+            </div>
+            <p className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>{target.type} · {target.tab}</p>
+
+            {phase === 'countin' && (
+              <div className="py-2">
+                <p className="text-sm mb-1" style={{ color: 'var(--color-ink-subtle)' }}>Get ready — playing {chords.map((c) => c.name).join(' → ')}</p>
+                <p className="text-4xl font-bold tabular-nums" style={{ color: 'var(--color-brand)' }}>{countdown}</p>
+              </div>
+            )}
+
+            {phase === 'playing' && (
+              <div className="mt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--color-ink-ghost)' }}>Play this chord</span>
+                  <span className="text-sm font-bold tabular-nums" style={{ color: remaining <= 2 ? 'var(--color-warning)' : 'var(--color-ink)' }}>{remaining}s</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-600)' }}>
+                  <div className="h-full rounded-full transition-all" style={{
+                    width: `${(remaining / GUIDED_SECONDS_PER_CHORD) * 100}%`,
+                    background: 'var(--color-brand)',
+                  }} />
+                </div>
+              </div>
+            )}
+
+            {phase === 'idle' && (
+              <p className="text-sm" style={{ color: 'var(--color-ink-subtle)' }}>
+                Press start — a 5-second count-in leads in, then each chord plays for {GUIDED_SECONDS_PER_CHORD}s while the mic listens.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center gap-3">
+        {phase === 'idle' ? (
+          <button onClick={start}
+            className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
+            style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+            {tr.startListening || 'Start listening'}
+          </button>
+        ) : (
+          <button onClick={stop}
+            className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-sm font-semibold"
+            style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <span className="animate-pulse">●</span> {tr.stop || 'Stop'}
+          </button>
+        )}
+        {permissionDenied && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{tr.micAccessDenied}</p>}
+        {phase === 'playing' && <div className="flex-1"><VolumeBar level={volume} /></div>}
+      </div>
+
+      {/* Live feedback while playing */}
+      {phase === 'playing' && (
+        <div className="space-y-3">
+          {autoDetected && (
+            <div className="flex items-center gap-3 rounded-xl px-3 sm:px-4 py-3"
+              style={{ background: autoDetected.chord === target ? 'rgba(74,222,128,0.08)' : 'var(--color-surface-750)', border: `1px solid ${autoDetected.chord === target ? 'rgba(74,222,128,0.25)' : 'var(--color-surface-650)'}` }}>
+              <span className="text-xl">{autoDetected.chord === target ? '🎯' : '🎵'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{tr.detected}</p>
+                <p className="font-bold text-base" style={{ color: autoDetected.chord === target ? 'var(--color-success)' : 'var(--color-ink)' }}>
+                  {autoDetected.chord.name}
+                  <span className="text-xs font-normal ml-2" style={{ color: 'var(--color-ink-faint)' }}>{autoDetected.chord.type}</span>
+                </p>
+              </div>
+              {autoDetected.chord === target
+                ? <span className="text-xs font-bold" style={{ color: 'var(--color-success)' }}>{tr.correct}</span>
+                : <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{tr.expected} <strong style={{ color: 'var(--color-brand)' }}>{target.name}</strong></span>}
+            </div>
+          )}
+          {stringResults && <StringFeedback stringResults={stringResults} />}
+          {!stringResults && volume < 0.05 && (
+            <div className="text-center py-6" style={{ color: 'var(--color-ink-ghost)' }}>
+              <p className="text-3xl mb-2">🎸</p>
+              <p className="text-sm">{tr.playGuitar}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Root export
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1517,7 +1864,7 @@ function PracticeMode({ cfg, tr }) {
  * Practice and Tune as their own ☰-menu entries and keeps Play-Along as the
  * main tab.
  */
-export default function ChordListener({ lang, mode = null }) {
+export default function ChordListener({ lang, mode = null, sequence = null, onDone = null }) {
   const tr  = useT(lang);
   const [tab, setTab] = useState('recorder');
   const [cfg, setCfg] = useState(loadConfig);
@@ -1547,7 +1894,7 @@ export default function ChordListener({ lang, mode = null }) {
       )}
 
       {active === 'recorder' && <RecorderMode cfg={cfg} />}
-      {active === 'practice' && <PracticeMode cfg={cfg} tr={tr} />}
+      {active === 'practice' && <PracticeMode cfg={cfg} tr={tr} sequence={sequence} onDone={onDone} />}
       {active === 'game'     && <PracticeGame cfg={cfg} />}
       {active === 'tune'     && <TuneMode cfg={cfg} setCfg={setCfg} />}
     </div>

@@ -59,10 +59,16 @@ export const LEVEL_PLAN = [
   {
     id: 'beg-open-chords', tier: 'Beginner', column: 'technical', type: 'route', tab: 'chords',
     title: 'Learn your first open chords (C A G E D)',
-    detail: 'Open the Chords tab to see each shape rated for your hand, then record each one to check it off.',
-    // Concrete sub-goals: record each of these chords cleanly (Start tab → Record).
-    // The step tracks which you've done from your recording grades.
+    detail: 'Go opens a guided mic walk that plays C → A → G → E → D one at a time and listens as you play each. (You can also open the Chords tab to see every shape rated for your hand.)',
+    // Concrete sub-goals: play each of these chords cleanly. The guided walk
+    // below routes to the mic Practice screen and steps through them in order;
+    // the step also tracks which you've recorded cleanly elsewhere.
     chords: ['C', 'A', 'G', 'E', 'D'],
+    // Go → opens the mic Practice screen in guided timed-cycle mode over this
+    // exact sequence, listening to the player. `practiceTab` is the route target;
+    // `tab` ('chords') stays the secondary "see the shapes" link.
+    practiceSequence: ['C', 'A', 'G', 'E', 'D'],
+    practiceTab: 'micpractice',
   },
   {
     id: 'beg-gcd-changes', tier: 'Beginner', column: 'technical', type: 'auto', tab: 'listen',
