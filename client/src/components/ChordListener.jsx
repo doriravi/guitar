@@ -1566,6 +1566,13 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
   // Kept in refs so the single rAF loop reads fresh values without re-subscribing.
   const phaseRef = useRef(phase);   phaseRef.current = phase;
   const indexRef = useRef(index);   indexRef.current = index;
+  // Per-chord set of string numbers that have read 'correct' at any point in the
+  // chord's window. A chord passes once EVERY fretted string has gone green —
+  // they don't have to be green in the same mic frame (strings ring at slightly
+  // different moments), which is how a real strum sounds.
+  const greenStringsRef = useRef(new Set());
+  // Live count for the on-screen "N/M strings" indicator during the window.
+  const [greenCount, setGreenCount] = useState(0);
 
   const target = chords[Math.min(index, chords.length - 1)];
 
@@ -1596,6 +1603,8 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
     }
     setPassed(chords.map(() => false));
     setIndex(0);
+    greenStringsRef.current = new Set();
+    setGreenCount(0);
     setCountdown(GUIDED_COUNT_IN);
     setRemaining(GUIDED_SECONDS_PER_CHORD);
     cueRef.current = makeCountdownCue({ muted: () => false });
@@ -1641,11 +1650,18 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
               setStringResults(res);
               const match = matchChordConfigured(hzList, cfgRef.current);
               setAutoDetected(match);
-              // Mark this chord passed if the mic hears it as the right chord OR
-              // all fretted strings read correct at least once in its window.
+
+              // Accumulate every string that reads 'correct' in THIS frame into
+              // the chord's running green-set (they need not all be green at once).
+              const green = greenStringsRef.current;
+              for (const s of res) if (s.expected === 'play' && s.status === 'correct') green.add(s.string);
+              setGreenCount(green.size);
+
+              // Passed when every fretted string has gone green at some point in
+              // the window, OR the mic recognises the whole chord in one frame.
               const play = res.filter((s) => s.expected === 'play');
-              const ok = play.length > 0 && play.every((s) => s.status === 'correct');
-              if (ok || (match && match.chord === tgt)) {
+              const allGreen = play.length > 0 && play.every((s) => green.has(s.string));
+              if (allGreen || (match && match.chord === tgt)) {
                 setPassed((prev) => prev[indexRef.current]
                   ? prev
                   : prev.map((v, i) => (i === indexRef.current ? true : v)));
@@ -1682,6 +1698,8 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
             const ni = i + 1;
             if (ni >= chords.length) { setPhase('done'); return i; }
             demo(chords[ni]);
+            greenStringsRef.current = new Set();   // fresh green-set for the next chord
+            setGreenCount(0);
             setStringResults(null); setAutoDetected(null);
             return ni;
           });
@@ -1790,6 +1808,20 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
                     background: 'var(--color-brand)',
                   }} />
                 </div>
+                {/* Running tally of fretted strings the mic has heard clean so far
+                    this window — turns green the moment all of them register. */}
+                {(() => {
+                  // Every non-muted string must ring — opens included, matching
+                  // the pass condition (evaluateStrings marks '0' as expected:'play').
+                  const need = target.tab.split('').filter((c) => c !== 'x').length;
+                  const got = Math.min(greenCount, need);
+                  const done = passed[index];
+                  return (
+                    <p className="text-xs mt-1.5" style={{ color: done ? 'var(--color-success)' : 'var(--color-ink-faint)' }}>
+                      {done ? '✓ got it — ' : ''}{got}/{need} strings clean
+                    </p>
+                  );
+                })()}
               </div>
             )}
 
