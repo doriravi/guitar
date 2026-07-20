@@ -1573,6 +1573,12 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
   const greenStringsRef = useRef(new Set());
   // Live count for the on-screen "N/M strings" indicator during the window.
   const [greenCount, setGreenCount] = useState(0);
+  // The timers live in REFS, not state — the rAF loop mutates them directly and
+  // only mirrors to state for rendering. (Doing the countdown inside setState
+  // updaters double-advanced the index under React StrictMode, which skipped
+  // every other chord: C→G→D instead of C→A→G→E→D.)
+  const countdownRef = useRef(GUIDED_COUNT_IN);
+  const remainingRef = useRef(GUIDED_SECONDS_PER_CHORD);
 
   const target = chords[Math.min(index, chords.length - 1)];
 
@@ -1603,8 +1609,11 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
     }
     setPassed(chords.map(() => false));
     setIndex(0);
+    indexRef.current = 0;
     greenStringsRef.current = new Set();
     setGreenCount(0);
+    countdownRef.current = GUIDED_COUNT_IN;
+    remainingRef.current = GUIDED_SECONDS_PER_CHORD;
     setCountdown(GUIDED_COUNT_IN);
     setRemaining(GUIDED_SECONDS_PER_CHORD);
     cueRef.current = makeCountdownCue({ muted: () => false });
@@ -1673,38 +1682,45 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
         }
       }
 
-      // ── Tick down whole seconds ──
+      // ── Tick down whole seconds (refs are the source of truth; state is only
+      //    mirrored for rendering, so nothing double-advances under StrictMode) ──
       if (acc < 1) return;
       acc -= 1;
 
       if (phaseRef.current === 'countin') {
-        setCountdown((c) => {
-          const next = c - 1;
-          try { cueRef.current?.set(next); } catch { /* ignore */ }
-          if (next <= 0) {
-            setPhase('playing');
-            setRemaining(GUIDED_SECONDS_PER_CHORD);
-            demo(chords[0]);          // strum the first chord as the count-in ends
-            return 0;
-          }
-          return next;
-        });
+        const next = countdownRef.current - 1;
+        countdownRef.current = next;
+        setCountdown(Math.max(0, next));
+        try { cueRef.current?.set(next); } catch { /* ignore */ }
+        if (next <= 0) {
+          phaseRef.current = 'playing';           // flip the ref first so the same
+          setPhase('playing');                    // loop tick already scores
+          remainingRef.current = GUIDED_SECONDS_PER_CHORD;
+          setRemaining(GUIDED_SECONDS_PER_CHORD);
+          demo(chords[0]);                        // strum the first chord in
+        }
       } else if (phaseRef.current === 'playing') {
-        setRemaining((r) => {
-          const next = r - 1;
-          if (next > 0) return next;
+        const next = remainingRef.current - 1;
+        if (next > 0) {
+          remainingRef.current = next;
+          setRemaining(next);
+        } else {
           // Window elapsed → advance to the next chord (or finish).
-          setIndex((i) => {
-            const ni = i + 1;
-            if (ni >= chords.length) { setPhase('done'); return i; }
-            demo(chords[ni]);
-            greenStringsRef.current = new Set();   // fresh green-set for the next chord
+          const ni = indexRef.current + 1;
+          if (ni >= chords.length) {
+            phaseRef.current = 'done';
+            setPhase('done');
+          } else {
+            indexRef.current = ni;
+            setIndex(ni);
+            greenStringsRef.current = new Set();  // fresh green-set for the next chord
             setGreenCount(0);
             setStringResults(null); setAutoDetected(null);
-            return ni;
-          });
-          return GUIDED_SECONDS_PER_CHORD;
-        });
+            remainingRef.current = GUIDED_SECONDS_PER_CHORD;
+            setRemaining(GUIDED_SECONDS_PER_CHORD);
+            demo(chords[ni]);
+          }
+        }
       }
     };
     rafRef.current = requestAnimationFrame(loop);
