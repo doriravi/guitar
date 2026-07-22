@@ -17,7 +17,13 @@
 //     it stays within the audio gesture unlock.
 
 import { useEffect, useRef, useState } from 'react';
-import { playFanfare } from '../lib/audio';
+import { playFanfare, getAudioAnalyser } from '../lib/audio';
+import Lazy3D from './Lazy3D';
+
+// Lazy loader for the big-win GPU particle burst. Static-literal specifier so
+// Vite splits it into the shared three-vendor chunk; Lazy3D only fetches it when
+// should3D() passes. Module-scoped so Lazy3D's memo stays stable across renders.
+const loadCelebrationBurst = () => import('./three/CelebrationBurst');
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -76,6 +82,16 @@ function describe(top, tr) {
         headline: tr.mmCelebPerfect || 'Perfect session! ✨',
         detail: tr.mmCelebPerfectSub || 'Every element, by ear.',
       };
+    // ── Play-With-Me (Progressions tab) — you played a whole song, self-paced,
+    //    chord by chord through the lyrics. Additive, so existing cases are
+    //    untouched and an un-extended build still hits `default`. ──
+    case 'songComplete':
+      return {
+        headline: tr.pwmCelebSong || 'You played the whole song! 🎸',
+        detail: d.title
+          ? (tr.pwmCelebSongSub || 'Every chord of “${title}”, at your own pace.').replace('${title}', d.title)
+          : (tr.pwmCelebSongSub2 || 'Every chord, at your own pace.'),
+      };
     default:
       return { headline: tr.sqCelebGeneric || 'You advanced! 🎉', detail: '' };
   }
@@ -109,15 +125,36 @@ function useConfetti(canvasRef, active, big) {
       c: COLORS[i % COLORS.length],
     }));
 
+    // Audio-reactive re-loft: for the first ~0.5s the confetti listens to the
+    // fanfare that plays over it (via the shared master-bus analyser) and gives
+    // each piece a small upward nudge scaled by live energy — so the burst
+    // visibly pulses up on the fanfare's ascending arpeggio hits instead of a
+    // launch that's blind to the sound. Fully backward-compatible: when no
+    // analyser exists the energy is 0 and the confetti behaves exactly as before.
+    // This code only runs when `active` (advanced && !reduced), so it's already
+    // inside the reduced-motion guard.
+    const analyser = (() => { try { return getAudioAnalyser(); } catch { return null; } })();
+    const freq = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
+    const REACT_FRAMES = 30; // ~0.5s — the fanfare arpeggio's active window
+    const fanfareEnergy = () => {
+      if (!analyser || frame > REACT_FRAMES) return 0;
+      analyser.getByteFrequencyData(freq);   // reuses `freq` — no per-frame alloc
+      let sum = 0;
+      for (let i = 0; i < freq.length; i++) sum += freq[i];
+      return sum / (freq.length * 255);      // 0..1 average bin energy
+    };
+
     let raf;
     let frame = 0;
     const MAX_FRAMES = 180; // ~3s then stop
     const tick = () => {
       frame += 1;
       ctx.clearRect(0, 0, W, H);
+      const energy = fanfareEnergy();          // 0 when no fanfare / past the window
       let alive = 0;
       for (const p of pieces) {
         p.vy += g;
+        if (energy > 0) p.vy -= energy * 0.9;  // re-loft on each arpeggio peak
         p.x += p.vx;
         p.y += p.vy;
         p.rot += p.vr;
@@ -149,6 +186,7 @@ export default function Celebration({ advancement, tr = {} }) {
   const canvasRef = useRef(null);
   const [reduced] = useState(prefersReducedMotion);
   const soundedRef = useRef(false);
+  const [burstDone, setBurstDone] = useState(false); // GPU burst finished → unmount it
 
   const advanced = !!advancement?.advanced;
   const big = !!advancement?.big;
@@ -187,6 +225,18 @@ export default function Celebration({ advancement, tr = {} }) {
           style={{ pointerEvents: 'none' }}
           aria-hidden="true"
         />
+      )}
+
+      {/* Big-win GPU particle burst — an additive point spray over the banner for
+          the highest-effort achievements. Lazy3D gates should3D() (never mounts /
+          fetches the chunk under reduced-motion, no-GPU, or user opt-out) and the
+          confetti above remains the universal base layer. Self-unmounts via
+          onDone when the ~1.8s ramp finishes, freeing the GPU context. */}
+      {big && !reduced && !burstDone && (
+        <div className="absolute inset-0" style={{ pointerEvents: 'none' }} aria-hidden="true">
+          <Lazy3D load={loadCelebrationBurst} fallback={null}
+            componentProps={{ onDone: () => setBurstDone(true) }} />
+        </div>
       )}
 
       <div className="relative p-5 z-10">

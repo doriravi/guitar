@@ -9,6 +9,10 @@ import { suggestTriadProgression } from '../lib/triadVoicings';
 import { alignChordsToLyrics, suggestCapo, enrichChords } from '../lib/lyricChords';
 import { lyrics as lyricsApi } from '../lib/api';
 import { playProgression, stopAudio } from '../lib/audio';
+import { useMic, loadConfig, detectPeaksConfigured, matchChordConfigured } from '../lib/micDetect';
+import { fretHz } from '../lib/pitchDetect';
+import { makeCountdownCue } from '../lib/countdownCue';
+import { sparkBurst } from '../lib/sparkBurst';
 import { SONGS_BY_PROGRESSION, songBpm } from '../lib/songs';
 import { loadCustomSongs, addCustomSong, updateCustomSong, songToText } from '../lib/customSongs';
 import { loadCatalogSongs } from '../lib/catalogSongs';
@@ -18,11 +22,14 @@ import { resolveChordCells } from '../lib/songTimeline';
 import { filterSongsByReach } from '../lib/songReach';
 import { filterSongsByLevel } from '../lib/levelFilter';
 import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
+import { prefersReducedMotion } from '../lib/gpu';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
+import Celebration from './Celebration';
+import Lazy3D from './Lazy3D';
 import { buildSimplifiedAutoTab } from '../lib/autoTab';
 import { useT } from '../lib/i18n';
 import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../App';
@@ -30,6 +37,13 @@ import { useHandProfile, useAIFingers, useReachLimit, useLevelLimit } from '../A
 // Shared empty degree set for song-search results (no progression context, so no
 // out-of-progression chord flagging). Module-scoped so its identity is stable.
 const EMPTY_DEGREE_SET = new Set();
+
+// Lazy loaders for the opened-song header's ambient TSL backdrop and the
+// chord-change "tension field". Static-literal specifiers so Vite splits them
+// into the shared three-vendor chunk; only fetched when should3D() passes (see
+// Lazy3D). Module-scoped so Lazy3D's memo stays stable across renders.
+const loadSongHeaderAmbient = () => import('./three/SongHeaderAmbient');
+const loadTensionField = () => import('./three/TensionField');
 
 function resolveForKey(root, scaleType, maxDiff) {
   const diatonic = getDiatonicChords(root, scaleType);
@@ -85,7 +99,7 @@ function FingerGapBars({ notes, profile }) {
     <div className="flex flex-col gap-0.5 mt-1.5">
       {pairs.map(p => {
         const over = p.userFraction > 1;
-        const barColor = over ? 'var(--color-danger)' : p.userFraction > 0.9 ? 'var(--color-warning)' : p.userFraction > 0.7 ? '#eab308' : 'var(--color-success)';
+        const barColor = over ? 'var(--color-danger)' : p.userFraction > 0.9 ? 'var(--color-warning)' : p.userFraction > 0.7 ? 'var(--color-caution)' : 'var(--color-success)';
         const tip = `${p.label}: needs ~${p.requiredCm.toFixed(1)} cm — your span ${p.userCm.toFixed(1)} cm (${Math.round(p.userFraction * 100)}%)`;
         return (
           <div key={p.key} className="flex items-center gap-1" title={tip}>
@@ -104,24 +118,87 @@ function FingerGapBars({ notes, profile }) {
   );
 }
 
+// ─── Card-header action chip ───────────────────────────────────────────────────
+// The easier / up-the-neck / changes / triads toggles. One unified pill so the
+// whole row reads as a single system (same padding/radius). At REST the icon is
+// tinted with the chip's feature color (colorful yet legible on a calm surface);
+// when OPEN it fills with a feature-colored wash + a matching soft shadow, so
+// "this is on" reads at a glance. Gold-family chips also get the shared .ui-glow.
+// `feat` is a CSS color value (a token var). Reduced-motion is handled by
+// .ui-press already degrading to brightness-only.
+
+function ActionChip({ onClick, open, feat, icon, title, dataExplain, children }) {
+  const isGold = feat === 'var(--color-brand)' || feat === 'var(--color-warning)';
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      data-explain={dataExplain}
+      className={`ui-press flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all${open && isGold ? ' ui-glow' : ''}`}
+      style={open
+        ? {
+            background: `color-mix(in srgb, ${feat} 14%, transparent)`,
+            color: feat,
+            border: `1px solid color-mix(in srgb, ${feat} 30%, transparent)`,
+            boxShadow: isGold ? undefined : `0 2px 10px color-mix(in srgb, ${feat} 18%, transparent)`,
+          }
+        : {
+            background: 'var(--color-surface-700)',
+            color: 'var(--color-ink-faint)',
+            border: '1px solid var(--color-surface-550)',
+          }}
+    >
+      {/* Icon carries the feature color even at rest so the row isn't all-grey.
+          Text stays legible ink; color here is redundant with the label. */}
+      <span aria-hidden="true" style={{ color: open ? feat : `color-mix(in srgb, ${feat} 55%, var(--color-ink-faint))` }}>{icon}</span>
+      {children}
+    </button>
+  );
+}
+
+// ─── Collapsible section ───────────────────────────────────────────────────────
+// Animates a panel open AND closed via a CSS grid-rows trick (0fr↔1fr + opacity),
+// so closing eases shut instead of hard-cutting — the enter/exit symmetry the
+// card panels were missing. Children mount LAZILY on first open (so five closed
+// panels per card don't run their useMemos), then stay mounted so the collapse
+// can animate. grid-template-rows / opacity are compositor-friendly; under
+// prefers-reduced-motion the transition duration collapses to ~0 (see index.css).
+
+function CollapsibleSection({ open, children }) {
+  const [everOpened, setEverOpened] = useState(open);
+  useEffect(() => { if (open) setEverOpened(true); }, [open]);
+  if (!everOpened) return null;
+  return (
+    <div className="pwm-collapse" data-open={open ? 'true' : 'false'}>
+      <div className="pwm-collapse-inner">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ─── Transition badge (difficulty of switching between two chords) ─────────────
 
 function transitionColor(score) {
   if (score <= 3) return 'var(--color-success)';
-  if (score <= 6) return '#eab308';
+  if (score <= 6) return 'var(--color-caution)';
   if (score <= 8) return 'var(--color-warning)';
   return 'var(--color-danger)';
 }
 
 function TransitionBadge({ fromName, toName, score, tr }) {
+  const tc = transitionColor(score);
+  const label = `${tr.changeLabel || 'Change'} ${fromName} → ${toName}: ${score.toFixed(1)} out of 10`;
   return (
     <div
-      className="flex flex-col items-center justify-center shrink-0 px-1 self-stretch select-none"
-      title={`${tr.changeLabel || 'Change'} ${fromName} → ${toName}: ${score.toFixed(1)}/10`}
+      className="ui-press flex flex-col items-center justify-center shrink-0 px-1 self-stretch select-none rounded"
+      role="button" tabIndex={0}
+      title={label} aria-label={label}
+      style={{ '--tc': tc }}
     >
       <span className="text-[10px] leading-none" style={{ color: 'var(--color-ink-ghost)' }}>→</span>
-      <span className="text-[10px] font-bold tabular-nums leading-tight mt-0.5"
-        style={{ color: transitionColor(score) }}>
+      <span className="badge-glow text-[10px] font-bold tabular-nums leading-tight mt-0.5"
+        style={{ color: tc }}>
         {score.toFixed(1)}
       </span>
     </div>
@@ -160,13 +237,22 @@ function TransitionStrip({ chordNames, profile }) {
     (m, t) => (t.score != null && t.score > (m?.score ?? -1) ? t : m), null);
 
   return (
-    <div className="px-3 sm:px-4 py-3"
-      style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
-      <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-ink-ghost)' }}>
+    <div className="relative overflow-hidden px-3 sm:px-4 py-3"
+      style={{ borderTop: '1px solid var(--color-surface-800)', background: 'var(--color-surface-900)',
+        boxShadow: 'inset 3px 0 0 0 color-mix(in srgb, var(--color-indigo) 65%, transparent)' }}>
+      {/* Tension-field underlay — turbulence + color encode the HARDEST change in
+          this strip (calm green → turbulent red). Lazy + gated (should3D via
+          Lazy3D, real-WebGPU inside the component); the numeric badges stay ground
+          truth on top. Idles when there are no scores. */}
+      <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
+        <Lazy3D load={loadTensionField} fallback={null} componentProps={{ score: hardest?.score ?? 0 }} />
+      </div>
+
+      <div className="relative text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-indigo)', zIndex: 1 }}>
         Chord-change difficulty
       </div>
 
-      <div className="flex flex-wrap items-center gap-y-2 font-mono">
+      <div className="relative flex flex-wrap items-center gap-y-2 font-mono" style={{ zIndex: 1 }}>
         {items.voicings.map((c, i) => (
           <span key={i} className="flex items-center">
             <ChordTip name={c.name}>
@@ -196,7 +282,7 @@ function TransitionStrip({ chordNames, profile }) {
       </div>
 
       {hardest?.score != null && (
-        <div className="text-[11px] mt-2" style={{ color: 'var(--color-ink-faint)' }}>
+        <div className="relative text-[11px] mt-2" style={{ color: 'var(--color-ink-faint)', zIndex: 1 }}>
           Hardest change:{' '}
           <span className="font-semibold" style={{ color: transitionColor(hardest.score) }}>
             {hardest.from.name} → {hardest.to.name} ({hardest.score.toFixed(1)}/10)
@@ -259,9 +345,10 @@ function SongPlayer({ sequence, bpm, onActive }) {
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={playing ? stop : start}
-          className="flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
+          className={`flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all${playing ? ' pulse-glow' : ''}`}
           style={playing
-            ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)' }
+            ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)',
+                '--halo': 'rgba(239,68,68,0.45)', animationDuration: `${(60 / tempo).toFixed(2)}s` }
             : { background: 'rgba(74,222,128,0.10)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.25)' }}
         >
           <span className="text-sm leading-none">{playing ? '■' : '▶'}</span>
@@ -275,9 +362,421 @@ function SongPlayer({ sequence, bpm, onActive }) {
   );
 }
 
+// ─── Play WITH me (mic-driven, self-paced) ─────────────────────────────────────
+// Unlike SongPlayer (which strums the whole song at a fixed tempo), this LISTENS
+// through the mic and only advances to the next chord in the song when it HEARS
+// you play roughly the right chord. So the song follows YOUR pace — a karaoke
+// prompter for guitar. Per the app's practice rules it opens with a 5-second
+// count-in (clock ticks → "go", recording begins during the count), confirms
+// each correct chord by strumming it back, and fires a big celebration when you
+// finish the whole song.
+//
+// `sequence` = [{ voicing, lineIdx, segIdx }] in lyric order (same as SongPlayer).
+// `onActive(seg|null)` reports the segment being LISTENED FOR, so the lyrics
+// view highlights + auto-scrolls to it exactly as it does during playback.
+
+// Expected pitch classes (0-11) of a voicing, from its 6-char EADGBe tab. Used
+// to gate the generic chord matcher so we only accept a match that is actually
+// the chord this segment wants (the matcher alone can return a near neighbour).
+function voicingPitchClasses(voicing) {
+  const tab = voicing?.tab;
+  if (!tab || tab.length < 6) return null;
+  const pcs = new Set();
+  for (let s = 0; s < 6; s++) {
+    const ch = tab[s];
+    if (ch === 'x') continue;
+    const fret = parseInt(ch, 10);
+    if (Number.isNaN(fret)) continue;
+    const midi = Math.round(69 + 12 * Math.log2(fretHz(s, fret) / 440));
+    pcs.add(((midi % 12) + 12) % 12);
+  }
+  return pcs;
+}
+
+// Per-string colors (low-E … high-e) matching the --color-string-* tokens, so a
+// spark burst reads as "your strings rang out". Returns the colors of the strings
+// this voicing actually sounds (non-muted), for the correct-chord confirmation.
+const PWM_STRING_COLORS = ['#a78bfa', '#38bdf8', '#34d399', '#e9c46a', '#fb923c', '#f87171'];
+function voicingStringColors(voicing) {
+  const tab = voicing?.tab;
+  if (!tab || tab.length < 6) return PWM_STRING_COLORS;
+  const cols = [];
+  for (let s = 0; s < 6; s++) if (tab[s] !== 'x') cols.push(PWM_STRING_COLORS[s]);
+  return cols.length ? cols : PWM_STRING_COLORS;
+}
+
+// How many recent detected pitch-classes must fall inside the target chord for
+// us to accept "you played it": the chord's root/3rd/5th over a short window.
+const PWM_STABLE_FRAMES = 8;   // consecutive matching frames before we advance (~130ms)
+// Release gate: after accepting a chord, require the input to fall this quiet for
+// this many consecutive frames before the NEXT chord can be accepted — proving a
+// real release + re-strum rather than one sustained chord bleeding into the next.
+const PWM_RELEASE_FRAMES = 5;              // ~consecutive quiet frames = a release
+const PWM_RELEASE_RMS_FACTOR = 1.6;        // "quiet" = below silenceRms × this
+
+function PlayWithMe({ sequence, onActive, onFinished, songTitle, tr }) {
+  const profileCfg = useRef(loadConfig());
+  const mic = useMic();
+  const rafRef = useRef(null);
+  const countTimerRef = useRef(null);
+
+  const [phase, setPhase] = useState('idle');   // idle | counting | listening | done
+  const [count, setCount] = useState(0);        // count-in seconds remaining
+  const [permDenied, setPermDenied] = useState(false);
+  const [idx, setIdx] = useState(0);            // current segment index in sequence
+  const [goFlash, setGoFlash] = useState(false); // one-shot gold "GO" flash overlay
+
+  // Mutable loop state (kept in refs so the RAF loop never re-binds mid-run).
+  const idxRef = useRef(0);
+  const okFramesRef = useRef(0);
+  const cueRef = useRef(null);
+  const runningRef = useRef(false);
+  // Live meter is driven IMPERATIVELY from the mic loop (no setState-per-frame):
+  // meterRef = the confidence fill, labelRef = the "play {chord}" text. We write
+  // transform/color/box-shadow straight to the DOM ~60×/s so React never
+  // re-renders the listening subtree on every frame.
+  const meterRef = useRef(null);
+  const labelRef = useRef(null);
+  const wasAboveRef = useRef(false);   // was confidence ≥ accept threshold last frame?
+  const reducedRef = useRef(false);    // cached prefers-reduced-motion at start()
+  // Release gate: after a chord is accepted, the NEXT chord can't be accepted
+  // until the strings are released (mic goes quiet for a few frames). Without
+  // this, one sustained/ringing chord double-advances — its notes often also fit
+  // the next chord (adjacent chords share notes), and the strum-back confirmation
+  // bleeds into the open mic. You must actually re-strum for the next chord.
+  const mustReleaseRef = useRef(false); // true right after an accept, until a release is seen
+  const quietFramesRef = useRef(0);     // consecutive frames below the "playing" RMS floor
+
+  const stop = useCallback((finished = false) => {
+    runningRef.current = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    if (countTimerRef.current) { clearTimeout(countTimerRef.current); countTimerRef.current = null; }
+    cueRef.current?.cancel();
+    try { mic.current.close(); } catch { /* not open */ }
+    stopAudio();
+    setPhase(finished ? 'done' : 'idle');
+    setCount(0);
+    setGoFlash(false);
+    onActive(null);
+  }, [mic, onActive]);
+
+  useEffect(() => () => stop(), [stop]);
+
+  // Paint the live confidence meter + chord label straight to the DOM — no React
+  // state. `frac` is 0..1 correctness; `rms` scales the gold bloom by attack so
+  // the prompter feels like it's truly listening. GPU-composited transform +
+  // box-shadow only. Above the 0.6 accept threshold it snaps to success green.
+  const paintMeter = useCallback((frac, rms) => {
+    const fill = meterRef.current;
+    const label = labelRef.current;
+    const above = frac >= 0.6;
+    if (fill) {
+      fill.style.transform = `scaleX(${Math.max(0, Math.min(1, frac))})`;
+      fill.style.background = above ? 'var(--color-success)' : 'var(--color-brand)';
+    }
+    if (label) {
+      // Bloom intensity: correctness sets the base, live level adds attack.
+      const glow = reducedRef.current ? 0 : Math.min(1, frac * 0.8 + Math.min(1, rms * 8) * 0.3);
+      label.style.textShadow = glow > 0.05
+        ? `0 0 ${Math.round(4 + glow * 14)}px var(--brand-glow)` : 'none';
+      label.style.color = above ? 'var(--color-success)' : 'var(--color-brand)';
+    }
+    // One-shot brightness pulse the instant we cross into "you've got it".
+    if (above && !wasAboveRef.current && !reducedRef.current) {
+      const el = meterRef.current?.parentElement;
+      if (el) { el.classList.remove('pwm-lock'); void el.offsetWidth; el.classList.add('pwm-lock'); }
+    }
+    wasAboveRef.current = above;
+  }, []);
+
+  // Advance to the next chord: strum the one just nailed back as confirmation,
+  // move the highlight/scroll, and celebrate at the end.
+  const advance = useCallback(() => {
+    const seq = sequence;
+    const cur = seq[idxRef.current];
+    if (cur?.voicing) {
+      // Confirm the correct chord by strumming it back (one voicing, one strum).
+      try { playProgression([cur.voicing], 150, () => {}, () => {}); } catch { /* audio busy */ }
+      // Reward the locked chord with a spark burst from the chord label, tinted by
+      // the strings that just rang out. Skipped under reduced motion.
+      if (!reducedRef.current && labelRef.current) {
+        try { sparkBurst(labelRef.current.getBoundingClientRect(), { colors: voicingStringColors(cur.voicing) }); } catch { /* view-only chrome */ }
+      }
+    }
+    const nextIdx = idxRef.current + 1;
+    okFramesRef.current = 0;
+    wasAboveRef.current = false;
+    // Arm the release gate: the next chord is locked out until the strings go
+    // quiet (a real release), so this chord's sustain / the strum-back can't
+    // double-advance.
+    mustReleaseRef.current = true;
+    quietFramesRef.current = 0;
+    paintMeter(0, 0);   // reset the confidence meter for the next chord
+    if (nextIdx >= seq.length) {
+      // Finished the whole song — the <Celebration> that renders on phase 'done'
+      // fires the big fanfare itself (once), so we don't play it here too.
+      setIdx(nextIdx);
+      onFinished?.();
+      stop(true);
+      return;
+    }
+    idxRef.current = nextIdx;
+    setIdx(nextIdx);
+    onActive(seq[nextIdx] || null);
+  }, [sequence, onActive, onFinished, stop, paintMeter]);
+
+  // One mic frame: detect peaks, match against the catalog, and accept only when
+  // the match IS this segment's chord (pitch-classes overlap) for enough frames.
+  const listenFrame = useCallback(() => {
+    if (!runningRef.current) return;
+    rafRef.current = requestAnimationFrame(listenFrame);
+    const cfg = profileCfg.current;
+    const m = mic.current;
+    if (!m.audioCtx || !m.analyser) return;
+    const rms = m.getRMS();
+
+    // Release tracking: count consecutive "quiet" frames. Once the input has been
+    // quiet long enough after an accept, the strings are considered released and
+    // the next chord becomes acceptable again.
+    if (rms < cfg.silenceRms * PWM_RELEASE_RMS_FACTOR) {
+      quietFramesRef.current++;
+      if (quietFramesRef.current >= PWM_RELEASE_FRAMES) mustReleaseRef.current = false;
+    } else {
+      quietFramesRef.current = 0;
+    }
+
+    if (rms < cfg.silenceRms) { paintMeter(0, 0); okFramesRef.current = 0; return; }
+
+    const fd = m.getFreqData();
+    if (!fd) return;
+    const sr = m.audioCtx.sampleRate;
+    const fftSz = m.analyser.fftSize;
+    const peaks = detectPeaksConfigured(fd, sr, fftSz, cfg);
+    const hzList = peaks.map(p => p.hz);
+    const matched = matchChordConfigured(hzList, cfg);
+
+    const target = sequence[idxRef.current]?.voicing;
+    const targetPCs = voicingPitchClasses(target);
+
+    // Distinct pitch classes we actually heard this frame.
+    const detPCs = new Set(hzList.map(hz => {
+      const midi = Math.round(69 + 12 * Math.log2(hz / 440));
+      return ((midi % 12) + 12) % 12;
+    }));
+
+    // How much of the TARGET CHORD did you play? overlap = target notes present;
+    // coverage = overlap / (# distinct notes the chord has). This is the right
+    // measure: it asks "did you play THIS chord", not "does what I heard happen to
+    // fit". `precision` = of what you played, how much belongs to the chord — it
+    // penalises playing the WRONG chord that merely includes a target note.
+    let overlap = 0;
+    if (targetPCs) for (const pc of detPCs) if (targetPCs.has(pc)) overlap++;
+    const targetSize = targetPCs ? targetPCs.size : 0;
+    const coverage = targetSize ? overlap / targetSize : 0;      // 0..1 of the chord's notes
+    const precision = detPCs.size ? overlap / detPCs.size : 0;   // 0..1 of what you played
+
+    // Accept only when you've genuinely played the chord:
+    //   • at least 2 distinct notes heard (kills single-note / room-noise triggers)
+    //   • you covered MOST of the chord's notes (≥⅔ — e.g. 2 of 3 in a triad)
+    //   • and most of what you played belongs to the chord (not a different chord
+    //     that merely shares a note) — OR the catalog matcher names this exact chord.
+    const exactMatch = !!matched && target && matched.chord?.name === target.name;
+    const enoughNotes = detPCs.size >= 2;
+    const heardIt = enoughNotes && coverage >= 0.66 && (precision >= 0.6 || exactMatch);
+
+    // Confidence for the meter blends coverage (main signal) with precision.
+    const overlapFrac = Math.min(1, coverage * 0.7 + precision * 0.3);
+
+    // While waiting for a release after the last accept, keep the meter dim and
+    // don't accumulate toward an accept — the sustained/ringing chord must decay
+    // and you must re-strum before the next chord counts.
+    if (mustReleaseRef.current) {
+      okFramesRef.current = 0;
+      paintMeter(Math.min(overlapFrac, 0.35), rms);  // show life, but never "locked"
+      return;
+    }
+
+    // Imperative paint — never setState here (this runs ~60×/s).
+    paintMeter(heardIt ? Math.max(overlapFrac, 0.6) : overlapFrac, rms);
+    if (heardIt) {
+      okFramesRef.current++;
+      if (okFramesRef.current >= PWM_STABLE_FRAMES) advance();
+    } else {
+      okFramesRef.current = Math.max(0, okFramesRef.current - 1);
+    }
+  }, [sequence, mic, advance, paintMeter]);
+
+  const begin = useCallback(async () => {
+    if (!sequence.length) return;
+    setPermDenied(false);
+    // Reset to the top. Cache reduced-motion once per run (used by the mic loop's
+    // imperative paint, which must not call matchMedia ~60×/s).
+    idxRef.current = 0; okFramesRef.current = 0; wasAboveRef.current = false;
+    mustReleaseRef.current = false; quietFramesRef.current = 0;
+    reducedRef.current = prefersReducedMotion();
+    setIdx(0);
+    try {
+      // Open the mic raw (guitar detection wants no AEC/NS/AGC). Recording starts
+      // NOW, during the count-in, per the app's practice-countdown rule.
+      await mic.current.open(profileCfg.current.smoothing, { raw: true });
+    } catch (e) {
+      if (e?.name === 'NotAllowedError') setPermDenied(true);
+      return;
+    }
+    runningRef.current = true;
+    setPhase('counting');
+
+    // 5-second count-in with clock ticks → "go". onGo fires the visual half of
+    // the ritual — a one-shot gold flash, cleared on animationend below.
+    setGoFlash(false);
+    cueRef.current = makeCountdownCue({ onGo: () => setGoFlash(true) });
+    let remaining = 5;
+    setCount(remaining);
+    cueRef.current.set(remaining);
+    const tick = () => {
+      if (!runningRef.current) return;
+      remaining -= 1;
+      setCount(remaining);
+      cueRef.current.set(remaining);
+      if (remaining > 0) {
+        countTimerRef.current = setTimeout(tick, 1000);
+      } else {
+        // "go" — begin listening for the first chord.
+        setPhase('listening');
+        onActive(sequence[0] || null);
+        rafRef.current = requestAnimationFrame(listenFrame);
+      }
+    };
+    countTimerRef.current = setTimeout(tick, 1000);
+  }, [sequence, mic, listenFrame, onActive]);
+
+  useEffect(() => () => { if (countTimerRef.current) clearTimeout(countTimerRef.current); }, []);
+
+  const total = sequence.length;
+  const progressPct = total ? Math.round((idx / total) * 100) : 0;
+  const running = phase === 'counting' || phase === 'listening';
+
+  // Screen-reader announcement — derived ONLY from phase/count/idx (never `heard`),
+  // so it fires on real transitions (count tick, chord change, done) and not ~60×/s
+  // like the confidence meter. Read out through a polite live region below.
+  const nowChord = sequence[idx]?.voicing?.name;
+  const announce =
+    phase === 'counting' ? `Get ready. ${count}`
+    : phase === 'listening' ? `Now play ${nowChord || 'the next chord'}. Chord ${idx + 1} of ${total}.`
+    : phase === 'done' ? 'Song complete.'
+    : '';
+
+  if (!sequence.length) return null;
+
+  return (
+    <div className="mb-3 relative" style={{ borderBottom: '1px solid var(--color-surface-750)', paddingBottom: 10 }}>
+      {/* Polite live region — announces count-in, the chord to play now, and
+          completion to screen readers. Visually hidden; the sighted UI below
+          shows the same information. */}
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announce}</span>
+
+      {/* One-shot "GO" flash — the visual half of the count-in ritual, fired by
+          the countdown cue's onGo. A gold wash + word, self-clearing on
+          animationend. pointer-events off so it never blocks the row. */}
+      {goFlash && (
+        <div className="go-flash absolute inset-0 z-10 flex items-center justify-center rounded-lg pointer-events-none"
+          aria-hidden="true"
+          onAnimationEnd={() => setGoFlash(false)}
+          style={{ background: 'radial-gradient(ellipse at center, var(--brand-glow) 0%, transparent 70%)' }}>
+          <span className="font-black tracking-widest" style={{ fontSize: '1.5rem', color: 'var(--color-brand)', textShadow: '0 0 18px var(--brand-glow)' }}>GO</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={running ? () => stop(false) : begin}
+          className="flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
+          style={running
+            ? { background: 'rgba(239,68,68,0.14)', color: 'var(--color-danger)' }
+            : { background: 'rgba(201,169,110,0.12)', color: 'var(--color-brand)', border: '1px solid rgba(201,169,110,0.3)' }}
+          title="Listen through your mic and advance the song only when you play each chord — self-paced"
+        >
+          <span className="text-sm leading-none">{running ? '■' : '🎤'}</span>
+          {running ? 'Stop' : 'Play with me'}
+        </button>
+
+        {phase === 'idle' && (
+          <span className="text-[10px]" style={{ color: 'var(--color-ink-ghost)' }}>
+            mic · the song waits for you — advances when it hears each chord
+          </span>
+        )}
+
+        {phase === 'counting' && (
+          <span className="flex items-baseline gap-2" style={{ color: 'var(--color-brand)' }}>
+            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-ink-faint)' }}>Get ready</span>
+            {/* Remount the digit each second (key={count}) so ui-dot-pop replays,
+                giving each tick a scale-punch; the final tick is a touch larger.
+                Reduced-motion neutralizes ui-dot-pop to a fade (index.css). */}
+            <span key={count} className="ui-dot-pop inline-block font-black tabular-nums leading-none"
+              style={{ fontSize: count === 1 ? '1.9rem' : '1.6rem', textShadow: '0 0 14px var(--brand-glow-soft)' }}>
+              {count}
+            </span>
+          </span>
+        )}
+
+        {phase === 'listening' && (
+          <div className="flex items-center gap-2 flex-1 min-w-[140px]">
+            <span className="text-[10px] shrink-0" style={{ color: 'var(--color-success)' }}>
+              <span className="animate-pulse">●</span> listening — play{' '}
+              {/* labelRef: the chord name blooms warmer as you lock the shape,
+                  then snaps to success green at the accept threshold (imperative,
+                  from the mic loop — no per-frame React state). */}
+              <strong ref={labelRef} style={{ color: 'var(--color-brand)', transition: 'color 150ms ease, text-shadow 150ms ease' }}>
+                {sequence[idx]?.voicing?.name || '…'}
+              </strong>
+            </span>
+            {/* Live "how close" meter — driven imperatively via meterRef ~60×/s,
+                so it's aria-hidden; the polite live region above carries state to
+                AT. The fill uses transform:scaleX (compositor-only, no reflow)
+                instead of width. pwm-lock fires a one-shot pulse at the 0.6
+                accept threshold. */}
+            <div className="pwm-meter flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-650)' }} aria-hidden="true">
+              <div ref={meterRef} className="h-full w-full rounded-full"
+                style={{ transformOrigin: 'left', transform: 'scaleX(0)',
+                  background: 'var(--color-brand)',
+                  transition: 'transform 90ms linear, background-color 150ms ease' }} />
+            </div>
+            <span className="text-[10px] tabular-nums shrink-0" style={{ color: 'var(--color-ink-ghost)' }}>
+              {idx}/{total}
+            </span>
+          </div>
+        )}
+
+        {permDenied && (
+          <span className="text-[10px]" style={{ color: 'var(--color-danger)' }}>
+            Mic access denied — allow the microphone to play along.
+          </span>
+        )}
+      </div>
+
+      {running && (
+        <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-750)' }}
+          role="progressbar" aria-label="Song progress" aria-valuemin={0} aria-valuemax={total} aria-valuenow={idx}>
+          <div className="h-full rounded-full transition-all"
+            style={{ width: `${progressPct}%`, background: 'var(--color-brand)' }} />
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div className="mt-2">
+          <Celebration
+            advancement={{ advanced: true, big: true, top: { type: 'songComplete', detail: { title: songTitle } } }}
+            tr={tr}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
-function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings }) {
+function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings, tr }) {
   // Imported songs carry their own pasted lyrics+chords → render those directly,
   // no fetch. Otherwise fetch the real lyrics from a public lyrics database.
   const isCustom = Array.isArray(customLyricLines) && customLyricLines.length > 0;
@@ -286,6 +785,30 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
   const [lyrics, setLyrics]  = useState('');
   const [active, setActive] = useState(null); // { lineIdx, segIdx } currently sounding
   const [simplified, setSimplified] = useState(false); // "Simplify all" — eases chords in tab + lyrics
+
+  // Auto-scroll the lyrics box so the currently-sounding line stays in view while
+  // the song plays (like a karaoke prompter). scrollRef is the overflow box;
+  // activeLineRef points at the DOM node of the line that's sounding right now.
+  const scrollRef = useRef(null);
+  const activeLineRef = useRef(null);
+  useEffect(() => {
+    const box = scrollRef.current, line = activeLineRef.current;
+    if (!box || !line || active == null) return;
+    // Center the active line within the box. Use getBoundingClientRect (viewport-
+    // relative) for BOTH nodes so the math doesn't depend on offsetParent — the
+    // box isn't a positioned ancestor, so line.offsetTop would be measured against
+    // some far ancestor and slam the scroll to the bottom. The delta between the
+    // two rects, added to the box's current scrollTop, is the exact target. We set
+    // scrollTop directly (not scrollIntoView) so ONLY this box scrolls, never the
+    // page.
+    const boxRect = box.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    const delta = (lineRect.top - boxRect.top) - (box.clientHeight / 2 - lineRect.height / 2);
+    const target = Math.max(0, box.scrollTop + delta);
+    // Repeated user-uninitiated vertical motion is exactly what reduced-motion
+    // suppresses — jump instantly for those users; the active line still centers.
+    box.scrollTo({ top: target, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }, [active]);
 
   // The eased-chord map (original name → simplified name) for the WHOLE song,
   // computed the same way the auto-tab simplifies. Applied to the lyrics chords
@@ -418,17 +941,28 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
     <div className="px-3 sm:px-4 py-3 font-mono text-xs"
       style={{ borderTop: '1px solid var(--color-surface-750)', background: 'var(--color-surface-base)' }}>
 
-      {/* Song controls row — play + one "Simplify all" toggle that eases every
-          chord across the lyrics view below, in place. */}
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-        <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
+      {/* Song controls row — synth play, "play WITH me" (mic self-paced), and a
+          "Simplify all" toggle. A confined ambient TSL wash sits BEHIND this band
+          (opened-song "now playing" glow), gated + lazy via Lazy3D so it never
+          mounts under reduced-motion / no-GPU / software-WebGL, and unmounts with
+          the whole LyricsSection when the song collapses. It warms up while a
+          player is walking the song (active != null). */}
+      <div className="relative flex items-center justify-between gap-2 flex-wrap mb-1 rounded-lg overflow-hidden">
+        {/* ambient underlay */}
+        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
+          <Lazy3D load={loadSongHeaderAmbient} fallback={null} componentProps={{ playing: active != null }} />
+        </div>
+        <div className="relative flex flex-col gap-1 flex-1 min-w-[200px]" style={{ zIndex: 1 }}>
+          <SongPlayer sequence={playSequence} bpm={bpm} onActive={setActive} />
+          <PlayWithMe sequence={playSequence} onActive={setActive} songTitle={title} tr={tr} />
+        </div>
         {song && (
           <button
             onClick={() => setSimplified(v => !v)}
-            className="text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-all shrink-0"
+            className="relative text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-all shrink-0"
             style={simplified
-              ? { background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
-              : { background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
+              ? { zIndex: 1, background: 'rgba(74,222,128,0.15)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }
+              : { zIndex: 1, background: 'var(--color-surface-700)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}
             title="Rewrite every chord over the lyrics as the easiest shape for your hand"
           >
             {simplified ? '✓ Simplified' : '✨ Simplify all'}
@@ -449,19 +983,19 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
       )}
 
       {status === 'done' && (
-      <div className="max-h-72 overflow-y-auto">
+      <div ref={scrollRef} className="max-h-72 overflow-y-auto">
 
       {/* Capo banner — easy open shapes for a hard-key song */}
       {capo && (
         <div className="mb-3 px-2.5 py-1.5 rounded-lg text-[11px] leading-snug"
           style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)', color: 'var(--color-success)' }}>
           <span className="font-semibold">Capo {capo.fret}</span>
-          <span style={{ color: '#3a7a3a' }}> — play easy open shapes: </span>
+          <span style={{ color: 'color-mix(in srgb, var(--color-success) 52%, #000)' }}> — play easy open shapes: </span>
           {Object.entries(capo.map).map(([orig, easy], k) => (
             <span key={orig}>
-              {k > 0 && <span style={{ color: '#2f5f2f' }}>, </span>}
+              {k > 0 && <span style={{ color: 'color-mix(in srgb, var(--color-success) 40%, #000)' }}>, </span>}
               <span style={{ color: 'var(--color-ink-faint)' }}>{orig}</span>
-              <span style={{ color: '#3a7a3a' }}>→</span>
+              <span style={{ color: 'color-mix(in srgb, var(--color-success) 52%, #000)' }}>→</span>
               <span className="font-semibold">{easy}</span>
             </span>
           ))}
@@ -470,8 +1004,10 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
 
       {annotatedLines.map((line, i) => {
         if (line.blank) return <div key={i} className="mt-2" />;
+        const lineActive = active && active.lineIdx === i;
         return (
           <div key={i}
+            ref={lineActive ? activeLineRef : undefined}
             className="mb-1.5 flex flex-wrap items-end gap-x-1 leading-tight"
             style={line.problem ? {
               background: 'rgba(250,204,21,0.14)',
@@ -508,12 +1044,12 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
                       {real}{hasEasy && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>→{easy}</span>}
                     </span>
                   </ChordTip>
-                  <span style={{ color: isActive ? '#b8a88a' : (line.problem ? '#facc15' : 'var(--color-ink-subtle)') }}>{seg.text}</span>
+                  <span style={{ color: isActive ? '#b8a88a' : (line.problem ? 'var(--color-caution)' : 'var(--color-ink-subtle)') }}>{seg.text}</span>
                 </span>
               );
             })}
             {line.problem && (
-              <span className="ml-1 text-[10px] font-semibold self-center" style={{ color: '#facc15' }}>
+              <span className="ml-1 text-[10px] font-semibold self-center" style={{ color: 'var(--color-caution)' }}>
                 ⚠ leftover sheet text — edit in Import to remove
               </span>
             )}
@@ -801,7 +1337,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
             onClick={() => setLyricsOpen(v => !v)}
             className="text-xs px-2 py-0.5 rounded font-medium transition-all"
             style={lyricsOpen
-              ? { background: 'rgba(99,102,241,0.12)', color: 'var(--color-accent)' }
+              ? { background: 'color-mix(in srgb, var(--color-indigo) 12%, transparent)', color: 'var(--color-accent)' }
               : { background: 'var(--color-surface-700)', color: 'var(--color-ink-faint)' }}
           >
             {lyricsOpen ? tr.hide : tr.lyrics}
@@ -819,7 +1355,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           <button
             onClick={() => { stopAudio(); setIsPlaying(false); setEditorOpen(true); }}
             className="text-xs px-2 py-0.5 rounded font-medium transition-all"
-            style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--color-accent)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-indigo) 12%, transparent)', color: 'var(--color-accent)' }}
             title="Open the Song Editor — mark a section and transform it (move up frets, easier voicings, capo, melody, rhythm, style)"
           >
             Editor
@@ -910,7 +1446,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
                 </div>
               )}
               {preview.warnings.length > 0 && (
-                <ul className="mt-1.5 list-disc list-inside" style={{ color: '#facc15' }}>
+                <ul className="mt-1.5 list-disc list-inside" style={{ color: 'var(--color-caution)' }}>
                   {preview.warnings.map((w, k) => <li key={k}>{w}</li>)}
                 </ul>
               )}
@@ -929,7 +1465,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           )}
         </div>
       )}
-      {lyricsOpen && <LyricsSection song={song} title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} />}
+      {lyricsOpen && <LyricsSection song={song} title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} tr={tr} />}
     </div>
   );
 }
@@ -1373,7 +1909,8 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
   }
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-800)', background: 'var(--color-surface-900)',
+      boxShadow: 'inset 3px 0 0 0 color-mix(in srgb, var(--color-success) 65%, transparent)' }}>
       <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-success)' }}>
         Easier alternatives for your hand
       </div>
@@ -1403,10 +1940,10 @@ function EasierChordsPanel({ prog, profile, onTooltip, onTooltipLeave }) {
                   onMouseLeave={onTooltipLeave}
                 >{sub.substitute.name}</span>
               </div>
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#152015', color: '#6a9a6a' }}>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-success) 12%, #000)', color: 'color-mix(in srgb, var(--color-success) 60%, var(--color-ink-subtle))' }}>
                 {SUB_KIND_LABEL[sub.substitute.kind]}
               </span>
-              <span className="text-[9px] tabular-nums" style={{ color: '#3a7a3a' }}>
+              <span className="text-[9px] tabular-nums" style={{ color: 'color-mix(in srgb, var(--color-success) 52%, #000)' }}>
                 −{sub.saved.toFixed(1)}
               </span>
             </div>
@@ -1438,8 +1975,9 @@ function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
   }
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
-      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: '#c084fc' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-800)', background: 'var(--color-surface-900)',
+      boxShadow: 'inset 3px 0 0 0 color-mix(in srgb, var(--color-violet) 65%, transparent)' }}>
+      <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-violet)' }}>
         Play it higher up the neck
       </div>
       <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
@@ -1457,14 +1995,14 @@ function UpperVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
           const v = up.voicing;
           return (
             <div key={j} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
-              style={{ background: 'rgba(192,132,252,0.05)', border: '1px solid rgba(192,132,252,0.18)' }}>
+              style={{ background: 'color-mix(in srgb, var(--color-violet) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--color-violet) 18%, transparent)' }}>
               <span
                 className="text-xs font-mono font-bold cursor-default"
-                style={{ color: '#c084fc' }}
+                style={{ color: 'var(--color-violet)' }}
                 onMouseEnter={e => onTooltip(e, v)}
                 onMouseLeave={onTooltipLeave}
               >{chord.chordName}</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#1d1726', color: '#9a7ab8' }}>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-violet) 14%, #000)', color: 'color-mix(in srgb, var(--color-violet) 70%, var(--color-ink-subtle))' }}>
                 {up.shape} · fret {up.barreFret}
               </span>
               <span className="text-[10px] font-mono" style={{ color: 'var(--color-ink-faint)' }}>{v.tab}</span>
@@ -1497,7 +2035,8 @@ function TriadVoicingsPanel({ prog, onTooltip, onTooltipLeave }) {
   }
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-surface-700)', background: 'var(--color-surface-900)' }}>
+    <div style={{ borderTop: '1px solid var(--color-surface-800)', background: 'var(--color-surface-900)',
+      boxShadow: 'inset 3px 0 0 0 color-mix(in srgb, var(--color-warning) 65%, transparent)' }}>
       <div className="px-3 sm:px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-warning)' }}>
         Up the neck — triads (no barre)
       </div>
@@ -1834,7 +2373,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
             onClick={() => setShowHandFilters(v => !v)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
             style={showHandFilters
-              ? { background: 'rgba(99,102,241,0.15)', color: 'var(--color-accent)', border: '1px solid rgba(99,102,241,0.3)' }
+              ? { background: 'color-mix(in srgb, var(--color-indigo) 15%, transparent)', color: 'var(--color-accent)', border: '1px solid color-mix(in srgb, var(--color-indigo) 30%, transparent)' }
               : { background: 'var(--color-surface-750)', color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
             ✋ {showHandFilters ? 'Hide Hand Filters' : 'My Hand Filters'}
@@ -1897,7 +2436,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   customSongs={customSongs}
                   currentProgName={song.__progName}
                   onEdited={() => setCustomSongs(loadCustomSongs())}
-                  onMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* noop */ } }}
+                  onMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch { /* noop */ } }}
                 />
               ))}
             </div>
@@ -1938,18 +2477,22 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
             <div key={i} className="rounded-lg overflow-hidden"
               style={{ border: '1px solid var(--color-surface-700)' }}>
 
-              {/* Card header */}
+              {/* Card header — a titled card, not a flat toolbar: a 2px inset gold
+                  left-rail (echoing the now-playing chord cell), the progression
+                  NAME as the bold anchor, genre demoted to a tracked eyebrow, and
+                  a gold-tinted key badge so gold actually enters the header. */}
               <div className="flex items-center justify-between px-3 sm:px-4 py-2"
-                style={{ background: 'var(--color-surface-750)', borderBottom: '1px solid var(--color-surface-700)' }}>
+                style={{ background: 'var(--color-surface-750)', borderBottom: '1px solid var(--color-surface-700)',
+                  boxShadow: 'inset 2px 0 0 0 var(--color-brand)' }}>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 flex-wrap min-w-0">
                   {multiKey && (
                     <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
-                      style={{ background: 'var(--color-surface-600)', color: 'var(--color-ink-subtle)' }}>
+                      style={{ background: 'color-mix(in srgb, var(--color-brand) 12%, var(--color-surface-600))', color: 'var(--color-brand)' }}>
                       {prog.root} {prog.scaleType === 'major' ? 'maj' : 'min'}
                     </span>
                   )}
-                  <span className="font-semibold text-sm truncate" style={{ color: 'var(--color-ink)' }}>{prog.name}</span>
-                  <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ink-ghost)' }}>{prog.genre}</span>
+                  <span className="font-bold text-[15px] truncate tracking-tight" style={{ color: 'var(--color-ink)' }}>{prog.name}</span>
+                  <span className="text-[10px] uppercase tracking-wider hidden sm:inline" style={{ color: 'var(--color-ink-ghost)' }}>{prog.genre}</span>
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-2">
@@ -1957,69 +2500,81 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                     max <DifficultyBadge score={prog.maxScore} />
                   </span>
 
-                  <button
+                  <ActionChip
                     onClick={() => toggleEasier(key)}
+                    open={easierOpen} feat="var(--color-success)" icon="✋"
                     title={limitToReach ? 'Shown automatically — “limit to my reach” is on (Account settings)' : 'Suggest easier chords that fit your hand'}
-                    data-explain="The easier button suggests simpler chord shapes that fit your hand, with the same sound — so you can play this progression even with short fingers."
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
-                    style={easierOpen
-                      ? { background: 'rgba(74,222,128,0.14)', color: 'var(--color-success)' }
-                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
-                  >
-                    ✋ easier{limitToReach && ' ✓'}
-                  </button>
+                    dataExplain="The easier button suggests simpler chord shapes that fit your hand, with the same sound — so you can play this progression even with short fingers."
+                  >easier{limitToReach && ' ✓'}</ActionChip>
 
-                  <button
+                  <ActionChip
                     onClick={() => toggleUpper(key)}
+                    open={upperOpen} feat="var(--color-violet)" icon="▲"
                     title="Play this progression higher up the neck (movable barre shapes)"
-                    data-explain="The up the neck button shows movable barre shapes for the same chords played higher on the fretboard."
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
-                    style={upperOpen
-                      ? { background: 'rgba(192,132,252,0.14)', color: '#c084fc' }
-                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
-                  >
-                    ▲ up the neck
-                  </button>
+                    dataExplain="The up the neck button shows movable barre shapes for the same chords played higher on the fretboard."
+                  >up the neck</ActionChip>
 
-                  <button
+                  <ActionChip
                     onClick={() => toggleChanges(key)}
+                    open={changesOpen} feat="var(--color-indigo)" icon="⇄"
                     title="Score how hard it is to SWITCH between each pair of chords, personalized to your hand"
-                    data-explain="The changes button scores how hard it is to switch between each pair of chords in the progression — the real difficulty of playing it, personalized to your hand."
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
-                    style={changesOpen
-                      ? { background: 'rgba(99,102,241,0.14)', color: 'var(--color-accent)' }
-                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
-                  >
-                    ⇄ changes
-                  </button>
+                    dataExplain="The changes button scores how hard it is to switch between each pair of chords in the progression — the real difficulty of playing it, personalized to your hand."
+                  >changes</ActionChip>
 
-                  <button
+                  <ActionChip
                     onClick={() => toggleTriad(key)}
+                    open={triadOpen} feat="var(--color-warning)" icon="♦"
                     title="Up the neck without barre chords — 3-note triad grips using the same notes"
-                    data-explain="The triads button gives small three-note shapes higher up the neck, using the same notes but with no barre — easier grips for small hands."
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
-                    style={triadOpen
-                      ? { background: 'rgba(251,191,36,0.14)', color: 'var(--color-warning)' }
-                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
-                  >
-                    ♦ triads
-                  </button>
+                    dataExplain="The triads button gives small three-note shapes higher up the neck, using the same notes but with no barre — easier grips for small hands."
+                  >triads</ActionChip>
 
                   <button
                     onClick={() => toggleSongs(key)}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all"
-                    style={songsOpen
-                      ? { background: 'rgba(56,189,248,0.12)', color: 'var(--color-info)' }
-                      : { background: 'var(--color-surface-600)', color: 'var(--color-ink-faint)' }}
+                    title={songCount > 0
+                      ? `${songCount} famous song${songCount === 1 ? '' : 's'} use this progression — tap to play them`
+                      : 'No famous songs on record for this progression'}
+                    data-explain="Shows famous songs built on this exact chord progression, with lyrics and a play-along — proof you already know songs that use it."
+                    className="ui-press flex items-center gap-1.5 px-2 py-1 rounded-md font-semibold transition-all"
+                    style={songCount > 0
+                      ? {
+                          background: songsOpen
+                            ? 'linear-gradient(95deg, color-mix(in srgb, var(--color-info) 28%, transparent), color-mix(in srgb, var(--color-indigo) 22%, transparent))'
+                            : 'linear-gradient(95deg, color-mix(in srgb, var(--color-info) 16%, transparent), color-mix(in srgb, var(--color-indigo) 12%, transparent))',
+                          color: 'var(--color-info)',
+                          border: '1px solid color-mix(in srgb, var(--color-info) 45%, transparent)',
+                          boxShadow: songsOpen
+                            ? '0 0 0 1px color-mix(in srgb, var(--color-info) 25%, transparent), 0 2px 10px color-mix(in srgb, var(--color-info) 18%, transparent)'
+                            : '0 1px 6px color-mix(in srgb, var(--color-info) 10%, transparent)',
+                        }
+                      : {
+                          background: 'var(--color-surface-700)',
+                          color: 'var(--color-ink-ghost)',
+                          border: '1px solid var(--color-surface-550)',
+                          fontWeight: 500,
+                        }}
                   >
-                    ♪{songCount > 0 ? ` ${songCount}` : ''}
+                    {songCount > 0 ? (
+                      <>
+                        <span className="text-sm leading-none">🎵</span>
+                        <span className="tabular-nums text-sm font-bold leading-none">{songCount}</span>
+                        <span className="text-xs uppercase tracking-wide leading-none hidden sm:inline">
+                          {songCount === 1 ? 'song' : 'songs'}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-xs">♪</span>
+                    )}
                   </button>
 
                   <button
                     onClick={() => handlePlay(prog, key)}
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all"
+                    // While playing, a halo breathes once per beat (72 BPM here →
+                    // 60/72 s). Schedule-driven, CSS-timed; --halo tints it to the
+                    // danger red so it matches the ■ Stop state.
+                    className={`ui-press w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all${isPlaying ? ' pulse-glow' : ''}`}
                     style={isPlaying
-                      ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)' }
+                      ? { background: 'rgba(239,68,68,0.15)', color: 'var(--color-danger)',
+                          '--halo': 'rgba(239,68,68,0.5)', animationDuration: `${(60 / 72).toFixed(2)}s` }
                       : { background: 'var(--color-surface-600)', color: 'var(--color-ink-subtle)' }}
                   >
                     {isPlaying ? '■' : '▶'}
@@ -2039,14 +2594,25 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   return (
                     <div key={j} className="flex items-stretch">
                       <div
-                        className="flex-1 px-2 sm:px-3 py-2.5 transition-colors duration-100"
+                        // Remount the active cell each time it becomes the sounding
+                        // chord so the .chord-strum animation retriggers per beat
+                        // (like .string-vibrate is re-applied per pluck). Inactive
+                        // cells share a stable key, so only the active one animates.
+                        key={activeChord === j ? `strum-${activeChord}` : 'idle'}
+                        className={`flex-1 px-2 sm:px-3 py-2.5 duration-150${activeChord === j ? ' chord-strum' : ''}`}
                         style={{
                           minWidth: 72,
-                          background: activeChord === j ? 'rgba(201,169,110,0.07)' : 'transparent',
+                          transition: 'background 0.15s ease, box-shadow 0.15s ease',
+                          background: activeChord === j
+                            // lit "now playing" cell — top-lit warm fill + inset gold
+                            // left rail, well above the old barely-there 7% wash.
+                            ? 'linear-gradient(180deg, var(--brand-glow-soft), transparent 80%)'
+                            : 'transparent',
+                          boxShadow: activeChord === j ? 'inset 2px 0 0 0 var(--color-brand)' : 'none',
                         }}
                       >
                         <div className="text-xs mb-0.5" style={{ color: 'var(--color-ink-ghost)' }}>{chord.roman}</div>
-                        <div className="font-bold text-sm mb-1.5 transition-colors"
+                        <div className={`font-bold text-sm mb-1.5 transition-colors${activeChord === j ? ' ui-text-glow' : ''}`}
                           style={{ color: activeChord === j ? 'var(--color-brand)' : 'var(--color-ink)' }}>
                           <a
                             href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(chord.chordName)}`}
@@ -2060,7 +2626,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                         </div>
                         <div className="flex flex-wrap gap-1">
                           {chord.voicings.map((v, k) => (
-                            <span key={k} className="cursor-default"
+                            <span key={k} className="ui-press inline-flex cursor-default rounded"
                               onMouseEnter={e => showTooltip(e, v)}
                               onMouseLeave={hideTooltip}>
                               <DifficultyBadge score={v.score} />
@@ -2086,45 +2652,44 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                 })}
               </div>
 
-              {/* Chord-change difficulty strip (collapsible) — per-transition
-                  scores across the whole progression, personalized to the hand. */}
-              {changesOpen && (
+              {/* Collapsible card panels — CollapsibleSection animates each open
+                  AND closed (grid-rows 0fr↔1fr), mounting content lazily on first
+                  open. Reduced motion → instant show/hide (index.css). */}
+              <CollapsibleSection open={changesOpen}>
                 <TransitionStrip
                   chordNames={prog.chords.map(c => c.chordName)}
                   profile={activeProfile}
                 />
-              )}
+              </CollapsibleSection>
 
-              {/* Easier-alternatives panel (collapsible) */}
-              {easierOpen && (
+              <CollapsibleSection open={easierOpen}>
                 <EasierChordsPanel
                   prog={prog}
                   profile={activeProfile}
                   onTooltip={showTooltip}
                   onTooltipLeave={hideTooltip}
                 />
-              )}
+              </CollapsibleSection>
 
-              {/* Up-the-neck voicings panel (collapsible) */}
-              {upperOpen && (
+              <CollapsibleSection open={upperOpen}>
                 <UpperVoicingsPanel
                   prog={prog}
                   onTooltip={showTooltip}
                   onTooltipLeave={hideTooltip}
                 />
-              )}
+              </CollapsibleSection>
 
-              {/* Up-the-neck triads panel — no barre (collapsible) */}
-              {triadOpen && (
+              <CollapsibleSection open={triadOpen}>
                 <TriadVoicingsPanel
                   prog={prog}
                   onTooltip={showTooltip}
                   onTooltipLeave={hideTooltip}
                 />
-              )}
+              </CollapsibleSection>
 
-              {/* Songs panel (collapsible) */}
-              {songsOpen && <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} catalogSongs={catalogSongs} tr={tr} reach={reach} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} }} />}
+              <CollapsibleSection open={songsOpen}>
+                <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} catalogSongs={catalogSongs} tr={tr} reach={reach} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch {} }} />
+              </CollapsibleSection>
 
             </div>
           );
@@ -2136,7 +2701,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
       {/* ── Fretboard tooltip ── */}
       {tooltip && (
         <div
-          className="fixed z-50 rounded-xl p-3 pointer-events-none"
+          className="tip-in fixed z-50 rounded-xl p-3 pointer-events-none"
           style={{ left: tooltip.x, top: tooltip.y, background: 'var(--color-surface-700)', border: '1px solid var(--color-surface-550)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
         >
           <div className="text-xs mb-1 text-center" style={{ color: 'var(--color-ink-faint)' }}>{tooltip.voicing.type}</div>

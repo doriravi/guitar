@@ -48,6 +48,15 @@
   --color-accent: #a78bfa;
   --color-warning: #fb923c;
   --color-danger: #f87171;
+
+  /* Feature accents — first-class tokens for hues that were previously hardcoded
+     inline across the Progressions tab. `caution` is the mid-difficulty amber
+     (between success and warning); `violet` is the "up the neck" identity color;
+     `indigo` is the "changes" panel identity. Tokenizing these keeps the whole
+     app on-palette (no raw hex duplicating a token). */
+  --color-caution: #eab308;
+  --color-violet: #c084fc;
+  --color-indigo: #6366f1;
 }
 
 @layer base {
@@ -174,7 +183,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* Table header */
 thead th {
   background: var(--color-surface-800);
-  color: #6b6b6b;
+  color: var(--color-ink-subtle);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -223,6 +232,64 @@ thead th {
   animation: string-vibrate 0.5s cubic-bezier(0.3, 0, 0.4, 1);
 }
 
+/* ── Beat-locked play halo ────────────────────────────────────────────────────
+   A gold halo that breathes once per beat behind a Play button while the synth
+   plays. Schedule-driven: the caller sets animation-duration = one beat (60/bpm),
+   so CSS owns the timing — no JS loop, no analyser. box-shadow on one small
+   button, negligible cost. Reduced-motion → static .ui-glow (see the media block). */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 6px 0 var(--halo, var(--brand-glow-soft)); }
+  50%      { box-shadow: 0 0 16px 2px var(--halo, var(--brand-glow)); }
+}
+.pulse-glow {
+  animation: pulse-glow 0.8s ease-in-out infinite;
+}
+
+/* ── Play-with-me accept pulse ────────────────────────────────────────────────
+   A one-shot gold bloom on the confidence-meter track the instant playing
+   crosses the accept threshold (0.6) — the "you've got it" acknowledgement, just
+   before the chord locks. Re-applied imperatively (class remove→reflow→add) so it
+   retriggers each time you re-cross. box-shadow/opacity only, one small element. */
+@keyframes pwm-lock {
+  0%   { box-shadow: 0 0 0 0 var(--brand-glow-soft); }
+  35%  { box-shadow: 0 0 12px 2px var(--brand-glow); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.pwm-lock {
+  animation: pwm-lock 0.5s ease-out;
+}
+
+/* ── Count-in "GO" flash ──────────────────────────────────────────────────────
+   A one-shot gold wash + "GO" that swells then fades as the count-in ends. Fired
+   by the countdown cue's onGo; self-clears on animationend. Overlay is
+   pointer-events:none so it never blocks the controls beneath. */
+@keyframes go-flash {
+  0%   { opacity: 0; transform: scale(0.85); }
+  25%  { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+.go-flash {
+  animation: go-flash 0.6s ease-out forwards;
+}
+
+/* ── Chord-cell strum ─────────────────────────────────────────────────────────
+   The "now playing" cell in a progression gets a quick strum-settle each time it
+   becomes active during playback — a gentle scale punch + warm brightness bloom
+   that decays over ~one beat, so the eye feels the strum land. Re-applied by
+   remounting the cell content via a React `key` on each chord change, so it
+   retriggers cleanly (same imperative-restart idea as .string-vibrate). Cheap:
+   GPU-composited transform/filter on a single element, one element at a time. */
+@keyframes chord-strum {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  14%  { transform: scale(1.05); filter: brightness(1.5); }
+  46%  { transform: scale(0.99); filter: brightness(1.15); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+.chord-strum {
+  animation: chord-strum 0.42s cubic-bezier(0.3, 0, 0.4, 1);
+  transform-origin: center;
+}
+
 /* ── Animations ──────────────────────────────────────────────────────────────
    Subtle, premium motion. All wrapped in a prefers-reduced-motion guard below
    so the app stays perfectly usable (and jank-free) for users who opt out. */
@@ -242,6 +309,53 @@ thead th {
   0%   { opacity: 0; transform: scale(0.2); }
   70%  { opacity: 1; transform: scale(1.12); }
   100% { opacity: 1; transform: scale(1); }
+}
+/* Reusable springy-pop utility (e.g. the count-in digit remounted per second). */
+.ui-dot-pop {
+  animation: ui-dot-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Collapsible section — grid-rows 0fr↔1fr gives a height animation with no JS
+   measurement. The inner element must have overflow:hidden and min-height:0 so it
+   can be squeezed to nothing. Used by the Progressions card panels so closing
+   eases shut instead of hard-cutting. */
+.pwm-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.2s ease;
+  opacity: 1;
+}
+.pwm-collapse[data-open='false'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.pwm-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Hover-tooltip entrance — a chord-shape tooltip should breathe in, not snap.
+   A quick fade + micro-lift. Applied to the portaled ChordTip / fretboard
+   tooltip. Reduced-motion → plain fade (see the media block). */
+@keyframes tip-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.tip-in {
+  animation: tip-in 0.13s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Info-dense score badges (chord-change, difficulty): on hover/focus the number
+   lights in ITS OWN hue via --tc (a difficulty color the component sets), not the
+   fixed-gold .ui-text-glow. Pair with .ui-press for the lift. */
+.badge-glow {
+  transition: text-shadow 0.14s ease;
+}
+.badge-glow:hover,
+:focus-visible > .badge-glow,
+.badge-glow:focus-visible {
+  text-shadow: 0 0 12px var(--tc, var(--brand-glow));
 }
 
 /* Tab / page content entrance. Applied fresh on every tab switch via a React
@@ -269,6 +383,22 @@ thead th {
   transform: translateY(0) scale(0.97);
   filter: brightness(0.98);
 }
+/* Keyboard focus reads as the same lit-brass language as an active/lit control. */
+.ui-press:focus-visible {
+  box-shadow: 0 0 0 1px var(--brand-glow-soft),
+              0 4px 20px -2px var(--brand-glow-soft);
+}
+
+/* ── Global keyboard focus ring ───────────────────────────────────────────────
+   Every interactive element must show WHERE keyboard focus is (WCAG 2.4.7). Uses
+   :focus-visible so a mouse click never paints a ring, and an `outline` (not only
+   box-shadow) so Windows High Contrast / forced-colors still shows it. Gold to
+   match the brand. `:where(...)` keeps specificity 0 so components can override. */
+:where(a, button, [role="button"], input:not([type="range"]), select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
 
 /* Chord-diagram finger dots animate on mount, staggered by string index. */
 .fret-dot {
@@ -285,8 +415,10 @@ thead th {
   .animate-in {
     animation: ui-fade-in 0.25s ease both;
   }
-  .fret-dot {
-    animation: ui-fade-in 0.25s ease both;
+  .fret-dot,
+  .ui-dot-pop,
+  .tip-in {
+    animation: ui-fade-in 0.2s ease both;
   }
   /* Vibration is vestibular motion — replace it with a brief brightness pulse. */
   .string-vibrate {
@@ -296,6 +428,14 @@ thead th {
     0%, 100% { filter: brightness(1); transform: translateY(-50%); }
     40%      { filter: brightness(1.7); transform: translateY(-50%); }
   }
+  /* Chord-strum scale is vestibular too — keep only the brightness bloom. */
+  .chord-strum {
+    animation: chord-strum-pulse 0.4s ease both;
+  }
+  @keyframes chord-strum-pulse {
+    0%, 100% { filter: brightness(1); transform: none; }
+    40%      { filter: brightness(1.4); transform: none; }
+  }
   .ui-press:hover {
     filter: brightness(1.06);
     transform: none;
@@ -303,5 +443,37 @@ thead th {
   .ui-press:active {
     filter: brightness(0.98);
     transform: none;
+  }
+  /* Tailwind's animate-pulse is an infinite opacity loop it does NOT disable for
+     reduced-motion (WCAG 2.2.2). Stop it and leave a calm, still dot — e.g. the
+     "● listening" indicator in Play-with-me. */
+  .animate-pulse {
+    animation: none !important;
+    opacity: 0.7;
+  }
+  /* The play-with-me accept pulse is decorative — the color swap to success
+     green already conveys "you've got it" without the bloom. */
+  .pwm-lock {
+    animation: none;
+  }
+  /* The beat-locked play halo pulses infinitely — freeze it to a steady lit glow
+     so "playing" still reads without the breathing motion. */
+  .pulse-glow {
+    animation: none;
+    box-shadow: 0 0 12px 1px var(--brand-glow-soft);
+  }
+  /* GO flash: drop the scale (vestibular), keep a brief opacity fade so it still
+     appears/clears and onAnimationEnd fires to unmount it. */
+  .go-flash {
+    animation: go-flash-fade 0.5s ease both;
+  }
+  @keyframes go-flash-fade {
+    0%, 60% { opacity: 1; transform: none; }
+    100%    { opacity: 0; transform: none; }
+  }
+  /* Collapse instantly (no height animation) — the show/hide still works, it just
+     doesn't slide. */
+  .pwm-collapse {
+    transition: opacity 0.15s ease;
   }
 }

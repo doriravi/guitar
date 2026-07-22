@@ -4,6 +4,8 @@ import { musicHeard } from './guideBus';
 const OPEN_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
 
 let _ctx = null;
+let _analyser = null;   // shared read-only tap on the master bus (ctx._out) for
+                        // audio-reactive visuals; lazily created by getAudioAnalyser.
 let _timeouts = [];
 let _lastState = 'none';
 let _emdr = null;      // bilateral EMDR bed: { osc, c2, panner, lfo, lfoDepth, bedMaster, extra } | null
@@ -72,12 +74,48 @@ function buildCtx() {
   comp.release.value = 0.2;
   comp.connect(ctx.destination);
   ctx._out = comp;
+  _tapAnalyser(comp);   // keep the reactive tap alive across a ctx rebuild
   return ctx;
 }
 
 function getCtx() {
   if (!_ctx || _ctx.state === 'closed') _ctx = buildCtx();
   return _ctx;
+}
+
+// Connect the shared analyser as a parallel branch off the master compressor, if
+// one has been requested. Called after every _out (re)build so the tap survives
+// stopAudio()'s compressor rebuild — otherwise reactive visuals go dead after the
+// first Stop. The analyser is a passive read tap (comp → analyser, not in the
+// audible path to destination), so it never affects the sound.
+function _tapAnalyser(comp) {
+  if (_analyser && comp) { try { comp.connect(_analyser); } catch { /* already connected */ } }
+}
+
+/**
+ * A shared read-only AnalyserNode on the synth master bus, for audio-reactive
+ * visuals (level/spectrum) that follow playProgression / playEvents / playFanfare.
+ * Lazily created on first call; null-safe by design — consumers should no-op when
+ * this returns null (e.g. createAnalyser unsupported). Read it in your own rAF via
+ * getByteFrequencyData/getByteTimeDomainData into a REUSED array — never allocate
+ * per frame.
+ *
+ * @returns {AnalyserNode|null}
+ */
+export function getAudioAnalyser() {
+  try {
+    const ctx = getCtx();
+    if (!_analyser) {
+      const a = ctx.createAnalyser();
+      a.fftSize = 1024;
+      a.smoothingTimeConstant = 0.8;
+      _analyser = a;
+    }
+    _tapAnalyser(ctx._out);   // ensure the current master bus feeds it
+    return _analyser;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -950,6 +988,7 @@ export function stopAudio() {
       comp.release.value = 0.2;
       comp.connect(_ctx.destination);
       _ctx._out = comp;
+      _tapAnalyser(comp);   // reconnect the reactive tap to the fresh master bus
     } catch { /* ignore */ }
   }
 }
