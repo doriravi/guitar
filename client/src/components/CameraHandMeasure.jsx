@@ -1,5 +1,68 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../lib/i18n';
+
+// True on phone-sized viewports (and updates on rotate/resize). Used to open the
+// camera as a full-screen layer on mobile instead of a boxed card — the video
+// needs the whole screen to place a hand well, especially in portrait.
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const on = () => setIsMobile(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return isMobile;
+}
+
+// Wrap children in a full-viewport fixed layer portaled to <body> when `active`
+// (escapes any transformed/overflow-clipped ancestor — the same reason ChordTip
+// portals); otherwise render them inline unchanged. Uses 100dvh so it fills
+// modern mobile browsers past the URL bar, and locks body scroll while open.
+function MaybeFullscreen({ active, children }) {
+  useEffect(() => {
+    if (!active) return undefined;
+    // iOS Safari ignores body{overflow:hidden} for touch scroll — the page
+    // rubber-bands behind a fixed overlay. Pinning the body with position:fixed
+    // (saving/restoring scroll position) is the reliable cross-browser lock.
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const prev = {
+      position: body.style.position, top: body.style.top,
+      left: body.style.left, right: body.style.right,
+      width: body.style.width, overflow: body.style.overflow,
+    };
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    return () => {
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.right = prev.right;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [active]);
+  if (!active) return children;
+  return createPortal(
+    <div
+      className="fixed inset-0 flex flex-col"
+      style={{ zIndex: 3000, background: '#000', width: '100vw', height: '100dvh' }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
 
 const TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
 const MCP = { thumb: 2, index: 5, middle: 9, ring: 13, pinky: 17 };
@@ -470,7 +533,20 @@ function drawHand(ctx, lm, W, H) {
 // as a normalized rect (0..1) of the video. Sized so a correctly-distanced,
 // splayed hand fills most of it — too far (small) or clipped (out of bounds)
 // fails the check, which keeps reach + flexibility readings consistent.
-const FRAME = { x: 0.18, y: 0.10, w: 0.64, h: 0.80 };
+//
+// Orientation-aware (fixes "only detects in landscape"): a portrait phone hands
+// back a tall buffer, where a wide landscape rect leaves almost no horizontal
+// room and the hand reads as perpetually "outside". We scale the frame's width
+// by the aspect: near-square/portrait buffers get a wider normalized rect so a
+// splayed hand actually fits. `aspect` is video width/height (≈1.78 landscape,
+// ≈0.56 portrait).
+function frameFor(aspect = 16 / 9) {
+  // Landscape baseline; widen (in normalized units) as the frame gets taller so
+  // the physical target stays hand-shaped rather than a thin vertical slot.
+  const w = Math.min(0.9, 0.64 * Math.max(1, (16 / 9) / Math.max(aspect, 0.1)) ** 0.5);
+  const h = 0.80;
+  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+}
 // Fraction of the frame the hand's bounding box should occupy to count as
 // "well-sized" (not too far away). Height is the more reliable axis for a
 // vertical splayed hand.
@@ -478,7 +554,8 @@ const FRAME_MIN_FILL = 0.55;
 
 // Check the hand landmarks against the target frame. Returns { ok, reason }.
 // reason ∈ 'ok' | 'outside' | 'toosmall' so the UI can give specific guidance.
-function checkHandInFrame(lm) {
+function checkHandInFrame(lm, aspect) {
+  const FRAME = frameFor(aspect);
   let minX = 1, minY = 1, maxX = 0, maxY = 0;
   for (const p of lm) {
     if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
@@ -495,8 +572,10 @@ function checkHandInFrame(lm) {
 }
 
 // Draw the target frame. Colored green when the hand fits, amber otherwise, with
-// corner brackets for a clear "align here" affordance.
+// corner brackets for a clear "align here" affordance. Frame geometry matches the
+// orientation-aware `frameFor(aspect)` used by the fit check.
 function drawFrame(ctx, W, H, ok) {
+  const FRAME = frameFor(H > 0 ? W / H : 16 / 9);
   const x = FRAME.x * W, y = FRAME.y * H, w = FRAME.w * W, h = FRAME.h * H;
   const color = ok ? '#4ade80' : '#c9a96e';
   ctx.save();
@@ -550,6 +629,7 @@ function loadMediaPipeScript() {
 
 export default function CameraHandMeasure({ onMeasured, lang }) {
   const tr = useT(lang);
+  const isMobile = useIsMobile();
   const videoRef  = useRef(null);
   const canvasRef = useRef(null);
   const handsRef  = useRef(null);
@@ -585,6 +665,10 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const [worldCalibrated, setWorldCalibrated] = useState(false);
 
   const [phase, setPhase]         = useState('idle');
+  // Open the camera as a full-screen layer on phones (any camera-active phase).
+  // Declared here (before the effects that reference it in their deps) to avoid
+  // a temporal-dead-zone ReferenceError during render.
+  const fullscreen = isMobile && (phase === 'ready' || phase === 'recording');
   const [statusMsg, setStatus]    = useState('');
   const [captured, setCaptured]   = useState(null);
   const [handVisible, setHandVisible] = useState(false);
@@ -594,6 +678,12 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const [holdProgress, setHoldProgress] = useState(0);    // 0..1 how far through the hold-still auto-measure
   const [livePeaks, setLivePeaks] = useState(null); // { gapKey: cm } running p90 for live bars
   const pendingStreamRef = useRef(null); // stream waiting for video element to mount
+  // Live camera aspect ratio (width/height) from the actual video buffer. The
+  // container adopts this instead of a hard-coded 16/9 so a portrait phone's
+  // portrait buffer isn't center-cropped by object-cover — MediaPipe sees the
+  // full frame and the hand can't get clipped out at the top/bottom (the cause
+  // of "only detects in landscape"). Defaults to 16/9 until the stream reports.
+  const [videoAspect, setVideoAspect] = useState(16 / 9);
 
   // No-detection fallback (upgrade): if the camera has been live for
   // DETECT_TIMEOUT_MS without ever seeing a hand, the phone is often held in an
@@ -640,6 +730,12 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         if (!video || !canvas) return;
         const W = canvas.width  = video.videoWidth  || 640;
         const H = canvas.height = video.videoHeight || 480;
+        // Keep the container aspect matched to the real buffer so nothing is
+        // cropped (portrait phones can hand back a portrait or landscape buffer).
+        if (H > 0) {
+          const ar = W / H;
+          setVideoAspect(prev => (Math.abs(prev - ar) > 0.001 ? ar : prev));
+        }
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, W, H);
         if (results.multiHandLandmarks?.length) {
@@ -653,7 +749,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           setShowOrientationHint(false);
 
           // Position gate: is the hand inside the target frame and well-sized?
-          const fit = checkHandInFrame(lm);
+          const fit = checkHandInFrame(lm, H > 0 ? W / H : 16 / 9);
           frameFitRef.current = fit.ok;
           setFrameFit(fit);
           drawFrame(ctx, W, H, fit.ok);
@@ -891,14 +987,23 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   useEffect(() => { autoMeasureRef.current = startRecording; }, [startRecording]);
 
 
-  // Attach stream to video element once it mounts after phase → 'ready'
+  // Attach stream to the video element after phase → 'ready', and re-attach if
+  // the element moves (e.g. toggling the mobile full-screen portal moves the
+  // <video> DOM node, which can drop its srcObject). Re-runs on `fullscreen` so
+  // playback survives the portal in/out. Attaches from the persistent
+  // streamRef (idempotent) rather than the one-shot pendingStreamRef.
   useEffect(() => {
-    if (phase !== 'ready') return;
+    // Runs for both 'ready' and 'recording': if the mobile fullscreen portal
+    // toggles mid-recording (viewport crosses the 768px breakpoint on rotate),
+    // React moves the <video> node and drops its srcObject — we must re-attach
+    // during recording too, or the stream goes blank and the measurement is
+    // silently corrupted.
+    if (phase !== 'ready' && phase !== 'recording') return undefined;
     const video = videoRef.current;
-    const stream = pendingStreamRef.current;
-    if (!video || !stream) return;
+    const stream = streamRef.current || pendingStreamRef.current;
+    if (!video || !stream) return undefined;
     pendingStreamRef.current = null;
-    video.srcObject = stream;
+    if (video.srcObject !== stream) video.srcObject = stream;
     video.play().catch(console.error);
 
     const loop = async () => {
@@ -907,8 +1012,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
       }
       rafRef.current = requestAnimationFrame(loop);
     };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [phase]);
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(loop);
+    return undefined;
+  }, [phase, fullscreen]);
 
   // No-detection fallback timer: while the camera is live and looking for a
   // hand, if none is found within DETECT_TIMEOUT_MS, surface a prompt to rotate
@@ -929,7 +1035,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
   useEffect(() => () => stop(), [stop]);
 
-  const retry = () => {
+  // Single source of truth for returning the tool to a clean 'idle' state, so
+  // retry and both cancel paths reset the SAME state (previously the cancel
+  // handlers skipped setRulerActive/frameFit/latest-landmark resets, leaving a
+  // stale "cm ruler live" badge on reopen).
+  const resetState = useCallback(() => {
     setCaptured(null);
     setPhase('idle');
     setHandVisible(false);
@@ -950,7 +1060,11 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     // Re-arm the no-detection orientation prompt.
     handEverSeenRef.current = false;
     setShowOrientationHint(false);
-  };
+  }, []);
+
+  const retry = resetState;
+  // Cancel = stop the camera/stream, then the same clean reset.
+  const cancelCamera = useCallback(() => { stop(); resetState(); }, [stop, resetState]);
 
   const CARD_CORNER_LABELS = [
     tr.cardTL || 'top-left', tr.cardTR || 'top-right',
@@ -987,7 +1101,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         </div>
         {(phase === 'ready' || phase === 'recording' || phase === 'card') && (
           <button
-            onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); autoTriggeredRef.current = false; holdSinceRef.current = null; prevCentroidRef.current = null; setHoldProgress(0); handEverSeenRef.current = false; setShowOrientationHint(false); }}
+            onClick={cancelCamera}
             className="text-xs px-3 py-1 rounded-lg"
             style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
@@ -1069,19 +1183,37 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
 
       {(phase === 'ready' || phase === 'recording') && (
         <div>
-          <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
+          {/* On mobile, the camera stage is portaled to a full-screen fixed
+              layer (escaping any transformed/clipped ancestor) so the video
+              fills the whole screen; on desktop it stays a boxed card. */}
+          <MaybeFullscreen active={fullscreen}>
+          <div
+            className={fullscreen ? 'relative bg-black w-full h-full' : 'relative bg-black mx-auto'}
+            style={fullscreen
+              ? { flex: 1, minHeight: 0 }
+              : { aspectRatio: String(videoAspect), maxHeight: '70vh', maxWidth: '100%' }}
+          >
+            {/* object-contain in BOTH modes: never crop the hand out of frame
+                (this is a measurement — a cropped fingertip is a wrong reading).
+                Fullscreen fills the screen; contain just letterboxes the unused
+                strip. video + canvas share the buffer aspect so contain scales
+                them identically, keeping the landmark overlay pixel-aligned. */}
             <video
               ref={videoRef}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               style={{ transform: 'scaleX(-1)' }}
               playsInline muted
             />
             <canvas
               ref={canvasRef}
-              className="absolute inset-0 w-full h-full"
+              className="absolute inset-0 w-full h-full object-contain"
               style={{ transform: 'scaleX(-1)' }}
             />
-            <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+            <div className="absolute flex flex-col items-start gap-2"
+              style={{
+                top: fullscreen ? 'max(0.75rem, env(safe-area-inset-top))' : '0.75rem',
+                left: fullscreen ? 'max(0.75rem, env(safe-area-inset-left))' : '0.75rem',
+              }}>
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
                 style={{ background: 'rgba(0,0,0,0.75)', color: handVisible ? 'var(--color-success)' : 'var(--color-danger)' }}>
                 <div className="w-2 h-2 rounded-full" style={{ background: handVisible ? 'var(--color-success)' : 'var(--color-danger)' }} />
@@ -1139,17 +1271,34 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
               </div>
             )}
             {phase === 'recording' && (
-              <div className="absolute top-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold"
-                style={{ background: 'rgba(0,0,0,0.75)', color: 'var(--color-danger)' }}>
+              // In fullscreen, sit top-CENTER so it never collides with the
+              // floating cancel button (both would otherwise hug the top-right).
+              <div
+                className={`absolute flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold ${fullscreen ? 'left-1/2 -translate-x-1/2' : 'right-3'}`}
+                style={{ top: fullscreen ? 'max(0.75rem, env(safe-area-inset-top))' : '0.75rem', background: 'rgba(0,0,0,0.75)', color: 'var(--color-danger)' }}>
                 <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--color-danger)' }} />
                 {tr.stretchNow || 'Stretch as wide as comfortable…'}
               </div>
+            )}
+            {/* Floating cancel — only in the mobile full-screen layer (the card
+                header's Cancel button is hidden while fullscreen). Safe-area on
+                both top and right so a notch/rounded corner (portrait OR
+                landscape) never hides or clips this tappable control. */}
+            {fullscreen && (
+              <button
+                onClick={cancelCamera}
+                className="absolute z-10 px-4 py-2 rounded-full text-sm font-semibold"
+                style={{ top: 'max(0.75rem, env(safe-area-inset-top))', right: 'max(0.75rem, env(safe-area-inset-right))', background: 'rgba(0,0,0,0.75)', color: '#fff', border: '1px solid rgba(255,255,255,0.35)' }}
+              >
+                {tr.cancel}
+              </button>
             )}
           </div>
 
           {/* Live max-stretch bars while recording */}
           {phase === 'recording' && livePeaks && (
-            <div className="px-4 pt-3 space-y-1.5">
+            <div className="px-4 pt-3 space-y-1.5"
+              style={fullscreen ? { background: 'rgba(0,0,0,0.75)', paddingBottom: '0.5rem' } : undefined}>
               {GAP_LABELS.map(({ key, label, color }) => {
                 const [lo, hi] = RANGES[key];
                 const val = livePeaks[key] ?? 0;
@@ -1160,15 +1309,16 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                     <div className="relative h-2 flex-1 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-550)' }}>
                       <div className="absolute left-0 top-0 h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
                     </div>
-                    <span className="text-[10px] tabular-nums w-12 text-right" style={{ color: 'var(--color-ink-subtle)' }}>{val.toFixed(1)} cm</span>
+                    <span className="text-[10px] tabular-nums w-12 text-right" style={{ color: fullscreen ? '#e5e7eb' : 'var(--color-ink-subtle)' }}>{val.toFixed(1)} cm</span>
                   </div>
                 );
               })}
             </div>
           )}
 
-          <div className="p-4">
-            <p className="text-xs" style={{ color: (phase === 'ready' && handVisible && !frameFit.ok) ? 'var(--color-brand)' : 'var(--color-ink-faint)' }}>
+          <div className="p-4"
+            style={fullscreen ? { background: 'rgba(0,0,0,0.78)', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' } : undefined}>
+            <p className="text-xs" style={{ color: fullscreen ? '#f0ede8' : ((phase === 'ready' && handVisible && !frameFit.ok) ? 'var(--color-brand)' : 'var(--color-ink-faint)') }}>
               {phase === 'recording'
                 ? (tr.keepStretching || 'Keep stretching — capturing your max…')
                 : (phase === 'ready' && handVisible && !frameFit.ok)
@@ -1182,6 +1332,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                         : tr.splayFingers)}
             </p>
           </div>
+          </MaybeFullscreen>
         </div>
       )}
 
