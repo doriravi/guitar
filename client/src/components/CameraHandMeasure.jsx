@@ -64,6 +64,47 @@ function MaybeFullscreen({ active, children }) {
   );
 }
 
+// A small looping "rotate your phone" animation — an SVG phone that tips from
+// portrait to landscape and back, with a hand glyph inside so the intent reads
+// as "turn the device to fit your hand". Pure CSS keyframes, no image asset;
+// the animation is suppressed under prefers-reduced-motion (the phone just
+// rests at a slight landscape tilt so the meaning still comes across).
+function RotatePhoneAnim() {
+  return (
+    <div className="shrink-0" style={{ width: 46, height: 46 }} aria-hidden="true">
+      <style>{`
+        @keyframes ghm-rotate-phone {
+          0%, 18%   { transform: rotate(0deg); }
+          42%, 66%  { transform: rotate(-90deg); }
+          90%, 100% { transform: rotate(0deg); }
+        }
+        .ghm-phone { transform-box: fill-box; transform-origin: center;
+          animation: ghm-rotate-phone 2.8s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .ghm-phone { animation: none; transform: rotate(-90deg); }
+        }
+      `}</style>
+      <svg viewBox="0 0 46 46" width="46" height="46" fill="none">
+        <g className="ghm-phone">
+          {/* phone body (portrait at rest) */}
+          <rect x="16" y="8" width="14" height="30" rx="3"
+            fill="var(--color-surface-800, #1f1d1a)" stroke="var(--color-brand)" strokeWidth="2" />
+          {/* screen */}
+          <rect x="18.5" y="12" width="9" height="20" rx="1" fill="rgba(201,169,110,0.18)" />
+          {/* little hand glyph on the screen */}
+          <text x="23" y="26" fontSize="9" textAnchor="middle">✋</text>
+          {/* home indicator */}
+          <rect x="21" y="34.5" width="4" height="1.4" rx="0.7" fill="var(--color-brand)" />
+        </g>
+        {/* rotation arc hint */}
+        <path d="M8 23 A15 15 0 0 1 12 13" stroke="var(--color-brand)" strokeWidth="1.6"
+          strokeLinecap="round" fill="none" opacity="0.6" />
+        <path d="M12 13 l-2.6 0.4 l1.2 2.3 z" fill="var(--color-brand)" opacity="0.6" />
+      </svg>
+    </div>
+  );
+}
+
 const TIP = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
 const MCP = { thumb: 2, index: 5, middle: 9, ring: 13, pinky: 17 };
 // Fallback palm width (cm, index-knuckle to pinky-knuckle) used only when
@@ -1114,6 +1155,18 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         <div className="p-5 text-center">
           <p className="text-sm mb-1" style={{ color: 'var(--color-ink-subtle)' }}>{tr.cameraInstruction}</p>
           <p className="text-xs mb-4" style={{ color: 'var(--color-ink-ghost)' }}>{tr.cameraDesc}</p>
+
+          {/* Rotate-your-phone tip: shown BEFORE the camera opens so mobile
+              users who can't get a detection know the fix up front. The phone
+              icon animates a portrait↔landscape rotation (pure CSS/SVG, no
+              asset; honors prefers-reduced-motion). */}
+          <div className="flex items-center gap-3 text-left rounded-xl p-3 mb-4"
+            style={{ background: 'rgba(201,169,110,0.08)', border: '1px solid var(--color-brand)' }}>
+            <RotatePhoneAnim />
+            <span className="text-xs leading-snug" style={{ color: 'var(--color-ink-muted)' }}>
+              {tr.rotateTip || 'Struggling to measure your hand on a phone? Rotate it and try again.'}
+            </span>
+          </div>
 
           {/* Step-by-step guide */}
           <div className="text-left rounded-xl p-4 mb-4 space-y-2.5"
