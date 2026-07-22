@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useHandProfile } from '../App';
 import { useT } from '../lib/i18n';
 import {
@@ -14,6 +14,8 @@ import {
 } from '../lib/levelPlan';
 import { recordedChordSummary, chordListProgress, GRADE_COLOR, qualityLabel } from '../lib/chordRecordings';
 import ChordTip from './ChordTip';
+import GuideVideoModal from './GuideVideoModal';
+import { guideVideoFor, hasSeenGuide, clearGuideSeen } from '../lib/guideVideos';
 
 // One roadmap the user climbs Beginner → Master. Every milestone is honestly
 // typed (AUTO / ROUTE / OFF-APP); AUTO rows are read-only ✓/○ derived from the
@@ -51,7 +53,7 @@ function TypeChip({ type }) {
   );
 }
 
-function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
+function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual, gate }) {
   const auto = m.type === 'auto';
   const autoDone = auto && isAutoComplete(m, ctx);
   // AUTO rows are read-only when their signal has fired; if not yet earned, the
@@ -122,13 +124,14 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
 
       {/* Go → for any milestone with a home tab. A milestone with a
           practiceSequence routes to the guided mic walk and keeps a small
-          secondary link to its shapes tab. */}
+          secondary link to its shapes tab. The primary Go runs through the
+          guide gate (forced intro video on first view). */}
       {onNavigate && (m.practiceSequence?.length || m.tab) && (
         <div className="mt-0.5 flex flex-col items-end gap-1 shrink-0">
           {m.practiceSequence?.length ? (
             <>
               <button
-                onClick={() => onNavigate(m.practiceTab || 'micpractice', m.practiceSequence)}
+                onClick={() => gate(m, () => onNavigate(m.practiceTab || 'micpractice', m.practiceSequence))}
                 className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
               >
                 Go → 🎸
@@ -144,19 +147,44 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual }) {
             </>
           ) : (
             <button
-              onClick={() => onNavigate(m.tab)}
+              onClick={() => gate(m, () => onNavigate(m.tab))}
               className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand"
             >
               Go →
             </button>
           )}
+          {/* Replay the intro video anytime, once it exists + has been seen. */}
+          <GuideReplayLink milestone={m} gate={gate} />
         </div>
       )}
     </div>
   );
 }
 
-function TierCard({ tier, ctx, onNavigate, onToggleManual }) {
+// A small "Watch guide again" link — shown only for milestones that actually
+// have a guide video (probed lazily against the manifest) and only after the
+// user has seen it once (before that, the forced Go already shows it).
+function GuideReplayLink({ milestone, gate }) {
+  const [hasVideo, setHasVideo] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!hasSeenGuide(milestone.id)) return undefined;
+    guideVideoFor(milestone.id).then((src) => { if (alive) setHasVideo(!!src); }).catch(() => {});
+    return () => { alive = false; };
+  }, [milestone.id]);
+  if (!hasVideo) return null;
+  return (
+    <button
+      onClick={() => gate(milestone, () => {}, { forceReplay: true })}
+      className="text-[11px] px-2 py-0.5 rounded-lg font-semibold text-ink-faint"
+      style={{ background: 'transparent', border: '1px solid var(--color-surface-600)' }}
+    >
+      ▶ Watch guide again
+    </button>
+  );
+}
+
+function TierCard({ tier, ctx, onNavigate, onToggleManual, gate }) {
   const meta = TIER_META[tier] || {};
   const ms = milestonesForTier(tier);
   const st = tierStatus(tier, ctx);
@@ -195,6 +223,7 @@ function TierCard({ tier, ctx, onNavigate, onToggleManual }) {
             ctx={ctx}
             onNavigate={onNavigate}
             onToggleManual={onToggleManual}
+            gate={gate}
           />
         ))}
       </div>
@@ -258,9 +287,15 @@ function RecordedChords({ tr, onNavigate }) {
 // Per-chord breakdown INSIDE a step whose goal is a specific set of chords
 // (e.g. "Learn C A G E D"). Shows which chords you've achieved (recorded/mastered)
 // and which are left, from your recording grades. Each chip hover-shows its shape.
-function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, shapesTab }) {
+function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, shapesTab, milestone, gate }) {
   const prog = useMemo(() => chordListProgress(chords), [chords]);
   if (!prog.total) return null;
+  // Route the guided-walk button through the guide gate when we have a milestone
+  // and gate; otherwise navigate directly (keeps the component usable standalone).
+  const goGuided = () => {
+    const proceed = () => onNavigate(practiceTab || 'micpractice', practiceSequence);
+    if (gate && milestone) gate(milestone, proceed); else proceed();
+  };
   return (
     <div className="mt-2">
       <div className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 text-ink-faint">
@@ -294,7 +329,7 @@ function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, sha
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {practiceSequence?.length > 0 && (
             <button
-              onClick={() => onNavigate(practiceTab || 'micpractice', practiceSequence)}
+              onClick={goGuided}
               className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
             >
               Play them one by one → 🎸
@@ -320,7 +355,7 @@ function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, sha
 // numbered stepper, so the player sees "step N of TOTAL" and exactly what to do
 // to move from one step to the next (e.g. 1 → 2 in Beginner). The CURRENT step
 // (first unfinished) is expanded with its how-to detail and a Go → button.
-function TierStepper({ ctx, onNavigate, tr }) {
+function TierStepper({ ctx, onNavigate, tr, gate }) {
   const info = useMemo(() => tierSteps(ctx), [ctx]);
   const allDone = info.stepDone >= info.total;
   const pct = info.total ? Math.round((info.stepDone / info.total) * 100) : 0;
@@ -376,11 +411,12 @@ function TierStepper({ ctx, onNavigate, tr }) {
                     {/* Per-chord breakdown when the step targets specific chords */}
                     {s.chords && s.chords.length > 0 && (
                       <ChordChecklist chords={s.chords} onNavigate={onNavigate}
-                        practiceSequence={s.practiceSequence} practiceTab={s.practiceTab} shapesTab={s.tab} />
+                        practiceSequence={s.practiceSequence} practiceTab={s.practiceTab} shapesTab={s.tab}
+                        milestone={s} gate={gate} />
                     )}
                     {s.tab && onNavigate && !(s.chords && s.chords.length) && (
                       <button
-                        onClick={() => onNavigate(s.tab)}
+                        onClick={() => gate(s, () => onNavigate(s.tab))}
                         className="mt-1.5 text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand"
                       >
                         {tr?.doThisStep || 'Do this step'} →
@@ -397,9 +433,46 @@ function TierStepper({ ctx, onNavigate, tr }) {
   );
 }
 
+// Guide gate: before a milestone's "Go" navigates, if that milestone has an
+// intro video (in the Drive manifest) the user hasn't seen, play it FIRST in a
+// forced modal, then run the deferred navigation. Milestones with no video, or
+// already-seen ones, pass straight through. `forceReplay` ignores the seen flag
+// (the "watch again" links). A Drive/manifest failure resolves to "no guide" so
+// practice is never blocked.
+function useGuideGate() {
+  const [pending, setPending] = useState(null);   // { milestoneId, title, videoUrl, proceed }
+
+  const gate = useCallback(async (milestone, proceed, { forceReplay = false } = {}) => {
+    const id = milestone?.id;
+    if (!id) { proceed(); return; }
+    if (!forceReplay && hasSeenGuide(id)) { proceed(); return; }
+    let source = null;
+    try { source = await guideVideoFor(id); } catch { source = null; }
+    if (!source) { proceed(); return; }           // no guide configured → go
+    if (forceReplay) clearGuideSeen(id);          // replays should force-show again
+    setPending({ milestoneId: id, title: milestone.title || 'Guide', source, proceed });
+  }, []);
+
+  const modal = pending ? (
+    <GuideVideoModal
+      milestoneId={pending.milestoneId}
+      title={pending.title}
+      source={pending.source}
+      onClose={(go) => {
+        const p = pending;
+        setPending(null);
+        if (go) { try { p.proceed(); } catch { /* ignore */ } }
+      }}
+    />
+  ) : null;
+
+  return { gate, modal };
+}
+
 export default function LevelPlan({ lang, onNavigate }) {
   const tr = useT(lang);
   const handProfile = useHandProfile();
+  const { gate, modal: guideModal } = useGuideGate();
   // Manual check-offs are read once and bumped via a tick so toggling re-renders.
   const [tick, setTick] = useState(0);
   const manual = useMemo(() => loadManual(), [tick]);
@@ -445,7 +518,7 @@ export default function LevelPlan({ lang, onNavigate }) {
       {/* Your recorded chords + the steps to your next level, side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 items-start">
         <RecordedChords tr={tr} onNavigate={onNavigate} />
-        <TierStepper ctx={ctx} onNavigate={onNavigate} tr={tr} />
+        <TierStepper ctx={ctx} onNavigate={onNavigate} tr={tr} gate={gate} />
       </div>
 
       {/* Legend — the status colors, then how each milestone is tracked */}
@@ -477,9 +550,13 @@ export default function LevelPlan({ lang, onNavigate }) {
             ctx={ctx}
             onNavigate={onNavigate}
             onToggleManual={onToggleManual}
+            gate={gate}
           />
         ))}
       </div>
+
+      {/* Forced first-time guide video (portalled to <body>) */}
+      {guideModal}
     </div>
   );
 }
