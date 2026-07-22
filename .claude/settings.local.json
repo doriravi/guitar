@@ -36,7 +36,16 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(npm view *)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Skill(update-config)",
+      "Bash(chmod +x .claude/hooks/check-db-migration.sh)",
+      "Bash(command -v jq)",
+      "Bash(bash .claude/hooks/check-db-migration.sh)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(exit 1)",
+      "Bash(node -e ' *)",
+      "Bash(cp /tmp/hook.bak .claude/hooks/check-db-migration.sh)",
+      "Bash(rm -f /tmp/claude-hook-check.txt /tmp/hook.bak)"
     ]
   }
 }
