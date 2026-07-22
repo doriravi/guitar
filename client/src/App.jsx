@@ -88,6 +88,19 @@ function SIDE_TABS_ACTIVE(tabs, activeId) {
   return tabs.some(t => t.side && t.id === activeId);
 }
 
+// Dev convenience: never show the $10/year paywall while developing on localhost.
+// The BACKEND still enforces payment (its 402s are real), but the front-end won't
+// raise the "Unlock your account" screen or block the app for a local dev session.
+// Set VITE_DISABLE_PAYWALL=false to test the paywall locally on purpose.
+const PAYWALL_DISABLED = (() => {
+  if (import.meta.env.VITE_DISABLE_PAYWALL === 'false') return false;
+  if (import.meta.env.VITE_DISABLE_PAYWALL === 'true') return true;
+  try {
+    const h = window.location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
+  } catch { return false; }
+})();
+
 // Side-menu entry that lets users install the PWA on demand, in case the
 // browser's own install prompt was dismissed or never surfaced. On Android/
 // desktop it fires the native install dialog; on iOS/iPadOS it reveals the
@@ -259,13 +272,19 @@ export default function App() {
   // Any API call that comes back 402 means "signed in, but the yearly pass isn't
   // paid". Listening centrally means a feature added later is covered without
   // touching it: whichever call trips the server's gate raises this screen.
-  useEffect(() => onPaymentRequired(() => setPaywalled(true)), []);
+  // On localhost the paywall is disabled (see PAYWALL_DISABLED) so a dev session
+  // is never blocked, even though the backend still returns its real 402s.
+  useEffect(() => {
+    if (PAYWALL_DISABLED) return undefined;
+    return onPaymentRequired(() => setPaywalled(true));
+  }, []);
 
   // Check paid status whenever a user session appears, so the paywall shows up
   // front rather than on the first feature they try. Read-only and fail-open on
   // a network error — the SERVER is the real gate, so a flaky status check must
   // never lock out someone who has actually paid.
   useEffect(() => {
+    if (PAYWALL_DISABLED) { setPaywalled(false); return; }
     if (!currentUser) { setPaywalled(false); return; }
     let alive = true;
     subscriptionsApi.getStatus()
@@ -595,7 +614,8 @@ export default function App() {
   // lapsed. Shown BEFORE onboarding — there's no point measuring a hand for an
   // account that can't save it. Guests never reach here (they use no backend),
   // and signing out is always available so nobody is trapped behind the wall.
-  if (currentUser && !guestMode && paywalled) {
+  // Disabled on localhost (PAYWALL_DISABLED) so dev never hits this screen.
+  if (!PAYWALL_DISABLED && currentUser && !guestMode && paywalled) {
     return (
       <LangContext.Provider value={lang}>
         <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-4 bg-surface-base">
