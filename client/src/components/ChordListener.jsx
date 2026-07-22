@@ -15,7 +15,7 @@ import {
   detectPeaksConfigured,
   matchChordConfigured,
 } from '../lib/micDetect';
-import { playProgression, stopAudio } from '../lib/audio';
+import { playProgression, stopAudio, playFanfare } from '../lib/audio';
 import { makeCountdownCue } from '../lib/countdownCue';
 import { composeSong } from '../lib/melodyCompose';
 import { getActiveStyle, loadStyle, saveStyle, learnStyle,
@@ -1546,6 +1546,152 @@ function FreePractice({ cfg, tr }) {
 const GUIDED_SECONDS_PER_CHORD = 8;   // window each chord gets before advancing
 const GUIDED_COUNT_IN          = 5;   // count-in seconds before the first chord
 
+const prefersReducedMotion = () => {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch { return false; }
+};
+
+// The BIG happy moment for a flawless run — every chord in the sequence played
+// cleanly. Birthday-party feel: a confetti burst, floating party emojis, a
+// popping "Excellent!" headline, and the app fanfare. Honours reduced-motion
+// (no confetti / no float — the message + sound still land). Self-contained so it
+// can't drift from the app's other celebration; the palette matches Celebration.jsx.
+function PerfectRunCelebration({ chords, passed, onAgain }) {
+  const canvasRef  = useRef(null);
+  const reduced    = useMemo(prefersReducedMotion, []);
+  const soundedRef = useRef(false);
+
+  // Fanfare once, the instant the perfect run is shown (big = flawless).
+  useEffect(() => {
+    if (soundedRef.current) return;
+    soundedRef.current = true;
+    try { playFanfare({ big: true }); } catch { /* audio may be unavailable */ }
+  }, []);
+
+  // One-shot canvas confetti — party colours, no external lib, no Math.random
+  // (deterministic spread, matching Celebration.jsx's approach).
+  useEffect(() => {
+    if (reduced) return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+    const parent = canvas.parentElement;
+    const W = (canvas.width  = parent.clientWidth);
+    const H = (canvas.height = parent.clientHeight);
+    const COLORS = ['#e0a93a', '#34d399', '#5b8def', '#ef6f6f', '#f5d76e', '#a78bfa', '#f472b6'];
+    const COUNT = 180;
+    const pieces = Array.from({ length: COUNT }, (_, i) => ({
+      x: W / 2 + ((i % 9) - 4) * 7,
+      y: H * 0.28,
+      vx: (i * 2654435761 % 240) / 100 - 1.2,
+      vy: -3.4 - ((i * 40503) % 100) / 34,
+      w: 4 + (i % 5),
+      h: 6 + (i % 6),
+      rot: (i % 360) * (Math.PI / 180),
+      vr: ((i % 7) - 3) * 0.09,
+      c: COLORS[i % COLORS.length],
+    }));
+    let raf, frame = 0;
+    const MAX = 200; // ~3.3s
+    const tick = () => {
+      frame += 1;
+      ctx.clearRect(0, 0, W, H);
+      let alive = 0;
+      for (const p of pieces) {
+        p.vy += 0.12; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        if (p.y < H + 20) alive += 1;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.c;
+        ctx.globalAlpha = Math.max(0, 1 - frame / MAX);
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (alive > 0 && frame < MAX) raf = requestAnimationFrame(tick);
+      else ctx.clearRect(0, 0, W, H);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { if (raf) cancelAnimationFrame(raf); };
+  }, [reduced]);
+
+  const PARTY = ['🎉', '🎂', '🥳', '🎊', '✨', '🎈'];
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="relative rounded-xl overflow-hidden text-center py-8"
+      style={{
+        background: 'linear-gradient(135deg, rgba(224,169,58,0.18), rgba(244,114,182,0.12), rgba(52,211,153,0.14))',
+        border: '1px solid rgba(224,169,58,0.5)',
+        boxShadow: '0 0 30px 4px rgba(224,169,58,0.35)',
+      }}
+    >
+      {!reduced && (
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }} aria-hidden="true" />
+      )}
+      {/* Floating party emojis drifting up behind the message */}
+      {!reduced && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+          {PARTY.map((e, i) => (
+            <span key={i} className="absolute text-2xl"
+              style={{
+                left: `${8 + i * 15}%`,
+                bottom: '-10%',
+                animation: `perfect-float ${2.6 + (i % 3) * 0.5}s ease-in ${(i * 0.18).toFixed(2)}s 1`,
+              }}>
+              {e}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="relative z-10 space-y-3">
+        <p className="text-5xl" style={reduced ? undefined : { animation: 'perfect-pop 700ms ease-out' }} aria-hidden="true">🥳🎂🎉</p>
+        <p className="text-2xl font-extrabold tracking-tight"
+          style={reduced ? { color: 'var(--color-brand)' } : { color: 'var(--color-brand)', animation: 'perfect-pop 800ms ease-out 80ms both' }}>
+          Excellent!
+        </p>
+        <p className="text-lg font-bold" style={{ color: 'var(--color-ink)' }}>Perfect run — all chords clean! 🎸</p>
+        <p className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>
+          You played <strong style={{ color: 'var(--color-success)' }}>{chords.length}</strong> of {chords.length} chords cleanly.
+        </p>
+        <div className="flex flex-wrap justify-center gap-1.5 pt-1">
+          {chords.map((c, i) => (
+            <span key={c.name + i} className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={{ background: 'rgba(74,222,128,0.14)', color: 'var(--color-success)', border: '1px solid rgba(74,222,128,0.35)' }}>
+              ✓ {c.name}
+            </span>
+          ))}
+        </div>
+        <button onClick={onAgain}
+          className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ background: 'var(--color-brand)', color: 'var(--color-surface-base)' }}>
+          Run it again
+        </button>
+      </div>
+
+      <style>{`
+        @keyframes perfect-pop {
+          0%   { transform: scale(0.3); opacity: 0; }
+          60%  { transform: scale(1.2); opacity: 1; }
+          100% { transform: scale(1); }
+        }
+        @keyframes perfect-float {
+          0%   { transform: translateY(0) rotate(0deg); opacity: 0; }
+          15%  { opacity: 1; }
+          100% { transform: translateY(-460%) rotate(24deg); opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [style*="perfect-pop"], [style*="perfect-float"] { animation: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function GuidedSequence({ cfg, tr, chords, onDone }) {
   // phase: 'idle' → 'countin' → 'playing' → 'done'
   const [phase, setPhase]                       = useState('idle');
@@ -1741,11 +1887,15 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
   // ── DONE ──
   if (phase === 'done') {
     const all = passedCount === chords.length;
+    // A flawless run gets the big birthday-style celebration ("Excellent!").
+    if (all) {
+      return <PerfectRunCelebration chords={chords} passed={passed} onAgain={start} />;
+    }
     return (
       <div className="text-center py-8 space-y-3">
-        <p className="text-5xl">{all ? '🎉' : '👏'}</p>
+        <p className="text-5xl">👏</p>
         <p className="text-lg font-bold" style={{ color: 'var(--color-ink)' }}>
-          {all ? 'All chords played cleanly!' : 'Nice run!'}
+          Nice run!
         </p>
         <p className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>
           You played <strong style={{ color: 'var(--color-success)' }}>{passedCount}</strong> of {chords.length} chords cleanly.
