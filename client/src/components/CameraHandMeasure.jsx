@@ -212,6 +212,11 @@ const STABILITY_MAX_SIGMA_CM = 0.05;
 const AUTO_HOLD_MS = 3000;
 const AUTO_MOVE_EPS = 0.012;
 
+// If the live camera goes this long without ever detecting a hand, the device
+// is likely held in an orientation that crops the hand out of the sensor frame —
+// prompt the user to switch between portrait and landscape.
+const DETECT_TIMEOUT_MS = 20000;
+
 /**
  * Moving-window stability gate (upgrade 1.C): the 90th-percentile peak over
  * the *whole* recording buffer can be skewed if the user hesitates or drifts
@@ -590,6 +595,13 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
   const [livePeaks, setLivePeaks] = useState(null); // { gapKey: cm } running p90 for live bars
   const pendingStreamRef = useRef(null); // stream waiting for video element to mount
 
+  // No-detection fallback (upgrade): if the camera has been live for
+  // DETECT_TIMEOUT_MS without ever seeing a hand, the phone is often held in an
+  // orientation where the hand doesn't fit the sensor's aspect — prompt the user
+  // to rotate the device (portrait ↔ landscape) and keep nudging every interval.
+  const [showOrientationHint, setShowOrientationHint] = useState(false);
+  const handEverSeenRef = useRef(false); // set true the first frame a hand is detected
+
   // Card calibration
   const [cardMode, setCardMode]     = useState(false); // user opted to use a card
   const [frozenFrame, setFrozenFrame] = useState(null); // data URL for the tap-the-corners step
@@ -636,6 +648,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
           latestLm.current = lm;
           latestWorld.current = world;
           setHandVisible(true);
+          // A hand is in frame — cancel/clear the "rotate your device" fallback.
+          if (!handEverSeenRef.current) handEverSeenRef.current = true;
+          setShowOrientationHint(false);
 
           // Position gate: is the hand inside the target frame and well-sized?
           const fit = checkHandInFrame(lm);
@@ -895,6 +910,23 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     rafRef.current = requestAnimationFrame(loop);
   }, [phase]);
 
+  // No-detection fallback timer: while the camera is live and looking for a
+  // hand, if none is found within DETECT_TIMEOUT_MS, surface a prompt to rotate
+  // the device between portrait and landscape (a common fix — the hand is
+  // getting cropped out of the sensor's aspect). `handEverSeenRef` is flipped in
+  // onResults the moment a hand appears, which also clears the hint. Re-checks
+  // on an interval so the nudge persists across failed orientation flips until a
+  // hand is finally detected. Only meaningful in the pre-recording 'ready' phase.
+  useEffect(() => {
+    if (phase !== 'ready') { setShowOrientationHint(false); return undefined; }
+    handEverSeenRef.current = false;
+    setShowOrientationHint(false);
+    const id = setInterval(() => {
+      if (!handEverSeenRef.current) setShowOrientationHint(true);
+    }, DETECT_TIMEOUT_MS);
+    return () => clearInterval(id);
+  }, [phase]);
+
   useEffect(() => () => stop(), [stop]);
 
   const retry = () => {
@@ -915,6 +947,9 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
     prevCentroidRef.current = null;
     holdSinceRef.current = null;
     setHoldProgress(0);
+    // Re-arm the no-detection orientation prompt.
+    handEverSeenRef.current = false;
+    setShowOrientationHint(false);
   };
 
   const CARD_CORNER_LABELS = [
@@ -952,7 +987,7 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
         </div>
         {(phase === 'ready' || phase === 'recording' || phase === 'card') && (
           <button
-            onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); autoTriggeredRef.current = false; holdSinceRef.current = null; prevCentroidRef.current = null; setHoldProgress(0); }}
+            onClick={() => { stop(); setPhase('idle'); setHandVisible(false); setLivePeaks(null); setFrozenFrame(null); setCardCorners([]); autoTriggeredRef.current = false; holdSinceRef.current = null; prevCentroidRef.current = null; setHoldProgress(0); handEverSeenRef.current = false; setShowOrientationHint(false); }}
             className="text-xs px-3 py-1 rounded-lg"
             style={{ color: 'var(--color-ink-faint)', border: '1px solid var(--color-surface-550)' }}
           >
@@ -1069,6 +1104,19 @@ export default function CameraHandMeasure({ onMeasured, lang }) {
                 {rulerActive ? (tr.rulerLive || 'cm ruler live') : (tr.rulerHint || 'Show your hand to scale the ruler')}
               </div>
             </div>
+            {/* No-detection fallback: after 20s with no hand, nudge the user to
+                rotate the device between portrait and landscape. */}
+            {phase === 'ready' && showOrientationHint && !handVisible && (
+              <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 flex justify-center pointer-events-none">
+                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl max-w-xs"
+                  style={{ background: 'rgba(0,0,0,0.82)', border: '1px solid var(--color-brand)', boxShadow: '0 4px 24px rgba(0,0,0,0.5)' }}>
+                  <span className="text-lg leading-none mt-0.5 animate-pulse">🔄</span>
+                  <span className="text-xs font-semibold leading-snug" style={{ color: 'var(--color-brand)' }}>
+                    {tr.orientationHint || 'Still no hand detected. Try rotating your device between portrait and landscape.'}
+                  </span>
+                </div>
+              </div>
+            )}
             {/* Auto-measure "hold still" ring — fills as the hand stays steady. */}
             {phase === 'ready' && holdProgress > 0 && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
