@@ -122,13 +122,39 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual, gate }) {
         )}
       </div>
 
-      {/* Go → for any milestone with a home tab. A milestone with a
-          practiceSequence routes to the guided mic walk and keeps a small
-          secondary link to its shapes tab. The primary Go runs through the
-          guide gate (forced intro video on first view). */}
-      {onNavigate && (m.practiceSequence?.length || m.tab) && (
+      {/* Go → for any milestone with a home. Priority: a `drill` milestone's Go
+          deep-links Play-Along's CHORD CHANGES view (ladder highlighted) — never
+          the songs list; a practiceSequence milestone's Go runs the guided mic
+          walk; otherwise Go opens the milestone's tab. The primary Go runs
+          through the guide gate (forced intro video on first view). */}
+      {onNavigate && (m.drill || m.practiceSequence?.length || m.tab || m.chords?.length) && (
         <div className="mt-0.5 flex flex-col items-end gap-1 shrink-0">
-          {m.practiceSequence?.length ? (
+          {m.drill ? (
+            <>
+              <button
+                onClick={() => gate(m, () => onNavigate('listen', null, { source: 'drills', drillId: m.drill, chords: m.chords, title: m.title }))}
+                className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
+              >
+                Go → ⇄
+              </button>
+              {m.practiceSequence?.length > 0 && (
+                <button
+                  onClick={() => onNavigate(m.practiceTab || 'micpractice', m.practiceSequence)}
+                  className="text-[11px] px-2 py-0.5 rounded-lg font-semibold bg-surface-600 text-brand"
+                >
+                  One by one → 🎸
+                </button>
+              )}
+              {m.tab && m.tab !== 'listen' && (
+                <button
+                  onClick={() => onNavigate(m.tab)}
+                  className="text-[11px] px-2 py-0.5 rounded-lg font-semibold bg-surface-600 text-brand"
+                >
+                  See shapes →
+                </button>
+              )}
+            </>
+          ) : m.practiceSequence?.length ? (
             <>
               <button
                 onClick={() => gate(m, () => onNavigate(m.practiceTab || 'micpractice', m.practiceSequence))}
@@ -146,11 +172,26 @@ function MilestoneRow({ m, done, ctx, onNavigate, onToggleManual, gate }) {
               )}
             </>
           ) : (
+            m.tab && (
+              // Milestones whose tab hosts a measured completion signal (they
+              // carry a `check`, e.g. the tab-reading quiz) get the primary
+              // style — Go starts the thing that finishes the step.
+              <button
+                onClick={() => gate(m, () => onNavigate(m.tab))}
+                className={`text-xs px-2.5 py-1 rounded-lg font-semibold ${m.check ? 'bg-brand text-surface-base' : 'bg-surface-600 text-brand'}`}
+              >
+                Go →
+              </button>
+            )
+          )}
+          {/* Stage → songs: jump to Play-Along filtered to songs playable with
+              this milestone's chord set (plus one-new-chord near-misses). */}
+          {m.chords?.length > 0 && (
             <button
-              onClick={() => gate(m, () => onNavigate(m.tab))}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand"
+              onClick={() => onNavigate('listen', null, { chords: m.chords, title: m.title })}
+              className="text-[11px] px-2 py-0.5 rounded-lg font-semibold bg-surface-600 text-brand"
             >
-              Go →
+              🎵 Songs you can play →
             </button>
           )}
           {/* Replay the intro video anytime, once it exists + has been seen. */}
@@ -296,6 +337,13 @@ function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, sha
     const proceed = () => onNavigate(practiceTab || 'micpractice', practiceSequence);
     if (gate && milestone) gate(milestone, proceed); else proceed();
   };
+  // Chord-changes deep link (milestones with a `drill`): auto-starts a drill of
+  // ONLY this step's chords, in random order — the step's primary action.
+  const goDrill = () => {
+    const proceed = () => onNavigate('listen', null,
+      { source: 'drills', drillId: milestone.drill, chords, title: milestone.title });
+    if (gate && milestone) gate(milestone, proceed); else proceed();
+  };
   return (
     <div className="mt-2">
       <div className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 text-ink-faint">
@@ -327,10 +375,18 @@ function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, sha
       </div>
       {onNavigate && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {milestone?.drill && (
+            <button
+              onClick={goDrill}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
+            >
+              ⇄ Play the changes →
+            </button>
+          )}
           {practiceSequence?.length > 0 && (
             <button
               onClick={goGuided}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-brand text-surface-base"
+              className={`text-xs px-2.5 py-1 rounded-lg font-semibold ${milestone?.drill ? 'bg-surface-600 text-brand' : 'bg-brand text-surface-base'}`}
             >
               Play them one by one → 🎸
             </button>
@@ -340,6 +396,13 @@ function ChordChecklist({ chords, onNavigate, practiceSequence, practiceTab, sha
               See shapes →
             </button>
           )}
+          {/* Play-Along filtered to songs playable with this step's chord set. */}
+          <button
+            onClick={() => onNavigate('listen', null, { chords, title: milestone?.title })}
+            className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand"
+          >
+            🎵 Songs you can play →
+          </button>
           {prog.done < prog.total && (
             <button onClick={() => onNavigate('start')} className="text-xs px-2.5 py-1 rounded-lg font-semibold bg-surface-600 text-brand">
               Record chords →

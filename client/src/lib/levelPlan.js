@@ -11,7 +11,9 @@
 //   • 'auto'   — completion computed from existing signals (read-only ✓/○).
 //   • 'route'  — the app has a real feature that trains/shows this; a "Go →"
 //                button navigates there and the user self-checks (no detector
-//                exists to auto-verify). Manual check-off allowed.
+//                exists to auto-verify). Manual check-off allowed. A route
+//                milestone MAY also carry a `check` — then real measured play
+//                completes it automatically too (manual stays available).
 //   • 'offapp' — the app has no feature for this (theory recall, bending/vibrato/
 //                sweep/legato, ear-training, artistic voice). Manual check + tip.
 //                Never dressed up as tracked progress.
@@ -19,6 +21,7 @@
 import { loadHistory, bestForSong, reachedLevelForSong, gradeFor } from './practiceGame';
 import { DEFAULT_PROFILE } from './handProfile';
 import { memoryMastery } from './memoryTrain';
+import { tabQuizMastery, TAB_QUIZ_PASS } from './tabQuiz';
 
 // ── The plan ──────────────────────────────────────────────────────────────────
 // Tiers, in order. Each milestone:
@@ -31,7 +34,7 @@ import { memoryMastery } from './memoryTrain';
 //
 // AUTO `check` descriptors (all read guitar_practice_history_v1 / hand profile):
 //   { kind: 'handMeasured' }
-//   { kind: 'drillPlayed',  drillId, minGrade? }          — any run of drill_<id>
+//   { kind: 'drillPlayed',  drillId, minGrade?, minAccuracy? } — a run of drill_<id>
 //   { kind: 'drillTopTier', drillId }                     — reached top speed step
 //   { kind: 'songCompletedAny' }                          — any song run completed
 //   { kind: 'songAtSpeed',  minSpeed }                    — a completed run ≥ speed
@@ -40,8 +43,16 @@ import { memoryMastery } from './memoryTrain';
 //   { kind: 'memoryMastered', level, minScore }           — scored ≥minScore% (0–100)
 //                                                            in a Music Memory session
 //                                                            that reached ≥level
+//   { kind: 'tabQuizMastered', minScore }                 — scored ≥minScore% in the
+//                                                            tab-reading quiz (tabquiz tab,
+//                                                            store guitar_tab_quiz_v1)
 
 export const TIERS = ['Beginner', 'Intermediate', 'Advanced', 'Master'];
+
+// Drill completion bar for the beginner chord milestones: 80% accuracy in a run
+// of the drill is enough to finish that part of the plan — mastery, not
+// perfection. (Letter grades sit elsewhere: B = 70, A = 85.)
+export const DRILL_PASS_ACCURACY = 80;
 
 // Ear-training (Music Memory) completion bar: a milestone is only "done" when the
 // user scored at least this % in a session that reached the required difficulty.
@@ -59,28 +70,37 @@ export const LEVEL_PLAN = [
   {
     id: 'beg-open-chords', tier: 'Beginner', column: 'technical', type: 'route', tab: 'chords',
     title: 'Learn your first open chords (C A G E D)',
-    detail: 'Go opens a guided mic walk that plays C → A → G → E → D one at a time and listens as you play each. (You can also open the Chords tab to see every shape rated for your hand.)',
-    // Concrete sub-goals: play each of these chords cleanly. The guided walk
-    // below routes to the mic Practice screen and steps through them in order;
-    // the step also tracks which you've recorded cleanly elsewhere.
+    detail: 'Go opens a guided mic walk that plays C → A → G → E → D one at a time, listens as you play each and scores it. (The Chords tab shows every shape rated for your hand.)',
+    // Concrete sub-goals: play each of these chords cleanly. The step tracks
+    // which you've recorded cleanly elsewhere.
     chords: ['C', 'A', 'G', 'E', 'D'],
-    // Go → opens the mic Practice screen in guided timed-cycle mode over this
-    // exact sequence, listening to the player. `practiceTab` is the route target;
-    // `tab` ('chords') stays the secondary "see the shapes" link.
+    // Go → the guided mic walk (ChordListener practice mode over this exact
+    // sequence: shows a chord, listens, scores). The chord-CHANGES drill
+    // belongs to 'beg-gcd-changes' below — but an 80%+ run of that drill
+    // covers this chord set too, so it completes this step automatically as
+    // well (manual tick still available).
+    check: { kind: 'drillPlayed', drillId: 'open-basics', minAccuracy: DRILL_PASS_ACCURACY },
     practiceSequence: ['C', 'A', 'G', 'E', 'D'],
     practiceTab: 'micpractice',
   },
   {
     id: 'beg-gcd-changes', tier: 'Beginner', column: 'technical', type: 'auto', tab: 'listen',
     title: 'Master the G–C–D–E–A changes',
-    detail: 'Play-Along → Drills → “Open-chord basics”. Reach grade B or better.',
-    check: { kind: 'drillPlayed', drillId: 'open-basics', minGrade: 'B' },
+    detail: 'Go starts random changes between G, C, D, E and A. Score 80% accuracy or better.',
+    check: { kind: 'drillPlayed', drillId: 'open-basics', minAccuracy: DRILL_PASS_ACCURACY },
     chords: ['G', 'C', 'D', 'E', 'A'],
+    // Go → auto-starts random changes over exactly these chords (see above),
+    // not the songs list.
+    drill: 'open-basics',
   },
   {
-    id: 'beg-tab-reading', tier: 'Beginner', column: 'theory', type: 'route', tab: 'chords',
+    // Route + check hybrid: Go opens the tab-reading lesson + quiz (hidden
+    // 'tabquiz' route); scoring 80%+ there completes this step on its own.
+    // Manual tick stays for players who already read tab.
+    id: 'beg-tab-reading', tier: 'Beginner', column: 'theory', type: 'route', tab: 'tabquiz',
     title: 'Read basic tab',
-    detail: 'The Chords and Audio → Tab tabs show the 6-string EADGBe tab notation — learn to read it.',
+    detail: 'Go opens a 2-minute lesson, then an 8-round quiz — match tabs like x32010 to the right shape. Score 80%+ to finish. The Chords and Audio → Tab tabs use the same EADGBe notation.',
+    check: { kind: 'tabQuizMastered', minScore: TAB_QUIZ_PASS },
   },
   {
     id: 'beg-note-names', tier: 'Beginner', column: 'theory', type: 'auto', tab: 'memory',
@@ -271,14 +291,16 @@ function sessionsFor(songKey, history) {
 }
 
 /**
- * Is an AUTO milestone complete? `handProfile` is the live profile (from context);
- * everything else is read from the practice-history store. Returns false for any
- * non-auto milestone or unknown check kind (so it can only ever UNDER-report, not
- * fake a completion).
+ * Is a milestone's `check` satisfied? `handProfile` is the live profile (from
+ * context); everything else is read from the practice-history store. Evaluated
+ * for ANY milestone carrying a check — auto milestones always do; a route
+ * milestone may carry one too, so real measured play completes it without a
+ * manual tick. Returns false for a missing check or unknown kind (so it can
+ * only ever UNDER-report, not fake a completion).
  */
 export function isAutoComplete(milestone, { handProfile } = {}) {
   const check = milestone?.check;
-  if (milestone?.type !== 'auto' || !check) return false;
+  if (!check) return false;
 
   const history = loadHistory();
 
@@ -299,8 +321,10 @@ export function isAutoComplete(milestone, { handProfile } = {}) {
     case 'drillPlayed': {
       const runs = sessionsFor(drillKey(check.drillId), history);
       if (!runs.length) return false;
-      if (!check.minGrade) return true;
-      return runs.some((s) => gradeAtLeast(s.grade, check.minGrade));
+      if (!check.minGrade && check.minAccuracy == null) return true;
+      return runs.some((s) =>
+        (check.minGrade == null || gradeAtLeast(s.grade, check.minGrade)) &&
+        (check.minAccuracy == null || (s.accuracy ?? 0) >= check.minAccuracy));
     }
 
     case 'drillTopTier':
@@ -344,6 +368,12 @@ export function isAutoComplete(milestone, { handProfile } = {}) {
       const minScore = check.minScore ?? MEMORY_PASS_SCORE;
       return memoryMastery().bestScoreAtLevel(check.level ?? 1) >= minScore;
     }
+
+    // ── Tab reading (the Read-basic-tab lesson + quiz) ───────────────────────
+    // Read from guitar_tab_quiz_v1 via tabQuizMastery(). Read-only: can only
+    // under-report — a saved quiz run of ≥minScore% is the only signal.
+    case 'tabQuizMastered':
+      return tabQuizMastery().bestScore >= (check.minScore ?? TAB_QUIZ_PASS);
 
     default:
       return false;
@@ -438,15 +468,16 @@ export function advanceForRecording({ kind, name, stars }) {
 // ── Roadmap status (combines AUTO + manual) ───────────────────────────────────
 
 /**
- * Whether a milestone counts as done: AUTO milestones are done when their signal
- * fires OR the user manually ticked them (route/offapp items are manual-only).
+ * Whether a milestone counts as done: any milestone with a `check` is done when
+ * its signal fires (auto milestones always have one; route milestones may), OR
+ * when the user manually ticked it (route/offapp).
  * @param {object} ctx { handProfile, manual }  manual = loadManual() (passed in so
  *   the caller reads localStorage once per render).
  */
 export function isMilestoneDone(milestone, ctx = {}) {
   const manual = ctx.manual || {};
   if (manual[milestone.id]) return true;
-  if (milestone.type === 'auto') return isAutoComplete(milestone, ctx);
+  if (milestone.check) return isAutoComplete(milestone, ctx);
   return false;
 }
 
@@ -466,6 +497,13 @@ export function milestoneProgress(milestone, ctx = {}) {
     const best = memoryMastery().bestScoreAtLevel(check.level ?? 1);
     if (minScore <= 0) return 0;
     return Math.min(0.99, Math.max(0, best / minScore));
+  }
+  // Tab-reading quiz: best-score-so-far vs the pass bar (route+check hybrid,
+  // so no 'auto' gate — any milestone carrying this check reports progress).
+  if (check?.kind === 'tabQuizMastered') {
+    const minScore = check.minScore ?? TAB_QUIZ_PASS;
+    if (minScore <= 0) return 0;
+    return Math.min(0.99, Math.max(0, tabQuizMastery().bestScore / minScore));
   }
   return 0;
 }

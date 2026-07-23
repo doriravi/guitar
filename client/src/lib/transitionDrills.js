@@ -154,6 +154,25 @@ function spreadSample(ranked, n) {
   return out;
 }
 
+/**
+ * RANDOM practice pairs from an exact chord set: every ordered change among
+ * `chords`, shuffled (Fisher-Yates), then capped to `maxPairs`. Used by the
+ * Level Plan chord-changes deep link — a step like "G C D E A" drills ONLY
+ * those basic chords, in a fresh random order every launch, instead of the
+ * fixed easy→hard ladder (which may also mix in extra chords like the minors).
+ * Scores still ride along on each pair for display; only the ORDER is random,
+ * so the tier unlocks serve a random mix too.
+ */
+export function randomPairs(chords, opts = {}) {
+  const { maxPairs = 12, ...rest } = opts;
+  const all = rankPairs(chords, { ...rest, maxPairs: 100000 });
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return all.slice(0, maxPairs);
+}
+
 /** Convenience: a built-in ladder's ranked pairs, personalized to the hand. A
  *  ladder may cap its length via `maxPairs`; when it also sets `spread`, the cap
  *  is filled by sampling evenly across the full easy→hard range (so a big open

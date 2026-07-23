@@ -5,6 +5,7 @@ import FretboardMeasures from './components/FretboardMeasures';
 import ChordTable from './components/ChordTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import MusicMemory from './components/MusicMemory';
+import TabReadingQuiz from './components/TabReadingQuiz';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
 import TabTranscriber from './components/TabTranscriber';
@@ -198,11 +199,16 @@ export default function App() {
   // Optional chord sequence handed to the mic Practice screen when a Level Plan
   // milestone routes there for a guided walk (e.g. "Learn C A G E D").
   const [practiceSequence, setPracticeSequence] = useState(null);
+  // Optional Play-Along intent handed over when a Level Plan milestone routes
+  // there: { chords, title } filters the song list to a stage's chord set
+  // ("Songs you can play →"), { source: 'drills', drillId } lands on the Chord
+  // changes view with that ladder highlighted (chord-changes milestones' Go →).
+  const [playIntent, setPlayIntent] = useState(null);
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
   // Switch tabs by hand (tab bar / ☰ menu). Always clears any pending guided
-  // practice sequence so opening Practice normally shows the free-pick screen,
-  // not a stale Level-Plan walk.
-  const selectTab = (id) => { setPracticeSequence(null); setActiveTab(id); };
+  // practice sequence / Play-Along intent so opening Practice or Play-Along
+  // normally shows the free-pick screen, not a stale Level-Plan walk/filter.
+  const selectTab = (id) => { setPracticeSequence(null); setPlayIntent(null); setActiveTab(id); };
   const [handProfile, setHandProfile] = useState(loadLocalProfile);
   const [limitToReach, setLimitToReach] = useState(loadLimitToReach);
   const [limitToLevel, setLimitToLevel] = useState(loadLimitToLevel);
@@ -889,10 +895,13 @@ export default function App() {
             {activeTab === 'memory'       && <MusicMemory lang={lang} onClose={() => setActiveTab('start')} />}
             {activeTab === 'chordfinder'  && <GuitarStrings lang={lang} mode="chord" />}
             {activeTab === 'tuner'        && <OscilloscopeTuner lang={lang} />}
-            {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" />}
+            {activeTab === 'listen'       && <ChordListener lang={lang} mode="game" playIntent={playIntent} />}
             {activeTab === 'notemap'      && <FretboardNoteMap lang={lang} />}
             {activeTab === 'virtual'      && <VirtualFretboard lang={lang} />}
-            {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={(tab, seq = null) => { setPracticeSequence(seq); setActiveTab(tab); }} />}
+            {activeTab === 'levelplan'    && <LevelPlan lang={lang} onNavigate={(tab, seq = null, intent = null) => { setPracticeSequence(seq); setPlayIntent(intent); setActiveTab(tab); }} />}
+            {/* Hidden route (no nav button): the "Read basic tab" lesson+quiz,
+                reached from its Level Plan milestone's Go. */}
+            {activeTab === 'tabquiz'      && <TabReadingQuiz lang={lang} onClose={() => setActiveTab('levelplan')} />}
             {activeTab === 'fbmeasure'    && <FretboardMeasures lang={lang} />}
             {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}
             {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" sequence={practiceSequence} />}

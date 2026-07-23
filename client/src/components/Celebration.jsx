@@ -53,7 +53,11 @@ function describe(top, tr) {
     case 'milestone':
       return {
         headline: tr.sqCelebMilestone || 'Level Plan advanced! 🗺️',
-        detail: tr.sqCelebMilestoneSub || 'This take cleared a milestone on your roadmap.',
+        // Name the exact step(s) when the caller provides them, so the player
+        // sees precisely what this take unlocked.
+        detail: d.title
+          ? (tr.sqCelebMilestoneNamed || 'You completed “${title}” on your roadmap.').replace('${title}', d.title)
+          : (tr.sqCelebMilestoneSub || 'This take cleared a milestone on your roadmap.'),
       };
     case 'bpmCleared':
       return {

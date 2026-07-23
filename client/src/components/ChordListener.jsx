@@ -2062,7 +2062,7 @@ function GuidedSequence({ cfg, tr, chords, onDone }) {
  * Practice and Tune as their own ☰-menu entries and keeps Play-Along as the
  * main tab.
  */
-export default function ChordListener({ lang, mode = null, sequence = null, onDone = null }) {
+export default function ChordListener({ lang, mode = null, sequence = null, playIntent = null, onDone = null }) {
   const tr  = useT(lang);
   const [tab, setTab] = useState('recorder');
   const [cfg, setCfg] = useState(loadConfig);
@@ -2093,7 +2093,7 @@ export default function ChordListener({ lang, mode = null, sequence = null, onDo
 
       {active === 'recorder' && <RecorderMode cfg={cfg} />}
       {active === 'practice' && <PracticeMode cfg={cfg} tr={tr} sequence={sequence} onDone={onDone} />}
-      {active === 'game'     && <PracticeGame cfg={cfg} />}
+      {active === 'game'     && <PracticeGame cfg={cfg} playIntent={playIntent} />}
       {active === 'tune'     && <TuneMode cfg={cfg} setCfg={setCfg} />}
     </div>
   );

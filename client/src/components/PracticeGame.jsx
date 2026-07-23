@@ -29,14 +29,15 @@ import { loadCatalogSongs } from '../lib/catalogSongs';
 import { loadComposerSongs, composerSongToLyricSong } from '../lib/composerLibrary';
 import { filterSongsByReach, chordWithinReach, songAllChordNames } from '../lib/songReach';
 import { filterSongsByLevel } from '../lib/levelFilter';
-import { currentLevelCeiling, loadManual } from '../lib/levelPlan';
+import { stageFit } from '../lib/stageSongs';
+import { currentLevelCeiling, loadManual, LEVEL_PLAN, isMilestoneDone } from '../lib/levelPlan';
 import { buildSessionReport } from '../lib/practiceReport';
 import { personalDifficulty } from '../lib/handProfile';
 import { calcDifficulty } from '../lib/fretboard';
 import { easiestVoicing } from '../lib/voicingLookup';
 import { songBpm } from '../lib/songs';
 import {
-  BUILTIN_LADDERS, ladderPairs, drillToItem,
+  BUILTIN_LADDERS, ladderPairs, randomPairs, drillToItem,
   loadDrillSets, saveDrillSet, deleteDrillSet, hydrateDrillSet,
   SPEED_STEPS, buildDrillLevel, nextDrillLevel,
 } from '../lib/transitionDrills';
@@ -44,6 +45,7 @@ import { useHandProfile, useReachLimit, useLevelLimit } from '../App';
 import FretboardDiagram from './FretboardDiagram';
 import DifficultyBadge from './DifficultyBadge';
 import ChordTip from './ChordTip';
+import Celebration from './Celebration';
 import Lazy3D from './Lazy3D';
 
 // Static-literal dynamic import so Rollup splits Neck3D (and all of three) into
@@ -207,14 +209,24 @@ function transitionColor(score) {
 // SHAPE on hover (ChordTip, per the CLAUDE.md hover rule), and a Play button that
 // launches it through the same mic game the songs use.
 
-function DrillRow({ item, onPlay, onDelete }) {
+function DrillRow({ item, onPlay, onDelete, highlight = false }) {
   const pairs = item.drill?.pairs || [];
   const best = bestForSong(item.key);
   const attempts = sessionsForSong(item.key).length;
   const hardest = pairs.length ? pairs[pairs.length - 1] : null;
 
+  // A Level Plan Go → deep-link highlights its target ladder and brings it
+  // into view, so "play the chord changes" lands the user on the exact drill.
+  const rowRef = useRef(null);
+  useEffect(() => {
+    if (highlight) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlight]);
+
   return (
-    <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
+    <div ref={rowRef} className="rounded-xl px-3 py-2.5"
+      style={highlight
+        ? { background: 'rgba(201,169,110,0.10)', border: '1px solid rgba(201,169,110,0.5)', boxShadow: '0 0 0 2px rgba(201,169,110,0.15)' }
+        : { background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-700)' }}>
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
@@ -263,8 +275,9 @@ function DrillRow({ item, onPlay, onDelete }) {
   );
 }
 
-function DrillPicker({ drillItems, savedMsg, onPlay, onDeleteSet, histTick }) {
+function DrillPicker({ drillItems, savedMsg, onPlay, onDeleteSet, histTick, highlightId = null }) {
   const { built, saved } = drillItems;
+  const highlightKey = highlightId ? `drill_${highlightId}` : null;
   return (
     <div className="space-y-3">
       <p className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
@@ -292,14 +305,14 @@ function DrillPicker({ drillItems, savedMsg, onPlay, onDeleteSet, histTick }) {
       <div className="space-y-1.5">
         <p className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-ink-ghost)' }}>Built-in ladders</p>
         {built.map(item => (
-          <DrillRow key={`${item.key}|${histTick}`} item={item} onPlay={onPlay} />
+          <DrillRow key={`${item.key}|${histTick}`} item={item} onPlay={onPlay} highlight={item.key === highlightKey} />
         ))}
       </div>
     </div>
   );
 }
 
-export default function PracticeGame({ cfg }) {
+export default function PracticeGame({ cfg, playIntent = null }) {
   const profile = useHandProfile();
   const limitToReach = useReachLimit();
   const limitToLevel = useLevelLimit();
@@ -311,13 +324,22 @@ export default function PracticeGame({ cfg }) {
   const [permDenied, setPermDenied] = useState(false);
 
   // ── Song select state ──
-  const [source, setSource] = useState('songs');  // 'songs' | 'drills' — what to practice
+  // A Level Plan chord-changes milestone's Go → lands directly on the Chord
+  // changes (drills) view — not the songs list.
+  const [source, setSource] = useState(playIntent?.source === 'drills' ? 'drills' : 'songs');  // 'songs' | 'drills' — what to practice
   const [drillSets, setDrillSets] = useState([]);  // user-saved weak-transition sets
   const [savedMsg, setSavedMsg] = useState(null);  // transient "saved to practice" toast
   const [customSongs, setCustomSongs] = useState([]);
   const [composerSongs, setComposerSongs] = useState([]);
   const [catalogSongs, setCatalogSongs] = useState([]);
   const [search, setSearch] = useState('');
+  // Stage chord filter (the Level Plan's "Songs you can play →" button): keep
+  // only songs fully playable with the stage's chords, plus near-misses that
+  // need exactly ONE extra chord (labelled with it). ✕ shows the full list.
+  // A drills deep link also carries chords (for the random drill build) — that
+  // one must NOT switch the songs list into stage-filter mode.
+  const [stageFilter, setStageFilter] = useState(
+    playIntent?.chords?.length && playIntent.source !== 'drills' ? playIntent : null);
   const [speed, setSpeed] = useState(DIFFICULTIES[0].speed);   // default: level 1 = 10%
   const [drumsOn, setDrumsOn] = useState(false);
   const [metronomeOn, setMetronomeOn] = useState(true);
@@ -470,11 +492,21 @@ export default function PracticeGame({ cfg }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customSongs, composerSongs, catalogSongs, profile, limitToReach, limitToLevel, levelCeil, histTick]);
 
+  // Stage filter first (chord-set fit, playable-now before +1-chord near-misses,
+  // then easiest first), then the text search on what remains.
+  const stagedItems = useMemo(() => {
+    if (!stageFilter) return songItems;
+    return songItems
+      .map(x => ({ ...x, stageMissing: stageFit(x.uniq, stageFilter.chords).missing }))
+      .filter(x => x.stageMissing.length <= 1)
+      .sort((a, b) => (a.stageMissing.length - b.stageMissing.length) || (a.hardest - b.hardest));
+  }, [songItems, stageFilter]);
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return songItems;
-    return songItems.filter(x => `${x.song.title} ${x.song.artist}`.toLowerCase().includes(q));
-  }, [songItems, search]);
+    if (!q) return stagedItems;
+    return stagedItems.filter(x => `${x.song.title} ${x.song.artist}`.toLowerCase().includes(q));
+  }, [stagedItems, search]);
 
   // ── Cleanup on unmount ──
   useEffect(() => () => {
@@ -695,6 +727,34 @@ export default function PracticeGame({ cfg }) {
     rafRef.current = requestAnimationFrame(loop);
   };
 
+  // Deep-linked drill (Level Plan "Go → ⇄"): start the practice AUTOMATICALLY —
+  // the user already pressed Go, so don't make them find ▶ Practice again.
+  // When the intent carries the step's own chord set (e.g. G C D E A), the run
+  // drills ONLY those basic chords, in a fresh RANDOM pair order each launch —
+  // built under the same drill id so history and the 80% plan check still
+  // apply. Without chords it falls back to the built-in ladder. Runs once per
+  // mount (the ref), only from the select screen. If the mic prompt is
+  // declined, start() bails to the select screen with the drill highlighted.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (phase !== 'select' || playIntent?.source !== 'drills' || !playIntent.drillId) return;
+    let item = null;
+    if (playIntent.chords?.length >= 2) {
+      const pairs = randomPairs(playIntent.chords, { profile, limitToReach });
+      if (pairs.length) {
+        item = drillToItem(
+          { id: playIntent.drillId, name: playIntent.title || `${playIntent.chords.join(' · ')} changes`, pairs },
+          { profile, limitToReach, bpm: 70, reps: 4 });
+      }
+    }
+    if (!item) item = drillItems.built.find(d => d.key === `drill_${playIntent.drillId}`) || null;
+    if (!item) return;
+    autoStartedRef.current = true;
+    start(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, playIntent, drillItems]);
+
   const pause = (reason = null) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
@@ -787,6 +847,12 @@ export default function PracticeGame({ cfg }) {
     const worst = worstChords(tl.windows, g.results);
     const prevBest = bestForSong(key);   // captured BEFORE saving this run
 
+    // Level Plan: capture which milestones are still OPEN before this run is
+    // saved, so a pass (e.g. 80%+ on "Open-chord basics") can celebrate exactly
+    // what it unlocked (the app's advancement-celebration rule).
+    const planCtx = { handProfile: profile, manual: loadManual() };
+    const planOpenBefore = LEVEL_PLAN.filter(m => !isMilestoneDone(m, planCtx));
+
     let record = null;
     if (g.resolved >= 3) {               // don't record trivial abandons
       record = {
@@ -809,8 +875,12 @@ export default function PracticeGame({ cfg }) {
     // finger attribution, wrong-note analysis, hardest transitions, suggestions.
     const report = buildSessionReport(tl.windows, g.results, profile);
 
+    // Any previously-open milestone whose check now fires was completed by THIS
+    // run (isMilestoneDone re-reads the just-saved history) — celebrate it.
+    const planAdvanced = record ? planOpenBefore.filter(m => isMilestoneDone(m, planCtx)) : [];
+
     setSummary({
-      record, worst, prevBest, report,
+      record, worst, prevBest, report, planAdvanced,
       history: key ? sessionsForSong(key).slice(0, 10) : [],
       accuracy: acc, grade: gradeFor(acc), completed,
     });
@@ -1191,6 +1261,34 @@ export default function PracticeGame({ cfg }) {
           </div>
 
           {source === 'songs' && (<>
+          {/* Stage chord filter banner — arrives from the Level Plan's
+              "Songs you can play →" button. Chord chips hover-show their shape. */}
+          {stageFilter && (
+            <div className="flex items-center gap-2 flex-wrap rounded-xl px-3 py-2.5"
+              style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.3)' }}>
+              <span className="text-xs font-bold" style={{ color: 'var(--color-success)' }}>
+                🎯 Songs you can play with
+              </span>
+              {stageFilter.chords.map(c => (
+                <ChordTip key={c} name={c}>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-md cursor-help"
+                    style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink)', border: '1px solid var(--color-surface-550)' }}>
+                    {c}
+                  </span>
+                </ChordTip>
+              ))}
+              {stageFilter.title && (
+                <span className="text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>
+                  — “{stageFilter.title}”
+                </span>
+              )}
+              <button onClick={() => setStageFilter(null)}
+                className="ml-auto text-xs font-semibold px-2.5 py-1 rounded-lg"
+                style={{ background: 'var(--color-surface-800)', color: 'var(--color-ink-subtle)', border: '1px solid var(--color-surface-550)' }}>
+                ✕ Show all songs
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search songs…"
               className="flex-1 text-sm rounded-lg px-3 py-2 outline-none"
@@ -1211,6 +1309,20 @@ export default function PracticeGame({ cfg }) {
                     <span>♩{item.bpm}</span>
                     <span>{item.occ} chords</span>
                     <DifficultyBadge score={item.hardest || 1} />
+                    {stageFilter && (item.stageMissing?.length > 0 ? (
+                      <ChordTip name={item.stageMissing[0]}>
+                        <span className="px-1.5 py-0.5 rounded font-semibold cursor-help"
+                          title={`Playable once you also learn ${item.stageMissing[0]}`}
+                          style={{ background: 'rgba(234,179,8,0.12)', color: '#eab308' }}>
+                          +1 new chord: {item.stageMissing[0]}
+                        </span>
+                      </ChordTip>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded font-semibold"
+                        style={{ background: 'rgba(74,222,128,0.12)', color: 'var(--color-success)' }}>
+                        ✓ only your chords
+                      </span>
+                    ))}
                     {item.beyond > 0 && (
                       <span className="px-1.5 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.1)', color: 'var(--color-warning)' }}>
                         {item.beyond} beyond reach
@@ -1251,7 +1363,9 @@ export default function PracticeGame({ cfg }) {
                   ? (limitToReach
                     ? 'No songs fully within your reach yet — import easier songs, or turn off "limit to my reach" in Account settings.'
                     : 'No songs yet — import one in the Import tab, and it appears here.')
-                  : `No songs match “${search}”.`}
+                  : (stageFilter && !search.trim())
+                    ? `No songs playable with just ${stageFilter.chords.join(' · ')} yet — “Show all songs” lists the full catalog.`
+                    : `No songs match “${search}”.`}
               </div>
             )}
           </div>
@@ -1264,6 +1378,7 @@ export default function PracticeGame({ cfg }) {
               onPlay={start}
               onDeleteSet={(id) => { setDrillSets(deleteDrillSet(id)); }}
               histTick={histTick}
+              highlightId={playIntent?.drillId || null}
             />
           )}
         </>
@@ -1664,6 +1779,20 @@ export default function PracticeGame({ cfg }) {
       {/* ══ RESULTS ══ */}
       {phase === 'done' && summary && (
         <>
+          {/* Level Plan advance — big congrats (message + fanfare + confetti)
+              naming exactly which roadmap step this run completed. */}
+          {summary.planAdvanced?.length > 0 && (
+            <Celebration
+              advancement={{
+                advanced: true,
+                big: true,
+                top: {
+                  type: 'milestone',
+                  detail: { title: summary.planAdvanced.map(m => m.title).join(' · ') },
+                },
+              }}
+            />
+          )}
           <div className="rounded-xl p-6 text-center" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
             <div className="text-6xl font-black mb-1" style={{
               color: GRADE_COLOR[summary.grade],
