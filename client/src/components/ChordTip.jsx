@@ -6,14 +6,15 @@
 
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { lookupVoicings } from '../lib/voicingLookup';
+import { easiestVoicing } from '../lib/voicingLookup';
 import FretboardDiagram from './FretboardDiagram';
 
 export default function ChordTip({ name, children, className, style }) {
   const [tip, setTip] = useState(null); // { voicing, x, y }
 
   const show = (e) => {
-    const v = lookupVoicings(name).slice().sort((a, b) => a.score - b.score)[0];
+    // Show the easiest shape to actually play (open shapes preferred over barres).
+    const v = easiestVoicing(name);
     if (!v) return;   // nothing on file even after normalization → no tooltip
     const r = e.currentTarget.getBoundingClientRect();
     const tipW = 150;

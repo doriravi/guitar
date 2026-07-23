@@ -129,14 +129,31 @@ export function lookupVoicings(chordName) {
   return [];
 }
 
+// A barre voicing (tagged "(barre)" in its type) scores LOW on the reach-diagonal
+// metric because the fingers cluster tightly — e.g. barre C (x35553) scores 4.9
+// vs open C (x32010) at 5.4. But holding a full barre is HARDER for a real hand
+// (especially the short-fingered target user), not easier. So when picking the
+// shape to SHOW, add a penalty to barres: an open/partial shape wins unless a
+// barre is meaningfully easier on the raw score, or is the only shape on file.
+const BARRE_DISPLAY_PENALTY = 1.5;
+function isBarreVoicing(v) {
+  return /barre/i.test(v?.type || '');
+}
+function displayScore(v) {
+  return v.score + (isBarreVoicing(v) ? BARRE_DISPLAY_PENALTY : 0);
+}
+
 /**
- * The easiest (lowest population-average difficulty) voicing for a chord, or
- * null when the chord isn't in the library.
+ * The easiest voicing to SHOW for a chord, or null when the chord isn't in the
+ * library. "Easiest" here is playability for a real hand, not just the raw
+ * reach-diagonal score: barre shapes are penalized (see displayScore) so an open
+ * shape is preferred whenever one exists and isn't drastically harder — the open
+ * C, not the barre C, is what a beginner should be shown.
  *
  * When a hand `profile` is passed AND the user has asked to be limited to their
- * reach, this prefers the easiest voicing that is WITHIN their comfortable reach.
- * If no catalogued shape qualifies (e.g. an inherently hard chord) it still
- * returns the overall easiest — the CLAUDE.md rule that every chord stays
+ * reach, this prefers the easiest such voicing that is WITHIN their comfortable
+ * reach. If no catalogued shape qualifies (e.g. an inherently hard chord) it
+ * still returns the overall easiest — the CLAUDE.md rule that every chord stays
  * playable everywhere wins over the preference.
  *
  * @param {string} chordName
@@ -145,7 +162,10 @@ export function lookupVoicings(chordName) {
 export function easiestVoicing(chordName, opts = {}) {
   const list = lookupVoicings(chordName);
   if (!list.length) return null;
-  const sorted = list.slice().sort((a, b) => a.score - b.score);
+  // Sort by the display score (raw difficulty + barre penalty) so open shapes
+  // beat barres of similar raw difficulty, but reach-gating still uses the true
+  // (unpenalized) score.
+  const sorted = list.slice().sort((a, b) => displayScore(a) - displayScore(b));
   const { profile, limitToReach } = opts;
   if (limitToReach && profile) {
     const inReach = sorted.find(v => isWithinReach(v.score, profile));

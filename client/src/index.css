@@ -245,6 +245,19 @@ thead th {
   animation: pulse-glow 0.8s ease-in-out infinite;
 }
 
+/* ── Live chord map "Now" glow ────────────────────────────────────────────────
+   A gentle breathing halo on the chord being fretted right now in the live chord
+   map, so the eye locks onto the current shape over the dimmed "up next" ones.
+   box-shadow only (compositor-friendly); frozen to a steady glow under
+   reduced-motion below. */
+@keyframes live-chord-now {
+  0%, 100% { box-shadow: 0 0 12px color-mix(in srgb, var(--color-brand) 18%, transparent); }
+  50%      { box-shadow: 0 0 22px color-mix(in srgb, var(--color-brand) 34%, transparent); }
+}
+.live-chord-now {
+  animation: live-chord-now 1.6s ease-in-out infinite;
+}
+
 /* ── Play-with-me accept pulse ────────────────────────────────────────────────
    A one-shot gold bloom on the confidence-meter track the instant playing
    crosses the accept threshold (0.6) — the "you've got it" acknowledgement, just
@@ -461,6 +474,12 @@ thead th {
   .pulse-glow {
     animation: none;
     box-shadow: 0 0 12px 1px var(--brand-glow-soft);
+  }
+  /* Live chord map "Now" halo breathes infinitely — freeze to a steady lit glow
+     so the current shape still stands out without the motion. */
+  .live-chord-now {
+    animation: none;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--color-brand) 26%, transparent);
   }
   /* GO flash: drop the scale (vestibular), keep a brief opacity fade so it still
      appears/clears and onAnimationEnd fires to unmount it. */

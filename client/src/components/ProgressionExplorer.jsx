@@ -17,7 +17,7 @@ import { SONGS_BY_PROGRESSION, songBpm } from '../lib/songs';
 import { loadCustomSongs, addCustomSong, updateCustomSong, songToText } from '../lib/customSongs';
 import { loadCatalogSongs } from '../lib/catalogSongs';
 import { parseChordSheet } from '../lib/chordSheetParser';
-import { lookupVoicings } from '../lib/voicingLookup';
+import { lookupVoicings, easiestVoicing } from '../lib/voicingLookup';
 import { resolveChordCells } from '../lib/songTimeline';
 import { filterSongsByReach } from '../lib/songReach';
 import { filterSongsByLevel } from '../lib/levelFilter';
@@ -774,6 +774,99 @@ function PlayWithMe({ sequence, onActive, onFinished, songTitle, tr }) {
   );
 }
 
+// ─── Live chord map (now-playing + next 2) ─────────────────────────────────────
+// While a song plays (synth OR play-with-me), show the chord being fretted RIGHT
+// NOW as a full fretboard diagram, plus the next two chords as smaller "up next"
+// shapes — a live, always-visible prompter so the player sees the shape to make
+// now and can pre-shape the two coming up. `sequence` is the same ordered
+// [{ voicing, lineIdx, segIdx }] the players walk; `activeIndex` is the position
+// currently sounding (−1 when nothing is playing). Consecutive identical chords
+// are collapsed for the "up next" list so a chord repeated over several lyric
+// segments doesn't fill all three slots with the same shape.
+
+function LiveChordMap({ sequence, activeIndex, profile, limitToReach, simplifyMap }) {
+  // Resolve a play-sequence entry to the SHAPE we display: always the EASIEST
+  // catalogued voicing for that chord (personalized to the hand when a reach
+  // limit is on), per the chord-map rule. When "Simplify all" is on, the chord
+  // is first swapped to its eased name (simplifyMap) so the map shows the SAME
+  // simplified shape the lyrics now show — otherwise the map would keep showing
+  // the original, harder chord. Falls back to the sequence's own voicing if the
+  // name isn't in the library.
+  const shapeFor = useCallback((entry) => {
+    const own = entry?.voicing;
+    if (!own) return null;
+    // simplifyMap is keyed by the ORIGINAL chord name — use entry.chordName if we
+    // have it (matches the lyrics' own simplify lookup), else the voicing's name.
+    const origName = entry.chordName || own.name;
+    const name = simplifyMap?.get(origName) || origName;
+    const easy = easiestVoicing(name, { profile, limitToReach });
+    return easy || own;
+  }, [profile, limitToReach, simplifyMap]);
+
+  const upcoming = useMemo(() => {
+    if (activeIndex < 0 || activeIndex >= sequence.length) return null;
+    const current = shapeFor(sequence[activeIndex]);
+    if (!current) return null;
+    // Walk forward, skipping repeats of the last shown chord, to collect the next
+    // two DISTINCT upcoming chords.
+    const next = [];
+    let lastName = current.name;
+    for (let i = activeIndex + 1; i < sequence.length && next.length < 2; i++) {
+      const v = shapeFor(sequence[i]);
+      if (!v || v.name === lastName) continue;
+      next.push(v);
+      lastName = v.name;
+    }
+    return { current, next };
+  }, [sequence, activeIndex, shapeFor]);
+
+  if (!upcoming) return null;
+
+  return (
+    <div className="relative z-[1] mb-3 flex items-stretch gap-3 px-3 py-2.5 rounded-xl overflow-x-auto"
+      style={{ background: 'var(--color-surface-800)', border: '1px solid var(--color-surface-600)' }}>
+      {/* NOW — the chord being fretted this instant, full-size with finger dots. */}
+      <div className="flex flex-col items-center shrink-0">
+        <span className="text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-brand)' }}>
+          Now
+        </span>
+        <div className="rounded-lg p-1 live-chord-now"
+          style={{ background: 'color-mix(in srgb, var(--color-brand) 10%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--color-brand) 40%, transparent)',
+            boxShadow: '0 0 16px color-mix(in srgb, var(--color-brand) 22%, transparent)' }}>
+          <FretboardDiagram chord={upcoming.current} showFingers />
+        </div>
+        <span className="text-xs font-bold mt-1" style={{ color: 'var(--color-brand)' }}>
+          {upcoming.current.name}
+        </span>
+      </div>
+
+      {/* NEXT — the two upcoming distinct chords, smaller + dimmed so the eye reads
+          the "now" shape first, then pre-shapes what's coming. */}
+      {upcoming.next.length > 0 && (
+        <div className="flex items-center shrink-0" style={{ color: 'var(--color-ink-ghost)' }}>
+          <span className="text-lg leading-none px-1">→</span>
+        </div>
+      )}
+      {upcoming.next.map((v, i) => (
+        <div key={i} className="flex flex-col items-center shrink-0" style={{ opacity: i === 0 ? 0.85 : 0.6 }}>
+          <span className="text-[9px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--color-ink-faint)' }}>
+            {i === 0 ? 'Next' : 'Then'}
+          </span>
+          <div className="rounded-lg p-1"
+            style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-600)',
+              transform: 'scale(0.82)', transformOrigin: 'top center' }}>
+            <FretboardDiagram chord={v} />
+          </div>
+          <span className="text-[11px] font-semibold mt-0.5" style={{ color: 'var(--color-ink-subtle)' }}>
+            {v.name}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
 function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings, tr }) {
@@ -781,6 +874,7 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
   // no fetch. Otherwise fetch the real lyrics from a public lyrics database.
   const isCustom = Array.isArray(customLyricLines) && customLyricLines.length > 0;
   const soloProfile = useHandProfile();
+  const limitToReach = useReachLimit();
   const [status, setStatus] = useState(isCustom ? 'done' : 'loading');
   const [lyrics, setLyrics]  = useState('');
   const [active, setActive] = useState(null); // { lineIdx, segIdx } currently sounding
@@ -926,16 +1020,32 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
       annotatedLines.forEach((line, lineIdx) => {
         if (line.blank) return;
         line.segments.forEach((seg, segIdx) => {
-          const voicing = playVoicing(progChordsWithVoicings[seg.chordIndex]);
-          if (voicing) seq.push({ voicing, lineIdx, segIdx });
+          const chord = progChordsWithVoicings[seg.chordIndex];
+          const voicing = playVoicing(chord);
+          // chordName = the ORIGINAL (un-capo'd) chord name, so the live chord map
+          // can look it up in simplifyMap (keyed by original names) exactly as the
+          // lyrics do.
+          if (voicing) seq.push({ voicing, chordName: chord?.chordName, lineIdx, segIdx });
         });
       });
       if (seq.length) return seq;
     }
     return progChordsWithVoicings
-      .map((c, i) => ({ voicing: playVoicing(c), lineIdx: -1, segIdx: i }))
+      .map((c, i) => ({ voicing: playVoicing(c), chordName: c?.chordName, lineIdx: -1, segIdx: i }))
       .filter(s => s.voicing);
   }, [annotatedLines, progChordsWithVoicings, playVoicing]);
+
+  // Index of the currently-sounding chord within playSequence, so the live chord
+  // map can look ahead to the next two. `active` is the sequence entry itself
+  // ({ voicing, lineIdx, segIdx }); match it back to its position. For the bare-
+  // progression fallback (lineIdx === -1) match on segIdx alone.
+  const activeIndex = useMemo(() => {
+    if (!active) return -1;
+    return playSequence.findIndex(s =>
+      active.lineIdx === -1
+        ? s.lineIdx === -1 && s.segIdx === active.segIdx
+        : s.lineIdx === active.lineIdx && s.segIdx === active.segIdx);
+  }, [active, playSequence]);
 
   return (
     <div className="px-3 sm:px-4 py-3 font-mono text-xs"
@@ -969,6 +1079,12 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
           </button>
         )}
       </div>
+
+      {/* Live chord map — the shape being fretted NOW plus the next two, visible
+          only while a player is walking the song (active != null). Sits directly
+          above the lyrics so the player reads shape + words together. */}
+      <LiveChordMap sequence={playSequence} activeIndex={activeIndex}
+        profile={soloProfile} limitToReach={limitToReach} simplifyMap={simplifyMap} />
 
       {status === 'loading' && (
         <div className="py-1 text-xs italic" style={{ color: 'var(--color-ink-ghost)' }}>Loading lyrics…</div>
@@ -1280,7 +1396,14 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           borderBottom: '1px solid rgba(201,169,110,0.18)',
           paddingTop: 14, paddingBottom: 12,
         } : undefined}>
-        <div className="min-w-0 flex-1">
+        {/* The title itself is the same toggle as the Lyrics button — tap the
+            song name to open/close its lyrics. */}
+        <button
+          type="button"
+          onClick={() => setLyricsOpen(v => !v)}
+          className="min-w-0 flex-1 text-left cursor-pointer"
+          title={lyricsOpen ? tr.hide : tr.lyrics}
+        >
           {lyricsOpen ? (
             // Grand header for the opened song — large display title with a gold
             // gradient wash, the artist as an eyebrow beneath.
@@ -1309,7 +1432,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
               <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}> — {song.artist}</span>
             </>
           )}
-        </div>
+        </button>
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-xs px-1.5 py-0.5 rounded font-medium hidden sm:inline"
             style={{ background: 'rgba(56,189,248,0.1)', color: 'var(--color-info)' }}>
