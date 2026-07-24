@@ -47,7 +47,7 @@ import { suggestUpperProgression } from './upperVoicings';
 import { suggestTriadProgression } from './triadVoicings';
 import { easierSubstitute } from './substitutions';
 import { findEasierVoicings } from './chords';
-import { suggestCapo } from './lyricChords';
+import { bestCapo } from './capo';
 import { lookupVoicings, easiestVoicing } from './voicingLookup';
 
 // ─── Scoring helpers ──────────────────────────────────────────────────────────
@@ -309,14 +309,17 @@ export function transformEasierVoicings(section, profile, opts = {}) {
 
 /**
  * Restate hard-key chords as easy open shapes behind ONE capo for the whole
- * section. Reuses suggestCapo verbatim.
+ * section. Delegates the FRET choice to the reach-driven optimizer bestCapo,
+ * passing the active hand profile so the capo is chosen against the user's own
+ * reach (small hands weight wide shapes harder). Return shape is unchanged —
+ * { fret, chords, map, beforeMax, afterMax, warnings } — so SongEditor is unaffected.
  *
  * @returns {CapoResult} { fret, chords, map, beforeMax, afterMax, warnings }
  */
 export function transformCapoSuggestion(section, profile) {
   const scoreFn = makeScoreFn(profile);
   const names = section.chords.map(c => c.chordName);
-  const capo = suggestCapo(names);
+  const capo = bestCapo(names, profile);
 
   if (!capo) {
     return {
@@ -334,7 +337,9 @@ export function transformCapoSuggestion(section, profile) {
   const warnings = [];
   const chords = section.chords.map((cell) => {
     const shapeName = capo.map[cell.chordName] || cell.chordName;
-    const shape = easiestVoicing(shapeName);
+    // Prefer the reach-limited shape for the user's hand, matching how bestCapo
+    // scored the fret; fall back to the overall easiest if nothing is in reach.
+    const shape = easiestVoicing(shapeName, { profile, limitToReach: true });
     if (!shape) {
       const r = blankResult(cell, scoreFn, `With capo ${capo.fret}, no open shape on file for ${shapeName}.`);
       r.toName = shapeName;

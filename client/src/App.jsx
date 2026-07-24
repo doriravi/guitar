@@ -6,6 +6,9 @@ import ChordTable from './components/ChordTable';
 import ProgressionExplorer from './components/ProgressionExplorer';
 import MusicMemory from './components/MusicMemory';
 import TabReadingQuiz from './components/TabReadingQuiz';
+import StrumTrainer from './components/StrumTrainer';
+import LevelPicker from './components/LevelPicker';
+import FirstChordWelcome from './components/FirstChordWelcome';
 import HandProfileSetup from './components/HandProfileSetup';
 import ChordListener from './components/ChordListener';
 import TabTranscriber from './components/TabTranscriber';
@@ -24,6 +27,7 @@ import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import Lazy3D from './components/Lazy3D';
 import { DEFAULT_PROFILE } from './lib/handProfile';
+import { getDeclaredTier, setDeclaredTier, hasSeenFirstChord, markFirstChordSeen } from './lib/levelPlan';
 
 // Static-literal dynamic import → shares the lazily-fetched three-vendor chunk.
 const loadAmbient = () => import('./components/three/AmbientBackground');
@@ -218,10 +222,17 @@ export default function App() {
   const [guestMode, setGuestMode] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  // One-time "Where are you starting from?" step, shown to a brand-new account
+  // BEFORE the hand-measurement gate. Only focuses the Level Plan on a tier.
+  const [needsLevelPick, setNeedsLevelPick] = useState(false);
+  // One-time "here's your first chord" welcome, shown right AFTER the hand scan
+  // completes — the plain-words hand-off from onboarding into actually playing.
+  const [needsFirstChord, setNeedsFirstChord] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   // Whether a never-logged-in visitor has moved past the marketing landing page
-  // to the sign-in form. Skipped automatically when arriving via an email link,
-  // or via ?login=1 (used after account deletion to land straight on sign-in).
+  // to the sign-in form. Skipped (jumps straight to the form) when arriving via an
+  // email link, or via ?login=1 — a deep link for anyone who wants to go directly
+  // to sign-in. Account deletion no longer uses it (it returns to the landing page).
   const [showSignIn, setShowSignIn] = useState(() => getTokenFromUrl('login') === '1');
   const [showForgot, setShowForgot] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -330,7 +341,14 @@ export default function App() {
       })
       .then(hasProfile => {
         // hasProfile is undefined if auth.me() rejected (caught below).
-        if (hasProfile === false) setNeedsOnboarding(true);
+        if (hasProfile === false) {
+          // Never-measured account → onboarding. If they also never declared a
+          // starting level, show the level picker first (covers OAuth signups,
+          // whose isNew is always false, and any account that closed the tab
+          // mid-onboarding).
+          if (!getDeclaredTier()) setNeedsLevelPick(true);
+          setNeedsOnboarding(true);
+        }
       })
       .catch(() => {})
       .finally(() => setAuthChecking(false));
@@ -405,8 +423,13 @@ export default function App() {
     if (!guestMode) {
       try { localStorage.setItem('guitar_hand_profile', JSON.stringify(profile)); } catch {}
     }
-    // Saving a real (non-default) measurement clears the onboarding gate.
-    if (!isDefaultProfile(profile)) setNeedsOnboarding(false);
+    // Saving a real (non-default) measurement clears the onboarding gate. On that
+    // first real save, hand a brand-new player straight into their first chord —
+    // the plain-words welcome (idea #1) — instead of dropping them among the tabs.
+    if (!isDefaultProfile(profile)) {
+      setNeedsOnboarding(false);
+      if (needsOnboarding && !hasSeenFirstChord()) setNeedsFirstChord(true);
+    }
     if (currentUser) {
       try { await handProfileApi.save(profile); }
       catch { setSaveError(true); }
@@ -422,7 +445,13 @@ export default function App() {
     // real hand profile through the mandatory measurement step before the rest
     // of the app becomes available. A new registration always onboards.
     syncProfileOnLogin(opts.isNew)
-      .then(hasProfile => { setNeedsOnboarding(!hasProfile); })
+      .then(hasProfile => {
+        setNeedsOnboarding(!hasProfile);
+        // Anyone about to onboard who hasn't declared a starting level picks one
+        // first. Keyed off "no measured profile" rather than opts.isNew so it
+        // also covers OAuth signups (isNew is always false for Google/Facebook).
+        if (!hasProfile && !getDeclaredTier()) setNeedsLevelPick(true);
+      })
       .catch(() => {});
   }
 
@@ -435,7 +464,24 @@ export default function App() {
     setHandProfile(DEFAULT_PROFILE);
     setGuestMode(true);
     setShowSignIn(false);
+    if (!getDeclaredTier()) setNeedsLevelPick(true);
     setNeedsOnboarding(true);
+  }
+
+  // "Where are you starting from?" answered (or skipped → tier null). Store the
+  // choice (display-focus only; nothing is auto-completed) and drop into the
+  // onboarding gate that handleAuthSuccess/enterGuestMode already armed.
+  function handlePickLevel(tier) {
+    if (tier) setDeclaredTier(tier);
+    setNeedsLevelPick(false);
+  }
+
+  // "Let's play →" from the first-chord welcome. Mark it seen so it never re-shows,
+  // then fall through to the main app (which opens on the Start tab, where the full
+  // easy-chord shortlist lives). Purely a dismiss — no scoring/milestone change.
+  function handleFirstChordDone() {
+    markFirstChordSeen();
+    setNeedsFirstChord(false);
   }
 
   // Leave guest mode to sign in / create an account (from the persistent notice).
@@ -451,7 +497,9 @@ export default function App() {
   }
 
   // After the account is deleted server-side, sign the user out (clear cookies +
-  // local data) and return to the login screen.
+  // local data) and return to the marketing landing page — a deleted user starts
+  // over from the top (Get started → register → level picker → hand camera),
+  // not straight into the sign-in form.
   async function handleDeleted() {
     await auth.logout().catch(() => {});
     try {
@@ -472,7 +520,7 @@ export default function App() {
         'guitar_mm_narrate',
       ].forEach(key => localStorage.removeItem(key));
     } catch {}
-    window.location.href = '/?login=1';
+    window.location.href = '/';
   }
 
   function handleSaveAIFingers(fingers) {
@@ -640,9 +688,32 @@ export default function App() {
     );
   }
 
+  // --- Level-pick gate: a brand-new user first says where they're starting from
+  // (Beginner…Master). This only focuses the Level Plan on that tier — no scores
+  // or milestones change. Shown BEFORE the onboarding gate below. Requires an
+  // actual entrant (signed-in user or committed guest) so a logged-out visitor
+  // always falls through to the landing page first — never straight to a gate.
+  if ((currentUser || guestMode) && needsLevelPick) {
+    return (
+      <LangContext.Provider value={lang}>
+      <AIFingerContext.Provider value={aiFingers}>
+      <HandProfileContext.Provider value={handProfile}>
+      <ReachLimitContext.Provider value={limitToReach}>
+      <LevelLimitContext.Provider value={limitToLevel}>
+        <LevelPicker lang={lang} onPick={handlePickLevel} />
+      </LevelLimitContext.Provider>
+      </ReachLimitContext.Provider>
+      </HandProfileContext.Provider>
+      </AIFingerContext.Provider>
+      </LangContext.Provider>
+    );
+  }
+
   // --- Onboarding gate: a logged-in user with no real measured hand profile
   // must complete and save a measurement before the rest of the app is shown.
-  if (needsOnboarding) {
+  // Requires an actual entrant (signed-in user or committed guest) — a logged-out
+  // visitor must see the landing page first, never the camera as the first screen.
+  if ((currentUser || guestMode) && needsOnboarding) {
     return (
       <LangContext.Provider value={lang}>
       <AIFingerContext.Provider value={aiFingers}>
@@ -691,6 +762,27 @@ export default function App() {
             </div>
           </main>
         </div>
+      </LevelLimitContext.Provider>
+      </ReachLimitContext.Provider>
+      </HandProfileContext.Provider>
+      </AIFingerContext.Provider>
+      </LangContext.Provider>
+    );
+  }
+
+  // --- First-chord welcome: the one-time, plain-words hand-off from the hand scan
+  // into playing. Shown right AFTER onboarding completes (needsOnboarding is false
+  // by now) and only for a fresh player who hasn't seen it. "Let's play →" marks it
+  // seen and drops into the app on the Start tab. Requires an actual entrant, same
+  // as the gates above, so a logged-out visitor never lands here first.
+  if ((currentUser || guestMode) && needsFirstChord) {
+    return (
+      <LangContext.Provider value={lang}>
+      <AIFingerContext.Provider value={aiFingers}>
+      <HandProfileContext.Provider value={handProfile}>
+      <ReachLimitContext.Provider value={limitToReach}>
+      <LevelLimitContext.Provider value={limitToLevel}>
+        <FirstChordWelcome lang={lang} profile={handProfile} onDone={handleFirstChordDone} />
       </LevelLimitContext.Provider>
       </ReachLimitContext.Provider>
       </HandProfileContext.Provider>
@@ -902,6 +994,9 @@ export default function App() {
             {/* Hidden route (no nav button): the "Read basic tab" lesson+quiz,
                 reached from its Level Plan milestone's Go. */}
             {activeTab === 'tabquiz'      && <TabReadingQuiz lang={lang} onClose={() => setActiveTab('levelplan')} />}
+            {/* Hidden route: the Strum Lab (calluses & steady strumming), reached
+                from its Level Plan milestone's Go. */}
+            {activeTab === 'strum'        && <StrumTrainer lang={lang} onClose={() => setActiveTab('levelplan')} />}
             {activeTab === 'fbmeasure'    && <FretboardMeasures lang={lang} />}
             {activeTab === 'recorder'     && <ChordListener lang={lang} mode="recorder" />}
             {activeTab === 'micpractice'  && <ChordListener lang={lang} mode="practice" sequence={practiceSequence} />}

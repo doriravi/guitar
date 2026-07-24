@@ -35,9 +35,11 @@ import {
 } from '../lib/editorTransforms';
 import { saveCustomSong, songToText } from '../lib/customSongs';
 import { parseChordSheet } from '../lib/chordSheetParser';
-import { useAuth, useReachLimit } from '../App';
+import { useAuth, useReachLimit, useLang } from '../App';
+import { useT } from '../lib/i18n';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
+import CapoSuggestion from './CapoSuggestion';
 import NoteStaff from './NoteStaff';
 import { chordToneNames } from '../lib/notation';
 
@@ -58,6 +60,8 @@ const CONTOURS = ['arch', 'ascending', 'descending', 'wave', 'static'];
 export default function SongEditor({ song: initialSong, profile, onClose }) {
   const currentUser = useAuth();
   const limitToReach = useReachLimit();
+  const lang = useLang();
+  const tr = useT(lang);
   const [saveMsg, setSaveMsg] = useState(null);   // { type: 'ok'|'err', text }
   const [saving, setSaving] = useState(false);
 
@@ -380,6 +384,14 @@ export default function SongEditor({ song: initialSong, profile, onClose }) {
     return buildMarkedSection(effective, markStart, markEnd, meta);
   }, [cells, markStart, markEnd, meta, applied, hasMark]);
 
+  // The marked section's chord names — fed to the shared <CapoSuggestion> banner so
+  // it recomputes the same reach-driven capo the transform used. Memoized on the
+  // section so the banner doesn't re-run bestCapo on unrelated re-renders.
+  const capoNames = useMemo(
+    () => (section ? section.chords.map(c => c.chordName) : []),
+    [section],
+  );
+
   // Apply a freshly-computed result onto the marked chords immediately. The sheet
   // re-renders the changed chords (green) right away; Play auditions the current
   // applied state. (No separate "Apply" step — transforms land on selection.)
@@ -494,6 +506,23 @@ export default function SongEditor({ song: initialSong, profile, onClose }) {
   // Remove a run of added (inserted) chords hanging off a cell.
   const removeInsertionAt = (pos) => {
     setInsertions(prev => { const next = { ...prev }; delete next[pos]; return next; });
+  };
+
+  // ─── Reconcile the suggestion with the song's metadata capo ──────────────────
+  // The song carries its own `capo` field (from an imported sheet, or the plain-text
+  // header "Capo: N"). When the user applies the reach-driven Capo transform we
+  // offer to set that metadata to the SAME fret, so the imported-sheet capo and the
+  // suggestion agree and the value is serialized/saved with the song. Additive —
+  // the chord-shape transform already landed on the selection; this only writes the
+  // number into the song object.
+  const setMetaCapo = (fret) => {
+    if (fret == null) return;
+    setSong(prev => ({ ...prev, capo: fret }));
+    setSaveMsg({
+      type: 'ok',
+      text: (tr.capoMetaSet || 'Song capo set to fret {n} — save to keep it')
+        .replace(/\{n\}/g, fret),
+    });
   };
 
   // ─── Audio preview ───────────────────────────────────────────────────────────
@@ -1153,10 +1182,35 @@ export default function SongEditor({ song: initialSong, profile, onClose }) {
                 <DifficultyBadge score={reachHeadline.after} />
                 {result.fret != null && (
                   <span className="ml-1 px-2 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' }}>
-                    Capo {result.fret}
+                    {(tr.capoSuggestFret || 'Capo {n}').replace(/\{n\}/g, result.fret)}
+                    {song.capo === result.fret && (
+                      <span className="ml-1" title={tr.capoMetaMatches || 'Matches the song’s capo setting'}>✓</span>
+                    )}
                   </span>
                 )}
               </div>
+            )}
+
+            {/* Shared capo banner — the SAME reach-driven copy/i18n and transposed
+                open-shape diagrams the rest of the app shows (Progressions, Play-Along,
+                Chord table). Its "Apply capo" button reconciles the song's metadata
+                capo field with the suggested fret, so an imported-sheet capo and this
+                suggestion agree. Every chord name inside is wrapped in <ChordTip>. */}
+            {transformId === 'capo' && result.fret != null && (
+              <>
+                <CapoSuggestion
+                  chordNames={capoNames}
+                  profile={profile}
+                  lang={lang}
+                  onApply={setMetaCapo}
+                />
+                {song.capo != null && song.capo !== result.fret && (
+                  <p className="text-[11px] mb-2" style={{ color: 'var(--color-ink-faint)' }}>
+                    {(tr.capoMetaCurrent || 'This song is currently marked Capo {n}.')
+                      .replace(/\{n\}/g, song.capo)}
+                  </p>
+                )}
+              </>
             )}
             {result.meta?.label && (
               <div className="text-xs mb-2" style={{ color: 'var(--color-ink-muted)' }}>

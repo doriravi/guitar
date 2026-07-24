@@ -203,6 +203,18 @@ export function recordedChordSummary() {
 }
 
 /**
+ * Has this chord been MASTERED — a recorded take whose best grade is ≥ A? This is
+ * the same bar `chordListProgress` counts as `done`, exposed as a single-chord
+ * predicate so the Level-Plan auto-advance can require the WHOLE required set
+ * (not just one lucky take) before completing the open-chords milestone.
+ */
+export function isChordMastered(chord) {
+  const b = bestForChord(chord);
+  if (!b) return false;
+  return (GRADE_RANK[recGrade(b)] ?? -1) >= GRADE_RANK[MASTERY_GRADE];
+}
+
+/**
  * Progress over a SPECIFIC list of chords (e.g. a Level-Plan step's required
  * chords "C A G E D"): for each, the best recorded grade and whether it's been
  * recorded / mastered. Lets a step show exactly which chords are done vs. left.
@@ -330,9 +342,17 @@ export function useChordRecorder() {
     };
 
     saveRecording(out);
-    // A strong take (stars > 3) advances the Level Plan by completing the
-    // open-chords milestone. Weak takes are a no-op.
-    out.advancedMilestone = advanceForRecording({ kind: 'chord', name: chordName, stars: out.stars });
+    // A strong take (stars > 3) contributes to the open-chords milestone — but it
+    // only COMPLETES once every required chord (C A G E D) has a mastered
+    // recording, not on this single take. We pass the per-chord mastery test
+    // (best grade ≥ A) so levelPlan can decide against the recordings store —
+    // which now includes the take just saved above. Weak takes are a no-op.
+    out.advancedMilestone = advanceForRecording({
+      kind: 'chord',
+      name: chordName,
+      stars: out.stars,
+      isChordMastered: isChordMastered,
+    });
     setResult(out);
     setState('idle');
     busyRef.current = false;

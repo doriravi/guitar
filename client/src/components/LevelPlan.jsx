@@ -11,8 +11,11 @@ import {
   loadManual,
   setManualDone,
   tierSteps,
+  getDeclaredTier,
+  currentTier,
+  healOpenChordsFalseCompletion,
 } from '../lib/levelPlan';
-import { recordedChordSummary, chordListProgress, GRADE_COLOR, qualityLabel } from '../lib/chordRecordings';
+import { recordedChordSummary, chordListProgress, isChordMastered, GRADE_COLOR, qualityLabel } from '../lib/chordRecordings';
 import ChordTip from './ChordTip';
 import GuideVideoModal from './GuideVideoModal';
 import { guideVideoFor, hasSeenGuide, clearGuideSeen } from '../lib/guideVideos';
@@ -22,7 +25,7 @@ import { guideVideoFor, hasSeenGuide, clearGuideSeen } from '../lib/guideVideos'
 // real practice record, ROUTE/OFF-APP rows carry a manual check-off. ROUTE (and
 // AUTO items with a natural home) get a "Go →" that navigates to the right tab.
 
-const TIER_META = {
+export const TIER_META = {
   Beginner:     { emoji: '🌱', tint: 'rgba(74,222,128,0.10)',  edge: 'rgba(74,222,128,0.30)' },
   Intermediate: { emoji: '🎯', tint: 'rgba(96,165,250,0.10)',  edge: 'rgba(96,165,250,0.30)' },
   Advanced:     { emoji: '🔥', tint: 'rgba(251,146,60,0.10)',  edge: 'rgba(251,146,60,0.30)' },
@@ -225,17 +228,31 @@ function GuideReplayLink({ milestone, gate }) {
   );
 }
 
-function TierCard({ tier, ctx, onNavigate, onToggleManual, gate }) {
+function TierCard({ tier, ctx, onNavigate, onToggleManual, gate, highlight, tr }) {
   const meta = TIER_META[tier] || {};
   const ms = milestonesForTier(tier);
   const st = tierStatus(tier, ctx);
   const status = STATUS[st.state] || STATUS.notStarted;
 
   return (
-    <section className="rounded-2xl p-4 border" style={{ background: meta.tint, borderColor: meta.edge }}>
+    <section
+      id={`tier-${tier}`}
+      className="rounded-2xl p-4 border scroll-mt-4"
+      style={{
+        background: meta.tint,
+        borderColor: highlight ? 'var(--color-brand)' : meta.edge,
+        boxShadow: highlight ? '0 0 0 2px var(--color-brand)' : undefined,
+      }}
+    >
       <header className="flex items-center justify-between gap-3 mb-3">
         <h3 className="text-base font-bold flex items-center gap-2 text-ink">
           <span>{meta.emoji}</span>{tier}
+          {highlight && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+              style={{ background: 'var(--color-brand-soft, rgba(201,169,110,0.18))', color: 'var(--color-brand)' }}>
+              {tr?.levelPickYouAreHere || 'You’re starting here'}
+            </span>
+          )}
         </h3>
         <div className="flex items-center gap-2">
           {/* Status pill: green complete / yellow in-progress / grey not started */}
@@ -546,6 +563,17 @@ export default function LevelPlan({ lang, onNavigate }) {
     setTick((t) => t + 1);
   }, []);
 
+  // One-time heal: clear the open-chords step if an earlier build falsely marked
+  // it complete off a single chord recording. Only removes an unearned green (the
+  // drill-passed / all-five-mastered paths are checked first); re-renders if it
+  // cleared anything. Runs once on mount.
+  useEffect(() => {
+    if (healOpenChordsFalseCompletion({ handProfile }, isChordMastered)) {
+      setTick((t) => t + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const overall = useMemo(() => {
     const totals = TIERS.map((t) => tierStatus(t, ctx));
     const done = totals.reduce((n, s) => n + s.done, 0);
@@ -554,6 +582,20 @@ export default function LevelPlan({ lang, onNavigate }) {
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0, state };
   }, [ctx]);
   const overallStatus = STATUS[overall.state] || STATUS.notStarted;
+
+  // The tier the user declared at sign-up (display-focus only). Highlight it, and
+  // scroll it into view once on open — but only when it differs from the tier the
+  // plan already opens on, so we never yank a beginner past their real starting
+  // point. Read once; TIERS.includes guards against a stale value.
+  const declaredTier = useMemo(() => getDeclaredTier(), []);
+  useEffect(() => {
+    if (!declaredTier) return;
+    if (declaredTier === currentTier(ctx)) return; // already the natural focus
+    const el = typeof document !== 'undefined' && document.getElementById(`tier-${declaredTier}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Run once on mount for the declared tier; ctx changes shouldn't re-scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [declaredTier]);
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto">
@@ -614,6 +656,8 @@ export default function LevelPlan({ lang, onNavigate }) {
             onNavigate={onNavigate}
             onToggleManual={onToggleManual}
             gate={gate}
+            highlight={tier === declaredTier}
+            tr={tr}
           />
         ))}
       </div>

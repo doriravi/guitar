@@ -22,6 +22,7 @@ import { loadHistory, bestForSong, reachedLevelForSong, gradeFor } from './pract
 import { DEFAULT_PROFILE } from './handProfile';
 import { memoryMastery } from './memoryTrain';
 import { tabQuizMastery, TAB_QUIZ_PASS } from './tabQuiz';
+import { strumMastery, STRUM_PASS, STRUM_PASS_PATTERNS } from './strumTrainer';
 
 // ── The plan ──────────────────────────────────────────────────────────────────
 // Tiers, in order. Each milestone:
@@ -46,6 +47,10 @@ import { tabQuizMastery, TAB_QUIZ_PASS } from './tabQuiz';
 //   { kind: 'tabQuizMastered', minScore }                 — scored ≥minScore% in the
 //                                                            tab-reading quiz (tabquiz tab,
 //                                                            store guitar_tab_quiz_v1)
+//   { kind: 'strumMastered', minScore, minPatterns }      — ≥minPatterns different Strum
+//                                                            Lab patterns passed at
+//                                                            ≥minScore% (strum tab, store
+//                                                            guitar_strum_trainer_v1)
 
 export const TIERS = ['Beginner', 'Intermediate', 'Advanced', 'Master'];
 
@@ -115,10 +120,16 @@ export const LEVEL_PLAN = [
     check: { kind: 'memoryMastered', level: 2, minScore: 80 },
   },
   {
-    id: 'beg-strum-calluses', tier: 'Beginner', column: 'practical', type: 'offapp',
+    // Route + check hybrid: Go opens the Strum Lab (hidden 'strum' route) —
+    // pick a strumming pattern, play it over a metronome, and the mic scores
+    // every strum's timing. Passing two different patterns at 80%+ completes
+    // this step on its own; manual tick stays for players who already strum
+    // steadily. The callus half stays a daily off-app habit (see tip).
+    id: 'beg-strum-calluses', tier: 'Beginner', column: 'practical', type: 'route', tab: 'strum',
     title: 'Build calluses & a steady strumming hand',
-    detail: 'Daily short sessions to toughen fingertips and groove a basic down/up strum.',
-    tip: 'A few minutes every day beats one long session. (No strum/callus detector — this is on you.)',
+    detail: 'Go opens the Strum Lab: hold a chord, follow the arrows and strum with the click — the mic checks every hit against the beat. Pass 2 different patterns at 80%+ to finish.',
+    tip: 'A few minutes every day beats one long session — fingertips harden between sessions, not during them.',
+    check: { kind: 'strumMastered', minScore: STRUM_PASS, minPatterns: STRUM_PASS_PATTERNS },
   },
   {
     id: 'beg-simple-song', tier: 'Beginner', column: 'practical', type: 'auto', tab: 'listen',
@@ -375,6 +386,14 @@ export function isAutoComplete(milestone, { handProfile } = {}) {
     case 'tabQuizMastered':
       return tabQuizMastery().bestScore >= (check.minScore ?? TAB_QUIZ_PASS);
 
+    // ── Strumming (the Strum Lab) ────────────────────────────────────────────
+    // Read from guitar_strum_trainer_v1 via strumMastery(). Done when enough
+    // DIFFERENT patterns have a run at ≥minScore% — one straight and one
+    // syncopated pattern is what "a steady strumming hand" actually means.
+    case 'strumMastered':
+      return strumMastery(check.minScore ?? STRUM_PASS).patternsPassed >=
+        (check.minPatterns ?? STRUM_PASS_PATTERNS);
+
     default:
       return false;
   }
@@ -423,6 +442,111 @@ export function setManualDone(milestoneId, done) {
   return data.manual;
 }
 
+// ── One-time heal for the open-chords false-completion bug ─────────────────────
+// An earlier build completed 'beg-open-chords' on the FIRST single passing chord
+// recording (of any name) by writing a permanent manual tick — so the whole
+// "Learn your first open chords (C A G E D)" step went green after one chord. This
+// clears that spurious tick UNLESS the step was genuinely earned by either real
+// path: the open-basics drill passed (its `check`), or all five required chords
+// actually mastered. A truly-earned step keeps its state (the drill check re-fires
+// on its own; a full mastered set re-completes on the next recording), so this can
+// only ever REMOVE a false green, never a real one. Runs once (a guard flag).
+//
+// `isChordMastered` is injected by the caller (LevelPlan reads it from
+// chordRecordings) so this module avoids importing it back — that would be a cycle.
+const OPEN_CHORDS_HEAL_FLAG = 'guitar_open_chords_heal_v1';
+
+export function healOpenChordsFalseCompletion(ctx = {}, isChordMastered) {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    if (localStorage.getItem(OPEN_CHORDS_HEAL_FLAG) === '1') return false;
+    localStorage.setItem(OPEN_CHORDS_HEAL_FLAG, '1');   // once, regardless of outcome
+
+    const manual = loadManual();
+    if (!manual['beg-open-chords']) return false;       // nothing ticked → nothing to heal
+
+    const milestone = LEVEL_PLAN.find((m) => m.id === 'beg-open-chords');
+    if (!milestone) return false;
+
+    // Path 1: the drill was genuinely passed (read-only check).
+    if (isAutoComplete(milestone, ctx)) return false;
+    // Path 2: every required chord is genuinely mastered.
+    const required = milestone.chords || [];
+    if (typeof isChordMastered === 'function' &&
+        required.length && required.every((c) => isChordMastered(c))) return false;
+
+    // Neither path holds → the tick was the bug's. Clear it.
+    setManualDone('beg-open-chords', false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Declared starting level (guitar_declared_level_v1) ────────────────────────
+// What the user said they are when they first registered ("Where are you starting
+// from?"). This is a DISPLAY preference only: it focuses the Level Plan on that
+// tier (scroll + highlight) so a self-declared intermediate isn't dumped at the
+// bottom of Beginner. It deliberately does NOT touch currentTier/currentFocus or
+// LEVEL_CEILINGS — real progress stays derived from what the app can measure, so
+// the roadmap can never claim skill the player hasn't shown.
+
+const DECLARED_KEY = 'guitar_declared_level_v1';
+
+/** The tier the user declared at sign-up, or null if they never picked/skipped. */
+export function getDeclaredTier() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(DECLARED_KEY) : null;
+    const data = raw ? JSON.parse(raw) : null;
+    if (data && data.v === 1 && TIERS.includes(data.tier)) return data.tier;
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
+ * Record the user's declared starting tier. Junk (a non-TIERS string) is ignored
+ * and returns null so a bad value can never focus a nonexistent tier. Sync-shaped
+ * ({ v, tier, clientId, updatedAt }) to mirror the manual store for a future sync.
+ */
+export function setDeclaredTier(tier) {
+  if (!TIERS.includes(tier)) return null;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DECLARED_KEY, JSON.stringify({
+        v: 1,
+        tier,
+        clientId: `dl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        updatedAt: new Date().toISOString(),
+      }));
+    }
+  } catch { /* ignore quota */ }
+  return tier;
+}
+
+// ── First-chord welcome (guitar_first_chord_seen_v1) ──────────────────────────
+// A one-time flag: has the brand-new user seen the "Start here — your first chord"
+// welcome that runs right after the hand scan? It's the plain-words hand-off from
+// onboarding into playing (idea #1, Absolute Beginner). Purely a "seen it" boolean
+// so the welcome never re-shows; it changes no scoring and completes no milestone.
+
+const FIRST_CHORD_KEY = 'guitar_first_chord_seen_v1';
+
+/** True once the user has seen (or skipped) the first-chord welcome. */
+export function hasSeenFirstChord() {
+  try {
+    return typeof localStorage !== 'undefined' &&
+      localStorage.getItem(FIRST_CHORD_KEY) === '1';
+  } catch { /* fall through */ }
+  return false;
+}
+
+/** Mark the first-chord welcome as seen so it doesn't show again. */
+export function markFirstChordSeen() {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(FIRST_CHORD_KEY, '1');
+  } catch { /* ignore quota */ }
+}
+
 // ── Recording → Level Plan auto-advance ───────────────────────────────────────
 // A recording (scale practice or a chord take) is graded 1–5 STARS. A run scoring
 // ABOVE 3 (i.e. 4 or 5) is a genuine pass and advances the plan by completing the
@@ -432,37 +556,61 @@ export function setManualDone(milestoneId, done) {
 // PASS threshold is expressed once here so the UI and the auto-advance agree.
 export const RECORDING_PASS_STARS = 3;   // must score ABOVE this (→ 4 or 5) to pass
 
-// Which milestone a strong recording completes, by what was recorded.
-//   scale "<Root> <ScaleName>" → the scale-learning milestone for that family
-//   chord  "<name>"            → the open-chords milestone (its core CAGED set)
-function milestoneForRecording({ kind, name }) {
-  if (kind === 'scale') {
-    const scaleName = (name || '').toLowerCase();
-    if (scaleName.includes('pentatonic')) return 'int-pentatonic';
-    if (scaleName.includes('major') && !scaleName.includes('pentatonic')) return 'int-major-scale';
-    return null;   // other scales have no dedicated milestone (yet)
-  }
-  if (kind === 'chord') {
-    // The core open-chord milestone tracks the CAGED set; any of them passing
-    // contributes to it. (Its own `chords` sub-goals still track per-chord.)
-    return 'beg-open-chords';
-  }
-  return null;
+// The open-chords milestone whose required set a chord recording contributes to.
+const OPEN_CHORDS_MILESTONE = 'beg-open-chords';
+
+// Which SCALE milestone a strong scale recording completes (one recording is a
+// genuine pass — there's a single scale to learn, unlike the 5-chord set below).
+function scaleMilestoneFor(name) {
+  const scaleName = (name || '').toLowerCase();
+  if (scaleName.includes('pentatonic')) return 'int-pentatonic';
+  if (scaleName.includes('major') && !scaleName.includes('pentatonic')) return 'int-major-scale';
+  return null;   // other scales have no dedicated milestone (yet)
 }
 
 /**
- * Called after a recording is graded. If it PASSED (stars > RECORDING_PASS_STARS)
- * and maps to a milestone, mark that milestone done so the Level Plan advances.
- * No-op for a weak take or an unmapped recording. Safe to call every recording.
- * @param {{ kind:'scale'|'chord', name:string, stars:number }} rec
+ * Called after a recording is graded. A strong take (stars > RECORDING_PASS_STARS)
+ * may advance the Level Plan:
+ *   • scale  — completes that scale's milestone (a single pass is enough).
+ *   • chord  — the open-chords milestone lists FIVE chords (C A G E D). One good
+ *     take is NOT the milestone; it completes ONLY once EVERY required chord has a
+ *     mastered recording. Per-chord progress is tracked from the recordings store
+ *     itself (chordListProgress), so this never fakes completion off one chord.
+ *
+ * The `isChordMastered` predicate is injected by the caller (chordRecordings.js,
+ * which owns the recordings store) so this module doesn't import it back — that
+ * would be a cycle. When absent, a chord recording advances nothing.
+ *
+ * @param {{ kind:'scale'|'chord', name:string, stars:number,
+ *           isChordMastered?:(chord:string)=>boolean }} rec
  * @returns {string|null} the milestoneId advanced, or null.
  */
-export function advanceForRecording({ kind, name, stars }) {
+export function advanceForRecording({ kind, name, stars, isChordMastered }) {
   if (!(stars > RECORDING_PASS_STARS)) return null;
-  const milestoneId = milestoneForRecording({ kind, name });
-  if (!milestoneId) return null;
-  setManualDone(milestoneId, true);
-  return milestoneId;
+
+  if (kind === 'scale') {
+    const id = scaleMilestoneFor(name);
+    if (!id) return null;
+    setManualDone(id, true);
+    return id;
+  }
+
+  if (kind === 'chord') {
+    // Only complete the milestone when its WHOLE required set is mastered.
+    if (typeof isChordMastered !== 'function') return null;
+    const milestone = LEVEL_PLAN.find((m) => m.id === OPEN_CHORDS_MILESTONE);
+    const required = milestone?.chords || [];
+    if (!required.length) return null;
+    // The just-passed chord is already saved, so this read sees it. Requiring the
+    // recorded chord to be one of the five keeps an off-list chord from ever
+    // counting — but even an on-list one only completes the step if all five are in.
+    if (!required.includes(name)) return null;
+    if (!required.every((c) => isChordMastered(c))) return null;
+    setManualDone(OPEN_CHORDS_MILESTONE, true);
+    return OPEN_CHORDS_MILESTONE;
+  }
+
+  return null;
 }
 
 // ── Roadmap status (combines AUTO + manual) ───────────────────────────────────
@@ -504,6 +652,17 @@ export function milestoneProgress(milestone, ctx = {}) {
     const minScore = check.minScore ?? TAB_QUIZ_PASS;
     if (minScore <= 0) return 0;
     return Math.min(0.99, Math.max(0, tabQuizMastery().bestScore / minScore));
+  }
+  // Strum Lab: whole patterns passed count fully toward the required number;
+  // before the first pass, the best score so far counts as a fraction of one
+  // pattern so the row turns yellow from the very first session.
+  if (check?.kind === 'strumMastered') {
+    const need = check.minPatterns ?? STRUM_PASS_PATTERNS;
+    const pass = check.minScore ?? STRUM_PASS;
+    if (need <= 0 || pass <= 0) return 0;
+    const m = strumMastery(pass);
+    const partial = m.patternsPassed === 0 ? Math.min(0.99, Math.max(0, m.bestScore / pass)) : 0;
+    return Math.min(0.99, (m.patternsPassed + partial) / need);
   }
   return 0;
 }

@@ -6,7 +6,8 @@ import { DEFAULT_PROFILE, gapStrain } from '../lib/handProfile';
 import { suggestEasierProgression } from '../lib/substitutions';
 import { suggestUpperProgression } from '../lib/upperVoicings';
 import { suggestTriadProgression } from '../lib/triadVoicings';
-import { alignChordsToLyrics, suggestCapo, enrichChords } from '../lib/lyricChords';
+import { alignChordsToLyrics, enrichChords } from '../lib/lyricChords';
+import { bestCapo, capoPlaybackTab } from '../lib/capo';
 import { lyrics as lyricsApi } from '../lib/api';
 import { playProgression, stopAudio } from '../lib/audio';
 import { useMic, loadConfig, detectPeaksConfigured, matchChordConfigured } from '../lib/micDetect';
@@ -26,6 +27,8 @@ import { prefersReducedMotion } from '../lib/gpu';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
+import CapoSuggestion from './CapoSuggestion';
+import ErrorBoundary from './ErrorBoundary';
 import SongEditor from './SongEditor';
 import SoloTabView from './SoloTabView';
 import Celebration from './Celebration';
@@ -869,7 +872,7 @@ function LiveChordMap({ sequence, activeIndex, profile, limitToReach, simplifyMa
 
 // ─── Lyrics fetch ────────────────────────────────────────────────────────────
 
-function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings, tr }) {
+function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines, tabBlocks, progChordsWithVoicings, tr, lang }) {
   // Imported songs carry their own pasted lyrics+chords → render those directly,
   // no fetch. Otherwise fetch the real lyrics from a public lyrics database.
   const isCustom = Array.isArray(customLyricLines) && customLyricLines.length > 0;
@@ -939,12 +942,23 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
   // A capo suggestion when the song's key forces barre chords — lets a short-
   // fingered player restate the whole song as easy open shapes (e.g. a B♭/E♭/F
   // song → "Capo 1, play A/D/E"). null when the chords are already easy.
-  // Custom (pasted) songs display exactly as saved — no capo relabeling. The
-  // capo "easy shapes" suggestion is only for the app's own derived songs.
-  const capo = useMemo(
-    () => (isCustom ? null : suggestCapo(progChordsWithVoicings.map(c => c.chordName))),
-    [progChordsWithVoicings, isCustom],
+  //
+  // Reach-driven via bestCapo (lib/capo), personalized to the active hand: it
+  // sums calcDifficulty of every transposed-down open shape and picks the fret
+  // that minimises total reach (ties → lowest fret). Applied on ALL surfaces —
+  // custom/imported (pasted) songs get the suggestion too, not just the app's
+  // own derived songs (design decision: capo everywhere). `capo.map` (origName →
+  // capoName) and `capo.fret` drive the in-line relabel + capo'd playback below.
+  const capoSuggestion = useMemo(
+    () => bestCapo(progChordsWithVoicings.map(c => c.chordName), soloProfile),
+    [progChordsWithVoicings, soloProfile],
   );
+  // The user can turn the capo restatement OFF to see the song's real chords as
+  // written. Default ON when one is suggested (the whole point is to help). The
+  // EFFECTIVE capo (used for the inline Bb→A relabels + capo'd playback below) is
+  // the suggestion only while enabled; off → behave exactly as if no capo exists.
+  const [capoOn, setCapoOn] = useState(true);
+  const capo = capoOn ? capoSuggestion : null;
 
   // Align chords over the lyrics realistically: chords change at phrase
   // boundaries (punctuation), cycle through the progression across sub-phrases,
@@ -997,18 +1011,19 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
     if (!base) return null;
     if (!capo) return base;
     const easyName = capo.map[chord.chordName];
-    const easyShape = easyName ? lookupVoicings(easyName)[0] : null;
+    // Play the EXACT shape bestCapo chose (from capo.shapes) — the same voicing
+    // the diagram shows and the reach score used — so the heard chord, the drawn
+    // shape and the score never diverge. Fall back to the easiest-voicing lookup
+    // only if this chord isn't in the map (shouldn't happen).
+    const chosen = capo.shapes?.find(s => s.orig === chord.chordName)?.voicing;
+    const easyShape = chosen || (easyName ? easiestVoicing(easyName) : null);
     if (!easyShape) return base; // no easy shape on file → fall back to real voicing
     // Shift the easy shape up by the capo fret so it sounds at the original
     // pitch — a capo presses ALL strings, so open (0) strings move to the capo
-    // fret and fretted notes move up by the same amount. The synth reads .tab,
-    // so emit a tab; capo (1–5) + easy open shapes keep every fret single-digit.
-    const shiftedTab = easyShape.tab.split('').map(ch => {
-      if (ch === 'x') return 'x';                 // muted stays muted
-      const f = Math.min(9, parseInt(ch, 10) + capo.fret); // 0 (open) → capo fret too
-      return String(f);
-    }).join('');
-    return { ...easyShape, name: easyName, tab: shiftedTab };
+    // fret and fretted notes move up by the same amount. capoPlaybackTab (the
+    // single, centralized capo shift in lib/capo) does this for every surface;
+    // the synth reads .tab.
+    return { ...easyShape, name: easyName, tab: capoPlaybackTab(easyShape, capo.fret) };
   }, [capo]);
 
   // The full play sequence: every chord in the order it appears in the lyrics
@@ -1101,22 +1116,25 @@ function LyricsSection({ song, title, artist, bpm, lineChords, customLyricLines,
       {status === 'done' && (
       <div ref={scrollRef} className="max-h-72 overflow-y-auto">
 
-      {/* Capo banner — easy open shapes for a hard-key song */}
-      {capo && (
-        <div className="mb-3 px-2.5 py-1.5 rounded-lg text-[11px] leading-snug"
-          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)', color: 'var(--color-success)' }}>
-          <span className="font-semibold">Capo {capo.fret}</span>
-          <span style={{ color: 'color-mix(in srgb, var(--color-success) 52%, #000)' }}> — play easy open shapes: </span>
-          {Object.entries(capo.map).map(([orig, easy], k) => (
-            <span key={orig}>
-              {k > 0 && <span style={{ color: 'color-mix(in srgb, var(--color-success) 40%, #000)' }}>, </span>}
-              <span style={{ color: 'var(--color-ink-faint)' }}>{orig}</span>
-              <span style={{ color: 'color-mix(in srgb, var(--color-success) 52%, #000)' }}>→</span>
-              <span className="font-semibold">{easy}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Capo suggestion — the shared, reach-driven banner (lib/capo + the
+          CapoSuggestion component used on every surface). It computes its own
+          bestCapo from the same chord names + hand profile, so it appears exactly
+          when the local `capo` memo above does, and every chord name inside it
+          shows its shape on hover (ChordTip). The in-line lyric relabel below
+          still uses `capo.map`/`capo.fret` for the Bb→A restatement + playback. */}
+      {/* The capo banner is a non-essential add-on — never let a failure in it
+          blank the lyrics view. It degrades to nothing on any render error.
+          `enabled`/`onToggle` let the user turn the capo restatement off (see the
+          real chords) and back on; the banner explains WHY a capo helps here. */}
+      <ErrorBoundary label="CapoSuggestion" fallback={null}>
+        <CapoSuggestion
+          chordNames={progChordsWithVoicings.map(c => c.chordName)}
+          profile={soloProfile}
+          lang={lang}
+          enabled={capoOn}
+          onToggle={setCapoOn}
+        />
+      </ErrorBoundary>
 
       {annotatedLines.map((line, i) => {
         if (line.blank) return <div key={i} className="mt-2" />;
@@ -1190,7 +1208,7 @@ function keyLabelFor(s) {
   return `${s.key || '?'}${s.scaleType === 'minor' ? 'm' : ''}`;
 }
 
-function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, onEdited, onMoved }) {
+function SongRow({ song, progDegreeSet, tr, lang, customSongs = [], currentProgName, onEdited, onMoved }) {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1588,7 +1606,7 @@ function SongRow({ song, progDegreeSet, tr, customSongs = [], currentProgName, o
           )}
         </div>
       )}
-      {lyricsOpen && <LyricsSection song={song} title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} tr={tr} />}
+      {lyricsOpen && <LyricsSection song={song} title={song.title} artist={song.artist} bpm={song.bpm ?? songBpm(song.title)} lineChords={song.lineChords} customLyricLines={song.lyricLines} tabBlocks={song.tabBlocks} progChordsWithVoicings={songChordsWithVoicings} tr={tr} lang={lang} />}
     </div>
   );
 }
@@ -1747,7 +1765,7 @@ function matchingSongs(progName, progDegrees, progScaleType, targetRoot, customS
   return applyReach([...custom, ...builtIn]);
 }
 
-function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, customSongs, catalogSongs, tr, reach, onSongEdited, onSongMoved }) {
+function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, customSongs, catalogSongs, tr, lang, reach, onSongEdited, onSongMoved }) {
   // Set of degree indices that belong to this progression — used to flag "outside" chords in red
   const progDegreeSet = useMemo(() => new Set(progDegrees), [progDegrees]);
 
@@ -1773,7 +1791,7 @@ function SongsPanel({ progressionName, progDegrees, progScaleType, targetRoot, c
       </div>
       <div style={{ borderTop: '1px solid var(--color-surface-750)' }}>
         {songs.map((song, i) => (
-          <SongRow key={song.id || i} song={song} progDegreeSet={progDegreeSet} tr={tr} customSongs={customSongs} currentProgName={progressionName} onEdited={onSongEdited} onMoved={onSongMoved} />
+          <SongRow key={song.id || i} song={song} progDegreeSet={progDegreeSet} tr={tr} lang={lang} customSongs={customSongs} currentProgName={progressionName} onEdited={onSongEdited} onMoved={onSongMoved} />
         ))}
       </div>
     </div>
@@ -2556,6 +2574,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
                   song={song}
                   progDegreeSet={EMPTY_DEGREE_SET}
                   tr={tr}
+                  lang={lang}
                   customSongs={customSongs}
                   currentProgName={song.__progName}
                   onEdited={() => setCustomSongs(loadCustomSongs())}
@@ -2811,7 +2830,7 @@ export default function ProgressionExplorer({ lang, onSaveProfile }) {
               </CollapsibleSection>
 
               <CollapsibleSection open={songsOpen}>
-                <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} catalogSongs={catalogSongs} tr={tr} reach={reach} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch {} }} />
+                <SongsPanel progressionName={prog.name} progDegrees={prog.degrees} progScaleType={prog.scaleType} targetRoot={prog.root} customSongs={customSongs} catalogSongs={catalogSongs} tr={tr} lang={lang} reach={reach} onSongEdited={() => setCustomSongs(loadCustomSongs())} onSongMoved={(n) => { setMoveNotice(n); try { window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch {} }} />
               </CollapsibleSection>
 
             </div>

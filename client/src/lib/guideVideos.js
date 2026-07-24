@@ -34,7 +34,7 @@
 //   Example after you upload the CAGED guide:
 //     'beg-open-chords': 'AbCdEfGhIjK',
 export const GUIDE_VIDEOS = {
-  'beg-open-chords': 'pdA6Vr1y2lE',   // CAGED open-chords guide (youtu.be/pdA6Vr1y2lE)
+  'beg-open-chords': 'Hku-YqnH7_k',   // CAGED open-chords guide (youtu.be/Hku-YqnH7_k)
 };
 
 // Optional: override/extend the manifest at build time (or host it remotely)

@@ -22,10 +22,11 @@ import { getActiveStyle, loadStyle, saveStyle, learnStyle,
          SCALE_FLAVORS, CHORD_COLORS, GENRES } from '../lib/styleProfile';
 import { saveCustomSong } from '../lib/customSongs';
 import { createJam, makeRoomCode } from '../lib/jamSession';
-import { useAuth } from '../App';
+import { useAuth, useHandProfile } from '../App';
 import PracticeGame from './PracticeGame';
 import FretboardDiagram from './FretboardDiagram';
 import ChordTip from './ChordTip';
+import CapoSuggestion from './CapoSuggestion';
 import DifficultyBadge from './DifficultyBadge';
 import { useT } from '../lib/i18n';
 
@@ -55,6 +56,19 @@ function noteSetFromHz(hzList) {
     pcs.add(NOTE_NAMES[((midi % 12) + 12) % 12]);
   }
   return [...pcs];
+}
+
+// Unique chord names used across a song's lyric lines, in first-seen order.
+// Fed to <CapoSuggestion> so a composed/received song in a hard key surfaces a
+// capo option (easy open shapes instead of barre chords) before play.
+function songChordNames(song) {
+  const seen = new Set();
+  for (const ln of song?.lyricLines || []) {
+    for (const n of ln?.chordNames || []) {
+      if (n) seen.add(n);
+    }
+  }
+  return [...seen];
 }
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
@@ -538,7 +552,7 @@ function SavedSequences({ sequences, onLoad, onDelete }) {
 // which debounces the queue so vibrato / attack transients don't spam it.
 const STABLE_FRAMES = 3;
 
-function PitchTracker({ cfg, style, loggedIn, onComposed }) {
+function PitchTracker({ cfg, style, loggedIn, onComposed, lang, profile }) {
   const [active, setActive]       = useState(false);
   const [permDenied, setPermDenied] = useState(false);
   const [volume, setVolume]       = useState(0);
@@ -763,6 +777,10 @@ function PitchTracker({ cfg, style, loggedIn, onComposed }) {
                   <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-success)' }}>
                     ✓ Saved “{composed.song.title}” — {composed.song.key}{composed.song.scaleType === 'minor' ? 'm' : ''} · {composed.song.bpm} bpm
                   </p>
+                  {/* A capo option when this composed song lands in a hard, barre-heavy
+                      key — play easy open shapes before taking it to Play-Along.
+                      Renders nothing when no capo helps. */}
+                  <CapoSuggestion chordNames={songChordNames(composed.song)} profile={profile} lang={lang} />
                   <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                     <span className="text-xs" style={{ color: 'var(--color-ink-ghost)' }}>Chords:</span>
                     {composed.song.lyricLines.map((ln, i) => ln.chordNames[0] && (
@@ -889,7 +907,7 @@ function StylePanel({ style, setStyle }) {
 // "Share to room", the others receive it. A copyable join link + native Share
 // make it easy to pull in another phone. Exposes the jam via `jamRef` so the
 // composer can broadcast a freshly composed song.
-function JamPanel({ jamRef, latestSong }) {
+function JamPanel({ jamRef, latestSong, lang, profile }) {
   const [status, setStatus]   = useState('idle');   // idle|connecting|connected|disconnected|error
   const [room, setRoom]       = useState('');
   const [peers, setPeers]     = useState(1);
@@ -1001,6 +1019,9 @@ function JamPanel({ jamRef, latestSong }) {
               <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-success)' }}>
                 ↓ Received “{incoming.title}” from a bandmate
               </p>
+              {/* Capo option for a received song in a hard, barre-heavy key —
+                  easy open shapes before you play it. Null when no capo helps. */}
+              <CapoSuggestion chordNames={songChordNames(incoming)} profile={profile} lang={lang} />
               <div className="flex items-center gap-1.5 flex-wrap">
                 {(incoming.lyricLines || []).map((ln, i) => ln.chordNames?.[0] && (
                   <ChordTip key={i} name={ln.chordNames[0]}>
@@ -1024,7 +1045,8 @@ function JamPanel({ jamRef, latestSong }) {
   );
 }
 
-function RecorderMode({ cfg }) {
+function RecorderMode({ cfg, lang }) {
+  const handProfile               = useHandProfile();
   const [phase, setPhase]         = useState('idle');
   const [entries, setEntries]     = useState([]);
   const [elapsed, setElapsed]     = useState(0);
@@ -1182,10 +1204,10 @@ function RecorderMode({ cfg }) {
       <StylePanel style={manualStyle} setStyle={setManualStyle} />
 
       {/* Live multi-device shared songwriting */}
-      <JamPanel jamRef={jamRef} latestSong={latestSong} />
+      <JamPanel jamRef={jamRef} latestSong={latestSong} lang={lang} profile={handProfile} />
 
       {/* Real-time single-note pitch tracker + note-sequence queue + composer */}
-      <PitchTracker cfg={cfg} style={activeStyle} loggedIn={loggedIn} onComposed={setLatestSong} />
+      <PitchTracker cfg={cfg} style={activeStyle} loggedIn={loggedIn} onComposed={setLatestSong} lang={lang} profile={handProfile} />
 
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface-750)', border: '1px solid var(--color-surface-650)' }}>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
@@ -2091,7 +2113,7 @@ export default function ChordListener({ lang, mode = null, sequence = null, play
         </div>
       )}
 
-      {active === 'recorder' && <RecorderMode cfg={cfg} />}
+      {active === 'recorder' && <RecorderMode cfg={cfg} lang={lang} />}
       {active === 'practice' && <PracticeMode cfg={cfg} tr={tr} sequence={sequence} onDone={onDone} />}
       {active === 'game'     && <PracticeGame cfg={cfg} playIntent={playIntent} />}
       {active === 'tune'     && <TuneMode cfg={cfg} setCfg={setCfg} />}

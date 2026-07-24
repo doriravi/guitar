@@ -10,7 +10,15 @@ import { recordings as recordingsApi } from '../lib/api';
 import DifficultyBadge from './DifficultyBadge';
 import FretboardDiagram from './FretboardDiagram';
 import FullFretboard from './FullFretboard';
+import ChordTip from './ChordTip';
+import CapoSuggestion from '../components/CapoSuggestion';
+import { bestCapo } from '../lib/capo';
 import { useT } from '../lib/i18n';
+
+// A barre voicing is tagged "(barre)" in its type — same detection as
+// voicingLookup/capo. Chords whose EASIEST shape is a barre are the ones a
+// capo exists to remove, so they get the per-chord "or Capo N → open shape" hint.
+const isBarreVoicing = v => /barre/i.test(v?.type || '');
 
 const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
 
@@ -142,7 +150,7 @@ function useRowWindow(containerRef, rowCount, rowHeight) {
 }
 
 const ChordRow = memo(function ChordRow({
-  r, isPersonal, handProfile, tr, showTooltip, hideTooltip,
+  r, isPersonal, handProfile, tr, lang, showTooltip, hideTooltip,
   onRecord, recording, recState, recCountdown, recError, result, recordDisabled,
 }) {
   return (
@@ -174,6 +182,24 @@ const ChordRow = memo(function ChordRow({
           </div>
         ) : (
           <DifficultyBadge score={r.score} />
+        )}
+        {/* This chord's easiest shape is a barre — a capo lets you play an easy
+            open shape instead. Compact pill (shared component) + an inline
+            "or Capo N → play <open shape>" hint whose shape name is a ChordTip. */}
+        {r.capo && r.capo.shapes?.[0] && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <CapoSuggestion compact chordNames={[r.name]} profile={handProfile} lang={lang} />
+            <span className="text-[10px] leading-none" style={{ color: 'var(--color-ink-faint)' }}>
+              {(tr.capoOrPlay || 'or Capo {n} → play').replace(/\{n\}/g, r.capo.fret)}
+            </span>
+            <ChordTip
+              name={r.capo.shapes[0].capoName}
+              className="text-[10px] font-semibold cursor-help px-1.5 py-0.5 rounded"
+              style={{ color: 'var(--color-success)', background: 'rgba(74,222,128,0.08)' }}
+            >
+              {r.capo.shapes[0].capoName}
+            </ChordTip>
+          </div>
         )}
       </td>
       {/* Practice: record this chord via mic → accuracy grade (feeds the Level Plan) */}
@@ -296,7 +322,14 @@ export default function ChordTable({ lang }) {
     }
     const groups = [...byName.values()].map(vs => {
       vs.sort((a, b) => sortKey(a) - sortKey(b));   // easiest/open voicing first
-      return { vs, lead: sortKey(vs[0]) };
+      // When even the EASIEST voicing of a chord is a barre, a capo can restate
+      // it as an easy open shape — attach the reach-driven suggestion to the lead
+      // row so it shows once per chord (bestCapo returns null when no capo helps,
+      // so only chords that actually benefit get a hint). Scored against the
+      // active hand so a small hand's harder barres are the ones flagged.
+      const lead = vs[0];
+      lead.capo = isBarreVoicing(lead) ? bestCapo([lead.name], handProfile) : null;
+      return { vs, lead: sortKey(lead) };
     });
     groups.sort((a, b) => a.lead - b.lead);          // chords ordered by their easiest shape
     return groups.flatMap(g => g.vs);
@@ -396,6 +429,7 @@ export default function ChordTable({ lang }) {
                 isPersonal={isPersonal}
                 handProfile={handProfile}
                 tr={tr}
+                lang={lang}
                 showTooltip={showTooltip}
                 hideTooltip={hideTooltip}
                 onRecord={recordChord}
